@@ -1,35 +1,37 @@
-# Opinion Farming Bot - Git Ignore
-# =================================
+# Opinion Trading Bot - Git Ignore File
+# ======================================
 
-# =============================================================================
-# SECURITY - CRITICAL!
-# =============================================================================
-# These files contain sensitive data - NEVER commit them!
-
-# Environment file with API keys and private keys
+# ============================================================================
+# CREDENTIALS & SECRETS - NEVER COMMIT THESE!
+# ============================================================================
 .env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+credentials/
 
-# =============================================================================
-# STATE & LOGS
-# =============================================================================
-
-# Bot state (changes frequently, not needed in repo)
+# ============================================================================
+# STATE & RUNTIME FILES
+# ============================================================================
 state.json
+state.json.backup
+state.json.old
+*.jsonold
 
 # Log files
 *.log
-opinion_farming_bot.log
+logs/
+*.log.*
 
-# =============================================================================
+# ============================================================================
 # PYTHON
-# =============================================================================
-
+# ============================================================================
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
 
 # Distribution / packaging
@@ -46,17 +48,15 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # PyInstaller
 *.manifest
 *.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
@@ -68,70 +68,130 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
+*.py,cover
 .hypothesis/
 .pytest_cache/
+cover/
 
-# Translations
-*.mo
-*.pot
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# Environments
-.venv
-env/
+# Virtual environments
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
+.venv
 
-# Spyder project settings
-.spyderproject
-.spyproject
+# ============================================================================
+# LEGACY & TEST CODE - EXCLUDED FROM PRODUCTION
+# ============================================================================
+legacy/
+tests/
+test_*.py
+*_test.py
+test/
+testing/
 
-# Rope project settings
-.ropeproject
+# ============================================================================
+# BACKUP & TEMPORARY FILES
+# ============================================================================
+*.bak
+*.backup
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# =============================================================================
-# IDE & EDITORS
-# =============================================================================
-
+# ============================================================================
+# IDE & EDITOR FILES
+# ============================================================================
 # VS Code
 .vscode/
+*.code-workspace
 
 # PyCharm
 .idea/
+*.iml
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
 
 # Vim
 *.swp
 *.swo
 *~
 
-# =============================================================================
-# OS FILES
-# =============================================================================
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
 
+# ============================================================================
+# OS FILES
+# ============================================================================
 # macOS
 .DS_Store
 .AppleDouble
 .LSOverride
+._*
 
 # Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+$RECYCLE.BIN/
 
 # Linux
 *~
+.directory
+.Trash-*
+
+# ============================================================================
+# PROJECT-SPECIFIC
+# ============================================================================
+# Development copies of config
+config - *.py
+config_backup.py
+config.*.py
+
+# Archives and compressed files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+
+# Data files (if you create custom data directories)
+data/
+datasets/
+*.csv
+*.xlsx
+
+# Custom scripts or experimental code
+experiments/
+sandbox/
+scratch/
+playground/
+
+# ============================================================================
+# VERSION FOLDERS
+# ============================================================================
+# Old versions stored in numbered folders
+0_1*/
+v0*/
+version*/
+archive/
+old/
+deprecated/

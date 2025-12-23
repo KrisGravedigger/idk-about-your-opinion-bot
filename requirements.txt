@@ -1,15 +1,45 @@
-# Opinion Farming Bot - Dependencies
-# ==================================
+# Opinion Trading Bot - Dependencies
+# ====================================
 # Install with: pip install -r requirements.txt
 
-# Opinion.trade SDK (primary trading interface)
+# Core Dependencies
+# -----------------
+
+# Opinion.trade SDK - Primary trading interface for BNB Chain prediction markets
 opinion-clob-sdk>=1.0.0
 
-# Environment variable management
+# Environment variable management - Securely load API keys and credentials
 python-dotenv>=1.0.0
 
-# Web3 for blockchain interactions (BSC)
+# Web3 for blockchain interactions - Required for BSC transactions
 web3>=6.0.0
 
-# HTTP requests (used by SDK internally)
+# HTTP requests - Used by SDK and for API communication
 requests>=2.31.0
+
+# Decimal precision - Used for accurate financial calculations
+# (Built-in Python library, no installation needed)
+
+# Additional Standard Library Dependencies
+# ----------------------------------------
+# These are built-in Python libraries, no installation needed:
+# - json (state persistence)
+# - pathlib (file operations)
+# - time (intervals and delays)
+# - datetime (timestamps and timeouts)
+# - typing (type hints)
+# - dataclasses (structured data)
+# - decimal (precise calculations)
+# - logging (centralized logging)
+# - argparse (command-line arguments)
+# - sys (system operations)
+
+# Development Dependencies (Optional)
+# -----------------------------------
+# Uncomment these if you want to run tests or contribute to development:
+
+# pytest>=7.4.0           # Testing framework
+# pytest-cov>=4.1.0       # Test coverage reporting
+# black>=23.7.0           # Code formatting
+# flake8>=6.1.0           # Code linting
+# mypy>=1.5.0             # Static type checking

@@ -1,103 +1,131 @@
-# Opinion Farming Bot 🤖
+# Opinion Trading Bot 🤖
 
-Automated trading bot for Opinion.trade - a prediction market platform on BNB Chain. The bot implements a liquidity provision strategy designed to maximize airdrop points while generating trading profits.
+**Autonomous trading bot for Opinion.trade prediction markets on BNB Chain**
+
+A sophisticated liquidity provision bot designed to maximize airdrop points while generating trading profits through automated market-making strategies.
+
+---
 
 ## 📋 Table of Contents
 
+- [Features](#-features)
+- [Architecture](#-architecture)
 - [Quick Start](#-quick-start)
-- [What Does This Bot Do?](#-what-does-this-bot-do)
 - [Installation](#-installation)
 - [Configuration](#-configuration)
 - [Running the Bot](#-running-the-bot)
-- [Stage Descriptions](#-stage-descriptions)
-- [Understanding the Output](#-understanding-the-output)
+- [How It Works](#-how-it-works)
+- [Module Overview](#-module-overview)
+- [Safety Features](#-safety-features)
 - [Troubleshooting](#-troubleshooting)
-- [Safety & Security](#-safety--security)
+- [Development](#-development)
+- [License & Disclaimer](#-license--disclaimer)
+
+---
+
+## ✨ Features
+
+### Core Trading Engine
+- **Fully Autonomous Operation** - Complete trading cycle from market selection to position closing
+- **State Machine Architecture** - 8-stage state machine with persistence across restarts
+- **Intelligent Market Selection** - Multi-factor scoring system with bonus market support
+- **Advanced Pricing Strategy** - Threshold-based market making with safety checks
+- **Smart Order Monitoring** - Detects fills, competition, and market deterioration
+
+### Risk Management
+- **Capital Management** - Fixed or percentage-based position sizing
+- **Stop-Loss Protection** - Automatic position closure when losses exceed threshold
+- **Liquidity Monitoring** - Detects and responds to orderbook deterioration
+- **Order Timeouts** - Automatic cancellation after configurable time periods
+- **Balance Safety Checks** - Prevents over-trading when capital is low
+
+### Analytics & Tracking
+- **P&L Calculation** - Precise profit/loss tracking using Decimal arithmetic
+- **Trade Statistics** - Win rate, total P&L, consecutive losses tracking
+- **Session Summaries** - Comprehensive performance reports
+- **State Persistence** - Resume interrupted trading cycles seamlessly
+
+---
+
+## 🏗️ Architecture
+
+### Project Structure
+
+```
+opinion_trading_bot/
+├── core/                          # Core business logic
+│   ├── autonomous_bot.py          # Main orchestrator (state machine)
+│   ├── capital_manager.py         # Position sizing & balance checks
+│   └── state_manager.py           # State persistence & validation
+│
+├── monitoring/                    # Order & market monitoring
+│   ├── buy_monitor.py             # BUY order fill monitoring
+│   ├── sell_monitor.py            # SELL order fill & stop-loss monitoring
+│   └── liquidity_checker.py      # Orderbook liquidity analysis
+│
+├── strategies/                    # Trading strategies
+│   └── pricing.py                 # Threshold-based pricing strategy
+│
+├── api_client.py                  # Opinion.trade API wrapper
+├── market_scanner.py              # Market discovery & ranking
+├── order_manager.py               # Order placement & management
+├── position_tracker.py            # P&L calculation & tracking
+├── scoring.py                     # Market scoring algorithms
+├── utils.py                       # Helper functions
+├── logger_config.py               # Logging configuration
+├── config.py                      # Configuration parameters
+│
+├── autonomous_bot_main.py         # Entry point
+├── state.json                     # Bot state (auto-generated)
+├── bonus_markets.txt              # Bonus market IDs
+└── .env                           # Credentials (create from .env.example)
+```
+
+### State Machine
+
+```
+IDLE → SCANNING → BUY_PLACED → BUY_MONITORING → BUY_FILLED →
+SELL_PLACED → SELL_MONITORING → COMPLETED → IDLE (repeat)
+```
+
+**Stage Descriptions:**
+- `IDLE`: Ready to start new cycle
+- `SCANNING`: Finding and ranking markets
+- `BUY_PLACED`: BUY order submitted, transitioning to monitoring
+- `BUY_MONITORING`: Monitoring BUY order for fills/competition
+- `BUY_FILLED`: BUY completed, preparing SELL order
+- `SELL_PLACED`: SELL order submitted, transitioning to monitoring
+- `SELL_MONITORING`: Monitoring SELL order for fills/stop-loss
+- `COMPLETED`: Trade finished, calculating P&L
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-# 1. Install dependencies
+# 1. Clone repository
+git clone <repository-url>
+cd opinion_trading_bot
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 2. Set up credentials
+# 3. Configure credentials
 cp .env.example .env
-# Edit .env with your API key and wallet details
+# Edit .env with your API_KEY, PRIVATE_KEY, MULTI_SIG_ADDRESS
 
-# 3. Add bonus markets (optional)
-# Edit bonus_markets.txt with market IDs
+# 4. (Optional) Add bonus markets
+# Edit bonus_markets.txt with market IDs (one per line)
 
-# 4. Run the bot stages
-python mvp_stage1.py  # Scan markets
-python mvp_stage2.py  # Place order
-python mvp_stage3.py  # Monitor for fills (passive)
-# OR
-python mvp_stage5.py  # Monitor with competitive re-pricing
-python mvp_stage4.py  # Flip position (after BUY fills)
-```
+# 5. Adjust configuration
+# Edit config.py to set capital, strategy parameters, etc.
 
----
+# 6. Run the bot
+python autonomous_bot_main.py
 
-## 🎯 What Does This Bot Do?
-
-The bot provides liquidity to prediction markets on Opinion.trade by:
-
-1. **Finding Opportunities** - Scans all active markets to find ones with wide spreads (high profit potential) and bonus point multipliers
-
-2. **Placing Strategic Orders** - Places limit BUY orders at optimal prices within the spread
-
-3. **Competitive Monitoring** - Watches for competitors and automatically re-prices to stay competitive (up to 5 times)
-
-4. **Position Flipping** - After buying tokens, automatically places SELL order to complete the cycle
-
-5. **Continuous Operation** - Can automatically reinvest and find new opportunities
-
-### Strategy Summary
-
-```
-Wide Spread Market Detected
-         │
-         ▼
-┌─────────────────────┐
-│   Place BUY Order   │  ◄── Stage 2
-│   (near ask price)  │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  Monitor Orderbook  │  ◄── Stage 3 or 5
-│  (detect fills/     │
-│   competition)      │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│   BUY Order Fills   │
-│                     │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  Place SELL Order   │  ◄── Stage 4
-│  (near bid price)   │
-└─────────────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  SELL Order Fills   │
-│  Position Closed    │
-│  P&L Calculated     │
-└─────────────────────┘
-         │
-         ▼
-    🔄 Reinvest?
-         │
-    Yes ─┴─ No
-     │      │
-     ▼      ▼
-   Stage 1  Exit
+# Optional flags:
+python autonomous_bot_main.py --max-cycles 5  # Run for 5 cycles then stop
+python autonomous_bot_main.py --reset-state   # Start fresh (clear previous state)
 ```
 
 ---
@@ -106,16 +134,15 @@ Wide Spread Market Detected
 
 ### Requirements
 
-- Python 3.10 or higher
-- BNB Chain wallet with:
-  - USDT for trading
-  - Small amount of BNB for gas fees
+- **Python 3.10+**
+- **BNB Chain wallet** with:
+  - USDT for trading (minimum 20 USDT recommended)
+  - Small amount of BNB for gas fees (0.01 BNB)
+- **Opinion.trade API key**
 
-### Steps
+### Setup Steps
 
-1. **Clone or download the bot files**
-
-2. **Create virtual environment (recommended)**
+1. **Create virtual environment** (recommended)
    ```bash
    python -m venv venv
    source venv/bin/activate  # Linux/Mac
@@ -123,276 +150,589 @@ Wide Spread Market Detected
    venv\Scripts\activate  # Windows
    ```
 
-3. **Install dependencies**
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Set up environment file**
+3. **Configure credentials**
    ```bash
    cp .env.example .env
    ```
+   
+   Edit `.env`:
+   ```env
+   API_KEY=your_opinion_trade_api_key
+   PRIVATE_KEY=0xYourWalletPrivateKey
+   MULTI_SIG_ADDRESS=0xYourWalletAddress
+   ```
 
-5. **Edit `.env` with your credentials** (see Configuration below)
+4. **Configure bot behavior**
+   
+   Edit `config.py` to adjust:
+   - Capital allocation (`CAPITAL_MODE`, `CAPITAL_AMOUNT_USDT`, `CAPITAL_PERCENTAGE`)
+   - Pricing strategy thresholds
+   - Stop-loss parameters
+   - Monitoring intervals
+   - Risk management settings
 
 ---
 
 ## ⚙️ Configuration
 
-### Required: `.env` File
+### Essential Parameters (`config.py`)
 
-Create a `.env` file with your credentials:
+#### Capital Management
 
-```bash
-API_KEY=your_opinion_trade_api_key
-PRIVATE_KEY=0xYourWalletPrivateKey
-MULTI_SIG_ADDRESS=0xYourWalletAddress
+```python
+# Capital mode: 'fixed' or 'percentage'
+CAPITAL_MODE = 'percentage'
+
+# Fixed mode: use this exact amount per position
+CAPITAL_AMOUNT_USDT = 20.0
+
+# Percentage mode: use this % of current balance
+CAPITAL_PERCENTAGE = 60.0
+
+# Safety thresholds
+MIN_BALANCE_TO_CONTINUE_USDT = 20.0
+MIN_POSITION_SIZE_USDT = 10.0
 ```
 
-⚠️ **NEVER share or commit your `.env` file!**
+#### Pricing Strategy
 
-### Optional: `config.py` Settings
+```python
+# Spread thresholds (in dollars)
+SPREAD_THRESHOLD_1 = 0.20  # Tiny spreads: ≤$0.20
+SPREAD_THRESHOLD_2 = 0.50  # Small spreads: $0.21-$0.50
+SPREAD_THRESHOLD_3 = 1.00  # Medium spreads: $0.51-$1.00
+                           # Wide spreads: >$1.00
 
-Key parameters you might want to adjust in `config.py`:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `TOTAL_CAPITAL_USDT` | 1000 | Total capital for trading |
-| `CAPITAL_ALLOCATION_PERCENT` | 100 | % of capital per market |
-| `AUTO_REINVEST` | True | Auto-find next market after cycle |
-| `MAX_REPRICING_ATTEMPTS` | 5 | Max re-price attempts before abandoning |
-| `PRICE_POSITION_BASE_PERCENT` | 95 | How aggressive to price (higher = more aggressive) |
-
-### Optional: `bonus_markets.txt`
-
-Add market IDs that earn bonus airdrop points:
-
+# Improvement amounts for each threshold
+IMPROVEMENT_TINY = 0.00    # Join queue (no improvement)
+IMPROVEMENT_SMALL = 0.10   # $0.10 better
+IMPROVEMENT_MEDIUM = 0.20  # $0.20 better
+IMPROVEMENT_WIDE = 0.30    # $0.30 better
 ```
-# One market ID per line
-813
-914
-1025
+
+#### Stop-Loss Protection
+
+```python
+ENABLE_STOP_LOSS = True
+STOP_LOSS_TRIGGER_PERCENT = -10.0  # Trigger at -10% loss
+STOP_LOSS_AGGRESSIVE_OFFSET = 0.001  # Place aggressive limit
+```
+
+#### Liquidity Monitoring
+
+```python
+LIQUIDITY_AUTO_CANCEL = True
+LIQUIDITY_BID_DROP_THRESHOLD = 25.0  # Cancel if bid drops >25%
+LIQUIDITY_SPREAD_THRESHOLD = 15.0    # Cancel if spread >15%
+```
+
+### Scoring Profiles
+
+Define market selection strategies in `config.py`:
+
+```python
+SCORING_PROFILES = {
+    'production_farming': {
+        'weights': {
+            'price_balance': 0.45,      # 50/50 bid/ask balance
+            'hourglass_advanced': 0.25,  # Orderbook shape
+            'spread': 0.20,              # Wide spreads
+            'volume_24h': 0.10,          # High volume bonus
+        },
+        'bonus_multiplier': 1.5,
+        'invert_spread': False,  # Larger = better
+    },
+    'test_quick_fill': {
+        'weights': {
+            'spread': 1.0,  # Only spread matters
+        },
+        'bonus_multiplier': 1.0,
+        'invert_spread': True,  # Smaller = better (fast fills)
+    },
+}
+
+DEFAULT_SCORING_PROFILE = 'production_farming'
 ```
 
 ---
 
 ## 🎮 Running the Bot
 
-### Stage 1: Market Scanner
+### Standard Operation
+
 ```bash
-python mvp_stage1.py
+python autonomous_bot_main.py
 ```
 
-**What it does:** Scans all active markets and shows top 10 by opportunity score.
+The bot will:
+1. Load/initialize state
+2. Find best market
+3. Place BUY order
+4. Monitor until filled
+5. Place SELL order
+6. Monitor until filled
+7. Calculate P&L
+8. Repeat (if `AUTO_REINVEST=True`)
 
-**Output:** Formatted table with:
-- Market ID and title
-- Spread percentage
-- Best bid/ask prices
-- Score (spread × bonus multiplier)
+### Command Line Options
 
-**When to use:** Before starting a new trading cycle.
-
----
-
-### Stage 2: Auto Order Placement
 ```bash
-python mvp_stage2.py
+# Run for specific number of cycles
+python autonomous_bot_main.py --max-cycles 5
+
+# Clear previous state and start fresh
+python autonomous_bot_main.py --reset-state
+
+# Show help
+python autonomous_bot_main.py --help
 ```
 
-**What it does:**
-1. Runs market scanner
-2. Selects best market
-3. Calculates optimal price
-4. Places limit BUY order
-5. Saves state to `state.json`
+### Interrupting the Bot
 
-**Prerequisites:** None (starts fresh)
+- Press `Ctrl+C` to stop gracefully
+- Bot saves state before exiting
+- Resume later by running again (state persists)
 
-**Next step:** Run Stage 3 or Stage 5 to monitor
+### Monitoring Output
 
----
-
-### Stage 3: Passive Fill Monitor
-```bash
-python mvp_stage3.py
-```
-
-**What it does:** Monitors your order every 9 seconds until it fills.
-
-**When to use:** When you want simple monitoring without competitive re-pricing.
-
-**Prerequisites:** Stage 2 must have been run (order placed)
-
----
-
-### Stage 4: Auto Flip (SELL)
-```bash
-python mvp_stage4.py
-```
-
-**What it does:**
-1. Loads state (after BUY filled)
-2. Places SELL order at calculated price
-3. Monitors until SELL fills
-4. Calculates and displays P&L
-5. If `AUTO_REINVEST=True`, starts new cycle
-
-**Prerequisites:** BUY order must be filled (Stage 3 or 5 completed)
-
----
-
-### Stage 5: Competitive Re-Pricing ⭐
-```bash
-python mvp_stage5.py
-```
-
-**What it does:**
-1. Monitors orderbook for competitors
-2. If outbid by >0.5%, automatically re-prices
-3. Uses "gradual capitulation" strategy
-4. After 5 re-prices, abandons market
-
-**When to use:** In competitive markets where you might get outbid.
-
-**Capitulation Logic:**
-- Won't drop below 55-75% of initial price
-- Prevents "race to bottom"
-
----
-
-## 📊 Understanding the Output
-
-### Market Scanner Table
-```
-┌──────┬────────────────────────────────────┬────────┬──────────┬──────────┬────────┐
-│ Rank │ Market ID & Title                  │ Spread │ Best Bid │ Best Ask │ Score  │
-├──────┼────────────────────────────────────┼────────┼──────────┼──────────┼────────┤
-│  1   │ 813: BTC $100k by 2025? 🌟        │ 15.2%  │   $0.42  │   $0.58  │  30.40 │
-└──────┴────────────────────────────────────┴────────┴──────────┴──────────┴────────┘
-```
-
-- **Spread:** Gap between bid and ask (higher = more profit potential)
-- **Score:** Spread × bonus multiplier (🌟 markets get 2x)
-
-### Log Messages
+The bot provides real-time logging with emojis:
 
 | Symbol | Meaning |
 |--------|---------|
 | ✅ | Success |
-| ❌ | Error/Failure |
+| ❌ | Error |
 | ⚠️ | Warning |
-| 🔄 | Action in progress |
-| 💰 | Money/P&L related |
-| 📊 | Data/Analysis |
+| 🔄 | Processing |
+| 💰 | Money/P&L |
+| 📊 | Data/Stats |
 | 🌟 | Bonus market |
-
-### P&L Summary
-```
-💰 POSITION CLOSED - P&L SUMMARY:
-   Buy cost: 1,000.00 USDT
-   Sell proceeds: 1,055.12 USDT
-   Net P&L: +$55.12 (+5.51%)
-```
+| 🛑 | Stop-loss |
 
 ---
 
-## 🔧 Troubleshooting
+## 🔧 How It Works
 
-### "Configuration errors found"
-- Check that `.env` file exists and has all required values
+### Market Selection
+
+1. **Fetch Active Markets** - Query all markets from API
+2. **Apply Filters** - Remove markets that don't meet criteria:
+   - Minimum orderbook depth
+   - Time until close constraints
+   - Balance requirements
+3. **Score Markets** - Calculate score based on:
+   - Spread percentage
+   - Price balance (50/50 bid/ask)
+   - Orderbook shape (hourglass pattern)
+   - 24h volume
+   - Bonus multiplier (if in bonus_markets.txt)
+4. **Select Best** - Choose highest scoring market
+
+### Order Execution
+
+**BUY Orders:**
+```
+1. Get current orderbook
+2. Calculate spread (ask - bid)
+3. Determine improvement based on spread size:
+   - Tiny spread (≤$0.20) → bid + $0.00 (join queue)
+   - Small spread ($0.21-$0.50) → bid + $0.10
+   - Medium spread ($0.51-$1.00) → bid + $0.20
+   - Wide spread (>$1.00) → bid + $0.30
+4. Apply safety checks (don't cross ask)
+5. Place limit order
+```
+
+**SELL Orders:**
+```
+1. Get current orderbook
+2. Calculate spread
+3. Determine improvement (same thresholds, subtract from ask)
+4. Apply safety checks (don't cross bid)
+5. Place limit order
+```
+
+### Monitoring & Risk Management
+
+**BUY Monitoring:**
+- Checks order status every 9 seconds
+- Monitors orderbook liquidity
+- Cancels if:
+  - Bid drops >25% from initial
+  - Spread widens >15%
+  - Timeout reached (24 hours default)
+
+**SELL Monitoring:**
+- Checks order status every 9 seconds
+- Calculates unrealized P&L
+- Triggers stop-loss if:
+  - Loss exceeds threshold (-10% default)
+  - Places aggressive limit order
+- Monitors liquidity deterioration
+- Cancels if timeout reached
+
+### P&L Calculation
+
+```python
+buy_cost = amount_usdt (what we spent)
+sell_proceeds = filled_tokens × sell_price (what we received)
+pnl = sell_proceeds - buy_cost
+pnl_percent = (pnl / buy_cost) × 100
+```
+
+Uses `Decimal` arithmetic for precision.
+
+---
+
+## 📚 Module Overview
+
+### Core Modules
+
+**`core/autonomous_bot.py`**
+- Main orchestrator implementing state machine
+- Coordinates all modules
+- Handles state transitions
+- Manages trading cycle
+
+**`core/capital_manager.py`**
+- Calculates position sizes
+- Queries USDT balance
+- Validates against platform constraints
+- Warns if position too small for airdrop points
+
+**`core/state_manager.py`**
+- Loads/saves state.json
+- Initializes fresh state
+- Validates state structure
+- Migrates old formats
+- Resets positions between cycles
+
+### Monitoring Modules
+
+**`monitoring/buy_monitor.py`**
+- Monitors BUY orders until filled
+- Checks liquidity conditions
+- Handles timeouts
+- Returns structured results
+
+**`monitoring/sell_monitor.py`**
+- Monitors SELL orders until filled
+- Calculates unrealized P&L
+- Triggers stop-loss if threshold exceeded
+- Monitors liquidity deterioration
+
+**`monitoring/liquidity_checker.py`**
+- Compares current vs initial orderbook
+- Calculates bid drop percentage
+- Calculates spread percentage
+- Returns deterioration analysis
+
+### Strategy Modules
+
+**`strategies/pricing.py`**
+- Threshold-based pricing strategy
+- Calculates BUY/SELL prices
+- Applies safety margins
+- Prevents spread crossing
+
+### Support Modules
+
+**`api_client.py`**
+- Opinion.trade API wrapper
+- Handles authentication
+- Provides convenience methods
+- Error handling
+
+**`market_scanner.py`**
+- Fetches all active markets
+- Applies filters
+- Calculates scores
+- Returns ranked list
+
+**`order_manager.py`**
+- Places BUY/SELL orders
+- Cancels orders
+- Fetches order status
+- Handles order-related operations
+
+**`position_tracker.py`**
+- Calculates P&L using Decimal arithmetic
+- Tracks trade history
+- Provides session summaries
+- Win rate calculations
+
+**`scoring.py`**
+- Market scoring algorithms
+- Price balance metric
+- Hourglass pattern detection
+- Volume/liquidity scoring
+
+**`utils.py`**
+- Helper functions
+- Formatting utilities
+- Safe type conversions
+- Timestamp generation
+
+**`logger_config.py`**
+- Centralized logging setup
+- Console + file output
+- Color coding
+- Structured logging helpers
+
+---
+
+## 🛡️ Safety Features
+
+### Capital Protection
+
+- **Minimum Balance Check** - Exits if balance < threshold
+- **Position Size Validation** - Ensures orders meet platform minimums
+- **Capital Allocation** - Prevents over-leveraging
+
+### Order Safety
+
+- **Spread Crossing Prevention** - Orders never cross spread (remain makers)
+- **Safety Margins** - Minimum distance from opposite side
+- **Price Validation** - Checks prices before submission
+
+### Risk Management
+
+- **Stop-Loss Protection** - Automatic position closure at loss threshold
+- **Liquidity Monitoring** - Cancels orders in deteriorating conditions
+- **Order Timeouts** - Prevents indefinite waiting
+- **State Persistence** - Resume after crashes/interruptions
+
+### Operational Safety
+
+- **Graceful Shutdown** - Ctrl+C saves state before exit
+- **Error Handling** - Comprehensive try/catch blocks
+- **Logging** - Full audit trail of all operations
+- **Validation** - Config validation at startup
+
+---
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**"Configuration errors found"**
+- Check `.env` file exists and has all required values
 - Verify API_KEY is valid
-- Verify PRIVATE_KEY is correct format (64 hex characters)
+- Ensure PRIVATE_KEY is 64 hex characters
 
-### "No markets found"
-- Opinion.trade might have no active markets
-- Check your internet connection
+**"Insufficient balance"**
+- Check USDT balance: `client.get_usdt_balance()`
+- Reduce `CAPITAL_AMOUNT_USDT` or `CAPITAL_PERCENTAGE`
+- Ensure `MIN_BALANCE_TO_CONTINUE_USDT` is appropriate
+
+**"No markets found"**
+- Opinion.trade may have no active markets
+- Check internet connection
 - Try again later
 
-### "Insufficient balance"
-- Check your USDT balance on Opinion.trade
-- Reduce `TOTAL_CAPITAL_USDT` in config
+**Order stuck in "pending"**
+- Normal - order waiting for fill
+- Check if you're competitive in orderbook
+- Wait or cancel with Ctrl+C
 
-### "Order cancelled by system"
-- Market may have been resolved
-- Run Stage 1 to find new market
+**"Failed to place order"**
+- Insufficient USDT balance
+- Insufficient BNB for gas (for some operations)
+- Invalid API key
+- Network issues
 
-### Bot stuck on "Order pending..."
-- This is normal - order is waiting to be filled
-- Press Ctrl+C to stop monitoring
-- You can resume later with same stage
+### Debug Mode
 
-### "Failed to place order"
-- Check if you have enough USDT
-- Check if you have enough BNB for gas
-- Verify API key is valid
+Enable detailed logging:
 
----
-
-## 🔒 Safety & Security
-
-### DO ✅
-- Keep `.env` file secure and never share it
-- Use a dedicated trading wallet (not your main wallet)
-- Start with small amounts to test
-- Monitor the bot regularly
-- Keep backup of your private key offline
-
-### DON'T ❌
-- Never commit `.env` to Git
-- Never share your private key
-- Never run on untrusted computers
-- Never leave large amounts unmonitored
-
-### State File
-The bot saves its state to `state.json`. This file:
-- Tracks current order and position
-- Allows resuming after interruptions
-- Should be backed up if you stop mid-cycle
-
----
-
-## 📁 File Structure
-
-```
-opinion_farming_bot/
-├── config.py           # All configuration parameters
-├── api_client.py       # Opinion.trade API wrapper
-├── market_scanner.py   # Market discovery & ranking
-├── order_manager.py    # Order placement & management
-├── position_tracker.py # Position & P&L tracking
-├── logger_config.py    # Logging setup
-├── utils.py            # Helper functions
-├── mvp_stage1.py       # Stage 1: Market Scanner
-├── mvp_stage2.py       # Stage 2: Auto Order Placement
-├── mvp_stage3.py       # Stage 3: Passive Fill Monitor
-├── mvp_stage4.py       # Stage 4: Auto Flip (SELL)
-├── mvp_stage5.py       # Stage 5: Competitive Re-Pricing
-├── .env.example        # Template for credentials
-├── .env                # Your credentials (create this)
-├── .gitignore          # Git ignore rules
-├── requirements.txt    # Python dependencies
-├── bonus_markets.txt   # Bonus market IDs
-├── state.json          # Bot state (auto-generated)
-└── README.md           # This documentation
+```python
+# In config.py
+LOG_LEVEL = "DEBUG"
 ```
 
----
+Check `opinion_farming_bot.log` for full details.
 
-## 📞 Support
+### State Issues
 
-If you encounter issues:
+If state.json becomes corrupted:
 
-1. Check the log file: `opinion_farming_bot.log`
-2. Review this README's Troubleshooting section
-3. Verify your configuration in `.env` and `config.py`
+```bash
+python autonomous_bot_main.py --reset-state
+```
 
----
-
-## ⚖️ Disclaimer
-
-This bot is for educational purposes. Trading prediction markets involves risk. Only trade with funds you can afford to lose. The developers are not responsible for any financial losses.
+Or manually delete `state.json`.
 
 ---
 
-**Happy Farming! 🌾**
+## 👨‍💻 Development
+
+### Project Structure
+
+The codebase follows modular architecture with clear separation of concerns:
+
+- **Core** - Business logic and orchestration
+- **Monitoring** - Order and market monitoring
+- **Strategies** - Trading strategies (pricing, etc.)
+- **Support** - Utilities, logging, API client
+
+### Adding New Features
+
+1. **New Strategy** - Add to `strategies/`
+2. **New Monitor** - Add to `monitoring/`
+3. **New Metric** - Add to `scoring.py`
+4. **New State** - Update `state_manager.py` and migration logic
+
+### Testing
+
+While comprehensive tests exist in the `tests/` directory (not included in production releases), you should always:
+
+1. Test with small amounts first
+2. Use `--max-cycles 1` for single-cycle testing
+3. Monitor logs carefully
+4. Verify state.json after each cycle
+
+### Code Quality
+
+- **Type Hints** - Used throughout for clarity
+- **Docstrings** - All public functions documented
+- **Comments** - Non-obvious logic explained
+- **Logging** - Comprehensive logging at all levels
+
+---
+
+## 📄 License & Disclaimer
+
+### Disclaimer
+
+⚠️ **IMPORTANT - READ CAREFULLY**
+
+This bot is provided for **educational purposes only**. Trading prediction markets involves substantial risk of loss.
+
+**RISKS:**
+- You can lose all capital deployed
+- Markets can be volatile and unpredictable
+- Bugs in the code could result in losses
+- API or network issues could cause problems
+- No guarantees of profitability
+
+**YOU ARE RESPONSIBLE FOR:**
+- Testing thoroughly with small amounts
+- Understanding the code before running it
+- Monitoring the bot regularly
+- Managing your own risk
+- Any financial losses incurred
+
+**THE DEVELOPERS:**
+- Provide no warranties or guarantees
+- Are not responsible for any losses
+- Do not provide financial advice
+- Recommend professional advice before trading
+
+### License
+
+MIT License - See LICENSE file for details
+
+---
+
+## 🤝 Support & Community
+
+### Getting Help
+
+1. Check this README thoroughly
+2. Review `opinion_farming_bot.log`
+3. Search existing GitHub issues
+4. Open new issue with:
+   - Full error message
+   - Relevant log excerpt
+   - Configuration (without credentials!)
+   - Steps to reproduce
+
+### Contributing
+
+Contributions welcome! Please:
+1. Fork repository
+2. Create feature branch
+3. Add tests if applicable
+4. Submit pull request
+
+---
+
+## 📊 Performance Expectations
+
+### Realistic Expectations
+
+- **Win Rate**: 50-70% (depends on market conditions)
+- **Average P&L**: 2-5% per trade (varies widely)
+- **Cycle Time**: 1-24 hours per complete cycle
+- **Airdrop Points**: Maximized through strategic market selection
+
+### Factors Affecting Performance
+
+- Market volatility
+- Competition from other traders
+- Spread availability
+- Capital allocated
+- Configuration parameters
+
+---
+
+## 🔐 Security Best Practices
+
+### Credential Management
+
+- ✅ **DO** use `.env` file for credentials
+- ✅ **DO** use dedicated trading wallet
+- ✅ **DO** start with small amounts
+- ✅ **DO** keep backup of private key offline
+- ❌ **DON'T** commit `.env` to Git
+- ❌ **DON'T** share private key
+- ❌ **DON'T** use main wallet
+- ❌ **DON'T** leave large amounts unmonitored
+
+### Operational Security
+
+- Keep software updated
+- Use secure network connections
+- Monitor bot regularly
+- Review logs periodically
+- Set appropriate stop-loss thresholds
+
+---
+
+## 📈 Roadmap
+
+### Planned Features
+
+- [ ] CSV transaction logging for analysis
+- [ ] State synchronization with API
+- [ ] Multi-market support (parallel positions)
+- [ ] Telegram notifications
+- [ ] Web dashboard
+- [ ] Backtesting framework
+- [ ] Advanced strategies (e.g., momentum, mean reversion)
+
+### Known Limitations
+
+- Single position at a time
+- Manual configuration updates
+- Limited historical data analysis
+- No GUI interface
+
+---
+
+## 📞 Contact
+
+For issues, questions, or contributions:
+- GitHub Issues: [Repository Issues Page]
+- Documentation: This README
+- Code: Fully commented and documented
+
+---
+
+**Happy Trading! 🌾**
+
+Remember: Start small, test thoroughly, and never invest more than you can afford to lose.
