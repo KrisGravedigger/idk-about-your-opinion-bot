@@ -1,0 +1,37 @@
+# Opinion Farming Bot - Bonus Markets
+# ====================================
+# Markets listed here get a 2x score multiplier for prioritization.
+# These are typically markets that earn extra airdrop points.
+#
+# Format:
+#   - One market_id per line
+#   - Lines starting with # are comments
+#   - Empty lines are ignored
+#
+# To find market IDs:
+#   - Run Stage 1 (python mvp_stage1.py) to see all available markets
+#   - Check Opinion.trade website for promoted/bonus markets
+#   - Market ID is shown in the URL: opinion.trade/market/[MARKET_ID]
+#
+# Example:
+#   813
+#   914
+#   1025
+
+# =============================================================================
+# ADD YOUR BONUS MARKET IDs BELOW
+# =============================================================================
+
+# Example entries (uncomment and replace with actual bonus markets):
+# 813
+# 914
+# 1025
+
+# =============================================================================
+# HOW TO UPDATE
+# =============================================================================
+# 1. Find bonus market IDs from Opinion.trade announcements
+# 2. Add one ID per line (just the number, no quotes)
+# 3. Save file
+# 4. Run Stage 1 to verify they're loaded correctly
+# =============================================================================

@@ -1,0 +1,15 @@
+# Opinion Farming Bot - Dependencies
+# ==================================
+# Install with: pip install -r requirements.txt
+
+# Opinion.trade SDK (primary trading interface)
+opinion-clob-sdk>=1.0.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Web3 for blockchain interactions (BSC)
+web3>=6.0.0
+
+# HTTP requests (used by SDK internally)
+requests>=2.31.0
