@@ -218,6 +218,15 @@ class AutonomousBot:
         """
         logger.info("💤 IDLE - Ready to start new cycle")
         
+        # CLEANUP: Redeem any resolved positions before starting new cycle
+        logger.info("🧹 Checking for resolved positions to cleanup...")
+        try:
+            redeemed = self.client.cleanup_resolved_positions()
+            if redeemed > 0:
+                logger.info(f"✅ Cleaned up {redeemed} resolved market(s)")
+        except Exception as e:
+            logger.warning(f"⚠️ Cleanup failed (non-critical): {e}")
+        
         # Transition to scanning
         self.state['stage'] = 'SCANNING'
         self.state['cycle_number'] = self.state.get('cycle_number', 0) + 1
@@ -379,13 +388,37 @@ class AutonomousBot:
             logger.info("✅ BUY order filled!")
             
             # Update state with fill data
-            position['filled_amount'] = result['filled_amount']
+            # CRITICAL FIX: Verify filled_amount from actual position, not just order data
+            # API get_order() may return filled_shares=0 or wrong field name
+            filled_from_monitor = result.get('filled_amount', 0)
+            
+            # Double-check with actual position shares
+            try:
+                market_id = position['market_id']
+                verified_shares = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side="YES"
+                )
+                verified_amount = float(verified_shares)
+                
+                if verified_amount > 0:
+                    logger.info(f"✅ Verified filled_amount from position: {verified_amount:.10f} tokens")
+                    position['filled_amount'] = verified_amount
+                else:
+                    logger.warning(f"⚠️ Position check returned 0, using monitor value: {filled_from_monitor}")
+                    position['filled_amount'] = filled_from_monitor
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Could not verify position, using monitor value: {e}")
+                position['filled_amount'] = filled_from_monitor
+            
             position['avg_fill_price'] = result['avg_fill_price']
             position['filled_usdt'] = result['filled_usdt']
             position['fill_timestamp'] = result['fill_timestamp']
             
             self.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.state)
+
             
             return True
         
@@ -424,6 +457,42 @@ class AutonomousBot:
         market_id = position['market_id']
         token_id = position['token_id']
         filled_amount = position['filled_amount']
+        
+        # SAFETY CHECK: Verify filled_amount is valid before attempting SELL
+        if not filled_amount or filled_amount <= 0:
+            logger.error(f"❌ Invalid filled_amount in state: {filled_amount}")
+            logger.error(f"   Cannot place SELL with 0 tokens!")
+            logger.info(f"🔄 Re-checking position from API...")
+            
+            try:
+                verified_shares = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side="YES"
+                )
+                filled_amount = float(verified_shares)
+                
+                if filled_amount > 0:
+                    logger.info(f"✅ Recovered filled_amount from position: {filled_amount:.10f}")
+                    position['filled_amount'] = filled_amount
+                    self.state_manager.save_state(self.state)
+                else:
+                    logger.error(f"❌ Position still shows 0 tokens!")
+                    logger.error(f"   This indicates BUY order may not be truly filled")
+                    logger.error(f"   Resetting to SCANNING to avoid stuck loop")
+                    
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return True
+                    
+            except Exception as e:
+                logger.error(f"❌ Failed to verify position: {e}")
+                logger.error(f"   Resetting to SCANNING")
+                
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return True
         
         try:
             # Get fresh orderbook for SELL pricing
