@@ -412,9 +412,9 @@ class AutonomousBot:
                 logger.warning(f"⚠️ Could not verify position, using monitor value: {e}")
                 position['filled_amount'] = filled_from_monitor
             
-            position['avg_fill_price'] = result['avg_fill_price']
-            position['filled_usdt'] = result['filled_usdt']
-            position['fill_timestamp'] = result['fill_timestamp']
+            position['avg_fill_price'] = result.get('avg_fill_price', position.get('price', 0))
+            position['filled_usdt'] = result.get('filled_usdt', 0)
+            position['fill_timestamp'] = result.get('fill_timestamp')
             
             self.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.state)
@@ -607,6 +607,59 @@ class AutonomousBot:
         logger.info("⏳ SELL_MONITORING - Waiting for fill...")
         
         position = self.state['current_position']
+        
+        # CRITICAL: Verify avg_fill_price exists before SellMonitor starts
+        # (SellMonitor requires this for stop-loss calculation)
+        if not position.get('avg_fill_price') or position.get('avg_fill_price') == 0:
+            logger.warning(f"⚠️ avg_fill_price missing in SELL_MONITORING stage!")
+            logger.info(f"🔄 Recovering avg_fill_price from BUY order...")
+            
+            fallback_price = position.get('price', 0)
+            if fallback_price > 0:
+                logger.info(f"✅ Using BUY order price as avg_fill_price: ${fallback_price:.4f}")
+                logger.info(f"   (Recovery after restart - normally set by BuyMonitor)")
+                position['avg_fill_price'] = fallback_price
+                self.state_manager.save_state(self.state)
+            else:
+                logger.error(f"❌ Cannot recover avg_fill_price - no valid price in state!")
+                logger.error(f"   Resetting to SCANNING to avoid errors")
+                
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return True
+        
+        # ALSO verify filled_amount (shouldn't be 0 at this stage)
+        filled_amount = position.get('filled_amount', 0)
+        if not filled_amount or filled_amount <= 0:
+            logger.error(f"❌ Invalid filled_amount in SELL_MONITORING: {filled_amount}")
+            logger.info(f"🔄 Re-checking position from API...")
+            
+            try:
+                market_id = position['market_id']
+                verified_shares = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side="YES"
+                )
+                filled_amount = float(verified_shares)
+                
+                if filled_amount > 0:
+                    logger.info(f"✅ Recovered filled_amount: {filled_amount:.10f}")
+                    position['filled_amount'] = filled_amount
+                    self.state_manager.save_state(self.state)
+                else:
+                    logger.error(f"❌ No position found - resetting to SCANNING")
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return True
+            except Exception as e:
+                logger.error(f"❌ Failed to verify position: {e}")
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return True
+        
         sell_order_id = position['sell_order_id']
         
         # Calculate timeout

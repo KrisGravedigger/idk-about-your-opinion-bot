@@ -986,7 +986,67 @@ class OpinionClient:
             logger.error(f"❌ Error getting position shares: {e}")
             logger.debug(f"Exception details: {type(e).__name__}: {str(e)}")
             return Decimal("0")
+
+    def cleanup_resolved_positions(self) -> int:
+        """
+        Find and redeem all positions from resolved markets.
         
+        Returns:
+            Number of markets redeemed
+            
+        Example:
+            >>> client = OpinionClient()
+            >>> count = client.cleanup_resolved_positions()
+            >>> print(f"Redeemed {count} resolved markets")
+        """
+        try:
+            # Get all positions
+            positions = self.get_positions()
+            
+            if not positions:
+                logger.debug("No positions to cleanup")
+                return 0
+            
+            # Track resolved markets
+            resolved_markets = set()
+            
+            for pos in positions:
+                market_id = pos.get('market_id')
+                shares = float(pos.get('shares_owned', 0))
+                
+                if shares <= 0:
+                    continue  # Skip empty positions
+                
+                # Check if market is resolved
+                if self.is_market_resolved(market_id):
+                    resolved_markets.add(market_id)
+            
+            if not resolved_markets:
+                logger.info("✅ No resolved positions to cleanup")
+                return 0
+            
+            logger.info(f"🔍 Found {len(resolved_markets)} resolved markets with positions")
+            
+            # Redeem each market
+            redeemed_count = 0
+            for market_id in resolved_markets:
+                logger.info(f"💰 Attempting to redeem market #{market_id}...")
+                
+                tx_hash = self.redeem_positions(market_id)
+                
+                if tx_hash:
+                    logger.info(f"✅ Redeemed market #{market_id}: {tx_hash}")
+                    redeemed_count += 1
+                else:
+                    logger.warning(f"⚠️ Could not redeem market #{market_id}")
+            
+            logger.info(f"✅ Cleanup complete: {redeemed_count}/{len(resolved_markets)} markets redeemed")
+            return redeemed_count
+            
+        except Exception as e:
+            logger.error(f"❌ Error during cleanup: {e}")
+            return 0
+
     def cleanup_resolved_positions(self) -> int:
         """
         Find and redeem all positions from resolved markets.
