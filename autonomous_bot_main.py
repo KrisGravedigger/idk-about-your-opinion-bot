@@ -65,7 +65,7 @@ from config import validate_config
 from logger_config import setup_logger, log_startup_banner
 from api_client import create_client
 from core.autonomous_bot import AutonomousBot
-from utils import clear_state
+from utils import clear_state, get_timestamp
 
 # Initialize logger
 logger = setup_logger(__name__)
@@ -319,6 +319,8 @@ def main():
     # Quick check: if we have an open position, skip balance check
     # (position value is locked in tokens, not in free USDT balance)
     from core.state_manager import StateManager
+    from utils import get_timestamp
+    
     state_mgr = StateManager()
     existing_state = state_mgr.load_state()
     
@@ -327,8 +329,82 @@ def main():
         and existing_state.get('stage') not in ['IDLE', 'SCANNING', 'COMPLETED']
     )
     
+    # =========================================================================
+    # SELF-HEALING: Check API for orphaned positions
+    # =========================================================================
+    # Even if state.json says IDLE, we might have positions in API
+    # This happens when:
+    # 1. Order was placed but save_state() failed
+    # 2. Bot was killed after place_buy() but before state update
+    # 3. Manual trading was done outside bot
+    
+    if not has_open_position:
+        logger.info("🔍 Checking API for orphaned positions...")
+        
+        try:
+            positions = client.get_positions()
+            
+            if positions:
+                logger.warning("=" * 70)
+                logger.warning("⚠️  ORPHANED POSITION DETECTED!")
+                logger.warning(f"   state.json says: {existing_state.get('stage', 'UNKNOWN')}")
+                logger.warning(f"   But API shows: {len(positions)} active position(s)")
+                logger.warning("=" * 70)
+                logger.info("")
+                
+                # Find first position with significant shares
+                for pos in positions:
+                    market_id = pos.get('market_id')
+                    shares = float(pos.get('shares_owned', 0))
+                    
+                    if shares >= 1.0:
+                        logger.info(f"🔄 AUTO-RECOVERY:")
+                        logger.info(f"   Market: #{market_id}")
+                        logger.info(f"   Shares: {shares:.4f}")
+                        logger.info(f"   Action: Will place SELL to close position")
+                        logger.info("")
+                        logger.info("💡 Bot will SKIP balance check and proceed to close position")
+                        logger.info("")
+                        
+                        # Force state to BUY_FILLED so bot will place SELL
+                        bot.state['stage'] = 'BUY_FILLED'
+                        bot.state['current_position'] = {
+                            'market_id': market_id,
+                            'token_id': pos.get('token_id', ''),
+                            'market_title': pos.get('title', f"Recovered market #{market_id}"),
+                            'filled_amount': shares,
+                            'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
+                            'filled_usdt': shares * pos.get('avg_price', 0.01),
+                            'fill_timestamp': get_timestamp()
+                        }
+                        bot.state_manager.save_state(bot.state)
+                        
+                        logger.info("✅ State recovered and saved")
+                        logger.info(f"📍 Bot will start in BUY_FILLED → SELL_PLACED")
+                        logger.info("")
+                        
+                        has_open_position = True
+                        break
+                
+                if not has_open_position:
+                    logger.info("⚠️  Positions exist but all have < 1.0 shares (dust)")
+                    logger.info("   Ignoring dust - proceeding with normal balance check")
+                    logger.info("")
+            else:
+                logger.info("✅ No orphaned positions found")
+                logger.info("")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check for orphaned positions: {e}")
+            logger.info("   Proceeding with normal startup")
+            logger.info("")
+    
+    # =========================================================================
+    # SKIP BALANCE CHECK IF RECOVERING POSITION
+    # =========================================================================
     if has_open_position:
-        logger.info(f"📋 Resuming existing position from stage: {existing_state.get('stage')}")
+        stage = bot.state.get('stage', existing_state.get('stage', 'UNKNOWN'))
+        logger.info(f"📋 Resuming existing position from stage: {stage}")
         logger.info("   Skipping balance check (value locked in position)")
         logger.info("")
     else:
@@ -349,7 +425,7 @@ def main():
         except Exception as e:
             logger.warning(f"Could not fetch balance: {e}")
             logger.warning("   Continuing anyway...")
-            logger.info("") 
+            logger.info("")
     
     # =========================================================================
     # RUN BOT
