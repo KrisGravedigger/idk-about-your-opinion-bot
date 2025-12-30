@@ -180,6 +180,59 @@ class AutonomousBot:
         Returns:
             True if stage executed successfully, False otherwise
         """
+        
+        # ================================================================
+        # CRITICAL: Before executing ANY stage, verify state consistency
+        # ================================================================
+        # This is the FIRST LINE OF DEFENSE against orphaned orders
+        
+        if stage in ['IDLE', 'SCANNING']:
+            # These stages should NOT have active positions
+            # But check anyway in case of state corruption
+            try:
+                logger.debug("🔍 Pre-stage check: Verifying no orphaned positions...")
+                positions = self.client.get_positions()
+                
+                if positions:
+                    # We have positions but state says IDLE/SCANNING
+                    # This is a CRITICAL inconsistency
+                    logger.warning("=" * 60)
+                    logger.warning("⚠️  CRITICAL: State inconsistency detected!")
+                    logger.warning(f"   State says: {stage}")
+                    logger.warning(f"   API shows: {len(positions)} active position(s)")
+                    logger.warning("=" * 60)
+                    
+                    # Find first position with significant shares
+                    for pos in positions:
+                        market_id = pos.get('market_id')
+                        shares = float(pos.get('shares_owned', 0))
+                        
+                        if shares >= 1.0:
+                            logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
+                            logger.warning(f"   Shares: {shares:.4f}")
+                            logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
+                            
+                            # Force state to BUY_FILLED so bot will place SELL
+                            self.state['stage'] = 'BUY_FILLED'
+                            self.state['current_position'] = {
+                                'market_id': market_id,
+                                'token_id': pos.get('token_id', ''),
+                                'market_title': pos.get('title', f"Recovered market #{market_id}"),
+                                'filled_amount': shares,
+                                'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
+                                'filled_usdt': shares * pos.get('avg_price', 0.01),
+                                'fill_timestamp': get_timestamp()
+                            }
+                            self.state_manager.save_state(self.state)
+                            
+                            # Change stage to BUY_FILLED for this execution
+                            stage = 'BUY_FILLED'
+                            logger.info("✅ State recovered - will execute BUY_FILLED handler")
+                            break
+                            
+            except Exception as e:
+                logger.debug(f"Pre-stage check failed (non-critical): {e}")
+        
         handlers = {
             'IDLE': self._handle_idle,
             'SCANNING': self._handle_scanning,
@@ -245,6 +298,42 @@ class AutonomousBot:
         """
         logger.info("🔍 SCANNING - Finding best market...")
         
+        # SELF-HEALING: Check for orphaned active orders before scanning
+        logger.info("🔍 Checking for existing active orders...")
+        try:
+            # Query all pending orders from API
+            # Note: This requires adding get_pending_orders() method to api_client.py
+            # For now, we'll check positions and orders via existing methods
+            
+            # Check if we have any active positions with tokens (indicating partial fill)
+            positions = self.client.get_positions()
+            for pos in positions:
+                market_id = pos.get('market_id')
+                shares = float(pos.get('shares_owned', 0))
+                
+                if shares >= 1.0:  # Significant position exists
+                    logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} tokens")
+                    logger.warning(f"   This may be from previous incomplete cycle")
+                    logger.info(f"🔄 Recovering to SELL stage...")
+                    
+                    # Recover state as if we're ready to SELL
+                    self.state['stage'] = 'BUY_FILLED'
+                    self.state['current_position'] = {
+                        'market_id': market_id,
+                        'token_id': pos.get('token_id', ''),  # Need to extract from position
+                        'market_title': f"Recovered market #{market_id}",
+                        'filled_amount': shares,
+                        'avg_fill_price': 0.01,  # Fallback - will be recalculated if needed
+                        'filled_usdt': shares * 0.01,
+                        'fill_timestamp': get_timestamp()
+                    }
+                    self.state_manager.save_state(self.state)
+                    return True
+                    
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check for existing orders: {e}")
+            logger.info("   Proceeding with normal scanning")
+        
         try:
             # Load bonus markets if configured
             bonus_file = self.config.get('BONUS_MARKETS_FILE')
@@ -291,6 +380,20 @@ class AutonomousBot:
             except InsufficientCapitalError as e:
                 logger.error(f"Insufficient capital: {e}")
                 logger.info("Bot will exit - please add funds")
+                
+                # CRITICAL: If we have current_position with order_id, cancel it
+                # (This handles case where order was placed BEFORE capital check failed)
+                if 'current_position' in self.state and 'order_id' in self.state['current_position']:
+                    orphaned_order_id = self.state['current_position']['order_id']
+                    logger.warning(f"⚠️ Found orphaned order from previous attempt: {orphaned_order_id}")
+                    logger.info(f"🧹 Cancelling orphaned order to prevent duplicate positions...")
+                    try:
+                        self.client.cancel_order(orphaned_order_id)
+                        logger.info(f"✅ Cancelled orphaned order")
+                    except Exception as cancel_err:
+                        logger.warning(f"⚠️ Could not cancel orphaned order: {cancel_err}")
+                
+                self.state_manager.reset_position(self.state)
                 self.state['stage'] = 'IDLE'
                 self.state_manager.save_state(self.state)
                 return False
@@ -320,25 +423,82 @@ class AutonomousBot:
             
             if not result:
                 logger.error("Failed to place BUY order")
+                
+                # CRITICAL: Check if failure was due to capital issues after placement attempt
+                # In this case, order might have been placed but we got error response
+                logger.info("🔍 Verifying if order was actually placed despite error...")
+                
+                # Wait 2 seconds for API to update
+                time.sleep(2)
+                
+                # Check for recent orders on this market
+                positions = self.client.get_positions(market_id=selected.market_id)
+                if positions:
+                    logger.warning("⚠️ Position exists despite place_buy error!")
+                    logger.warning("   Order may have been placed - checking...")
+                    
+                    # Try to recover by checking if we have tokens
+                    shares = float(positions[0].get('shares_owned', 0))
+                    if shares > 0:
+                        logger.info(f"✅ Found {shares:.4f} tokens - order WAS placed")
+                        logger.info(f"🔄 Recovering to BUY_FILLED stage...")
+                        
+                        # Build minimal position state
+                        self.state['stage'] = 'BUY_FILLED'
+                        self.state['current_position'] = {
+                            'market_id': selected.market_id,
+                            'token_id': selected.yes_token_id,
+                            'market_title': selected.title,
+                            'filled_amount': shares,
+                            'avg_fill_price': buy_price,
+                            'filled_usdt': shares * buy_price,
+                            'fill_timestamp': get_timestamp()
+                        }
+                        self.state_manager.save_state(self.state)
+                        return True
+                
+                # No position found - order truly failed
                 return False
             
-            order_id = result.get('order_id', result.get('orderId', 'unknown'))
-                 
-            # Update state
+            # ================================================================
+            # CRITICAL: Save state IMMEDIATELY after successful place_buy()
+            # This prevents lost orders if any error occurs below
+            # ================================================================
+            
+            logger.info(f"✅ BUY order placed successfully")
+            logger.info(f"💾 Saving state IMMEDIATELY to prevent order loss...")
+            
+            # Extract order_id with defensive error handling
+            order_id = None
+            try:
+                order_id = result.get('order_id', result.get('orderId', None))
+                if not order_id:
+                    logger.warning(f"⚠️ Could not extract order_id from result")
+                    logger.warning(f"   Result keys: {list(result.keys()) if result else 'None'}")
+                    order_id = 'unknown'
+            except Exception as e:
+                logger.warning(f"⚠️ Error extracting order_id: {e}")
+                order_id = 'unknown'
+            
+            # Update state - MINIMAL data first, details can be added later
             self.state['stage'] = 'BUY_PLACED'
             self.state['current_position'] = {
                 'market_id': selected.market_id,
                 'token_id': selected.yes_token_id,
                 'market_title': selected.title,
                 'is_bonus': selected.is_bonus,
-                'order_id': order_id,
+                'order_id': str(order_id),
                 'side': 'BUY',
                 'price': buy_price,
                 'amount_usdt': position_size,
                 'placed_at': get_timestamp()
             }
             
+            # SAVE IMMEDIATELY - before any logging or validation
             self.state_manager.save_state(self.state)
+            
+            logger.info(f"✅ State saved with order_id: {order_id}")
+            logger.info(f"📍 Next stage: BUY_PLACED → BUY_MONITORING")
             
             return True
             
