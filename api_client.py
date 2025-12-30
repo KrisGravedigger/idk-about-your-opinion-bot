@@ -565,11 +565,28 @@ class OpinionClient:
             order_id: The order ID
             
         Returns:
-            Status string (e.g., 'pending', 'filled', 'cancelled') or None
+            Status string (e.g., 'PENDING', 'FILLED', 'CANCELLED') or None
+            
+        Note:
+            API returns status as numeric enum:
+            0 = PENDING
+            1 = FILLED
+            2 = PARTIALLY_FILLED
+            3 = CANCELLED
         """
+        # Status code to string mapping
+        STATUS_MAP = {
+            0: 'PENDING',
+            1: 'FILLED',
+            2: 'PARTIALLY_FILLED',
+            3: 'CANCELLED'
+        }
+        
         order = self.get_order(order_id)
         if order:
-            return order.get('status')
+            status_code = order.get('status')
+            if status_code is not None:
+                return STATUS_MAP.get(status_code, f'UNKNOWN({status_code})')
         return None
     
     def cancel_order(self, order_id: str) -> bool:

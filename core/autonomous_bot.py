@@ -379,7 +379,10 @@ class AutonomousBot:
             order_status = self.client.get_order_status(order_id)
             
             # If order doesn't exist or is in terminal state (can't be monitored)
-            if not order_status or order_status in ['cancelled', 'canceled', 'expired', 'filled']:
+            # Status codes: PENDING, FILLED, PARTIALLY_FILLED, CANCELLED
+            terminal_statuses = ['CANCELLED', 'FILLED']
+            
+            if not order_status or order_status in terminal_statuses:
                 if order_status:
                     logger.warning(f"⚠️ Order status is '{order_status}' - order is not active")
                 else:
@@ -397,8 +400,8 @@ class AutonomousBot:
                 if tokens >= 1.0:  # Have significant position
                     logger.info(f"✅ Found position with {tokens:.4f} tokens")
                     
-                    if order_status == 'filled':
-                        logger.info(f"   Order was filled - switching to BUY_FILLED")
+                    if order_status in ['FILLED', 'PARTIALLY_FILLED']:
+                        logger.info(f"   Order was {order_status} - switching to BUY_FILLED")
                     else:
                         logger.info(f"   Order was {order_status or 'not found'} but position exists")
                         logger.info(f"   This may be partial fill - switching to SELL")
@@ -727,7 +730,10 @@ class AutonomousBot:
             order_status = self.client.get_order_status(sell_order_id)
             
             # If order doesn't exist or is in terminal state
-            if not order_status or order_status in ['cancelled', 'canceled', 'expired', 'filled']:
+            # Status codes: PENDING, FILLED, PARTIALLY_FILLED, CANCELLED
+            terminal_statuses = ['CANCELLED', 'FILLED', 'PARTIALLY_FILLED']
+            
+            if not order_status or order_status in terminal_statuses:
                 if order_status:
                     logger.warning(f"⚠️ SELL order status is '{order_status}' - order is not active")
                 else:
@@ -745,8 +751,8 @@ class AutonomousBot:
                 if tokens >= 1.0:  # Still have tokens
                     logger.info(f"✅ Still have {tokens:.4f} tokens")
                     
-                    if order_status == 'filled':
-                        logger.info(f"   SELL order was filled but we still have tokens?")
+                    if order_status in ['FILLED', 'PARTIALLY_FILLED']:
+                        logger.info(f"   SELL order was {order_status} but we still have tokens?")
                         logger.info(f"   This is unusual - going back to BUY_FILLED")
                     else:
                         logger.info(f"   SELL order was {order_status or 'not found'} but tokens remain")
@@ -768,8 +774,8 @@ class AutonomousBot:
                 else:
                     logger.warning(f"⚠️ No tokens found (only {tokens:.4f})")
                     
-                    if order_status == 'filled':
-                        logger.info("   SELL order was filled successfully")
+                    if order_status in ['FILLED', 'PARTIALLY_FILLED']:
+                        logger.info(f"   SELL order was {order_status} successfully")
                         logger.info("   Marking as COMPLETED")
                         self.state['stage'] = 'COMPLETED'
                         self.state_manager.save_state(self.state)
