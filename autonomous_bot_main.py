@@ -366,10 +366,6 @@ def main():
                         logger.info("💡 Bot will SKIP balance check and proceed to close position")
                         logger.info("")
                         
-                        # CRITICAL: Load bot.state before modifying
-                        if bot.state is None:
-                            bot.state = bot.state_manager.load_state()
-                        
                         # Force state to BUY_FILLED so bot will place SELL
                         bot.state['stage'] = 'BUY_FILLED'
                         bot.state['current_position'] = {
@@ -417,19 +413,63 @@ def main():
                                     logger.warning("   ⚠️  FOUND: Frozen balance indicates PENDING order!")
                                     logger.info("")
                                     logger.info("🔄 AUTO-RECOVERY:")
-                                    logger.info("   You have an active PENDING order waiting to fill")
-                                    logger.info("   Bot will monitor this order until it fills or times out")
-                                    logger.info("")
+                                    # ...
                                     
-                                    # Find position with matching frozen amount
+                                    # CRITICAL FIX: Find the market with PENDING order, not just any position
+                                    # Strategy: Query pending orders across ALL markets, find one matching frozen amount
                                     recovered_market = None
-                                    for pos in positions:
-                                        market_id = pos.get('market_id')
-                                        # Match based on market_id from positions list
-                                        # We'll recover to BUY_MONITORING to wait for fill
-                                        if market_id:
-                                            recovered_market = pos
-                                            break
+                                    
+                                    try:
+                                        logger.info("   🔍 Searching for pending order matching frozen balance...")
+                                        
+                                        # Get ALL pending orders (no market filter)
+                                        all_pending_orders = client.get_my_orders(
+                                            market_id=0,  # 0 = all markets
+                                            status='PENDING',
+                                            limit=20
+                                        )
+                                        
+                                        logger.info(f"   Found {len(all_pending_orders)} pending orders across all markets")
+                                        
+                                        # Find order with amount close to frozen balance
+                                        for order in all_pending_orders:
+                                            order_market_id = order.get('market_id')
+                                            order_amount = float(order.get('order_amount', 0) or 0)
+                                            
+                                            # Match if amounts are close (within $0.50)
+                                            if abs(order_amount - frozen_balance) < 0.50:
+                                                logger.info(f"   ✅ Found matching order:")
+                                                logger.info(f"      Market: #{order_market_id}")
+                                                logger.info(f"      Order amount: ${order_amount:.2f}")
+                                                logger.info(f"      Frozen balance: ${frozen_balance:.2f}")
+                                                
+                                                # Find corresponding position (if exists)
+                                                for pos in positions:
+                                                    if pos.get('market_id') == order_market_id:
+                                                        recovered_market = pos
+                                                        break
+                                                
+                                                # If no position found, create minimal one
+                                                if not recovered_market:
+                                                    recovered_market = {
+                                                        'market_id': order_market_id,
+                                                        'token_id': order.get('outcome_side', 'YES'),  # Fallback
+                                                        'title': order.get('market_title', f"Market #{order_market_id}")
+                                                    }
+                                                
+                                                break
+                                        
+                                        if not recovered_market:
+                                            logger.warning("   ⚠️ Could not find order matching frozen balance")
+                                            logger.info("   Using first position as fallback")
+                                            if positions:
+                                                recovered_market = positions[0]
+                                                
+                                    except Exception as e:
+                                        logger.warning(f"   Error searching for pending order: {e}")
+                                        logger.info("   Using first position as fallback")
+                                        if positions:
+                                            recovered_market = positions[0]
                                     
                                     if not recovered_market and positions:
                                         # Fallback: use first position
@@ -443,11 +483,6 @@ def main():
                                         logger.info("")
                                         logger.info("💡 Bot will SKIP balance check and monitor order")
                                         logger.info("")
-                                        
-                                        # CRITICAL: Load bot.state before modifying
-                                        # (bot.state is None until bot.run() is called)
-                                        if bot.state is None:
-                                            bot.state = bot.state_manager.load_state()
                                         
                                         # Force state to BUY_PLACED (order exists but we don't have order_id)
                                         # Bot will transition to BUY_MONITORING and try to recover order_id there

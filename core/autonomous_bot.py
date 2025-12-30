@@ -550,6 +550,19 @@ class AutonomousBot:
                     status='PENDING',
                     limit=20
                 )
+
+                # 🔍 DEBUG: Log ALL order details
+                logger.info(f"🔍 DEBUG: API returned {len(orders)} orders:")
+                for i, order in enumerate(orders):
+                    logger.info(f"   Order #{i+1}:")
+                    logger.info(f"      order_id: {order.get('order_id', 'N/A')}")
+                    logger.info(f"      status: {order.get('status', 'N/A')} ({order.get('status_str', 'N/A')})")
+                    logger.info(f"      side: {order.get('side', 'N/A')}")
+                    logger.info(f"      price: {order.get('price', 'N/A')}")
+                    logger.info(f"      maker_amount: {order.get('maker_amount', 'N/A')}")
+                    logger.info(f"      amount: {order.get('amount', 'N/A')}")
+                    logger.info(f"      filled_amount: {order.get('filled_amount', 'N/A')}")
+                    logger.info(f"      ALL KEYS: {list(order.keys())}")
                 
                 if orders:
                     # Found pending order(s) on this market
