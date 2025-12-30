@@ -633,12 +633,12 @@ class OpinionClient:
             List of order dictionaries
             
         Note:
-            Status mapping:
-            - 'PENDING' → API uses "open"
-            - 'FILLED' → API uses "filled"
-            - 'CANCELLED' → API uses "cancelled"
-            - 'PARTIALLY_FILLED' → API uses "open" (same as pending)
-            - None → all statuses
+            Status codes (API uses integers):
+            0 = PENDING
+            1 = FILLED
+            2 = PARTIALLY_FILLED
+            3 = CANCELLED
+            "" (empty string) = all statuses
             
         Example:
             >>> client = OpinionClient()
@@ -647,24 +647,32 @@ class OpinionClient:
             >>> if orders:
             >>>     order_id = orders[0]['order_id']
         """
-        # Map our status strings to API status strings
-        STATUS_API_MAP = {
-            'PENDING': 'open',
-            'FILLED': 'filled',
-            'CANCELLED': 'cancelled',
-            'PARTIALLY_FILLED': 'open'  # Partially filled orders are still "open"
+        # Map our status strings to API status codes (integers)
+        # API expects int, not string like "open"/"filled"
+        STATUS_CODE_MAP = {
+            'PENDING': 0,
+            'FILLED': 1,
+            'PARTIALLY_FILLED': 2,
+            'CANCELLED': 3
         }
         
-        # Convert status to API format
-        api_status = ""
+        # Convert status to API format (int or empty string)
+        api_status = ""  # Default: all statuses
         if status:
-            api_status = STATUS_API_MAP.get(status.upper(), status.lower())
+            status_upper = status.upper()
+            if status_upper in STATUS_CODE_MAP:
+                api_status = STATUS_CODE_MAP[status_upper]
+            else:
+                logger.warning(f"Unknown status '{status}', fetching all orders")
+                api_status = ""
+        
+        logger.debug(f"Fetching orders: market_id={market_id or 0}, status={api_status}, limit={limit}")
         
         try:
             # Call SDK method
             response = self._client.get_my_orders(
                 market_id=market_id or 0,  # 0 = all markets
-                status=api_status,
+                status=api_status,  # Now passing int (0/1/2/3) or "" 
                 limit=min(limit, 20),  # Cap at 20 (API limit)
                 page=1
             )
