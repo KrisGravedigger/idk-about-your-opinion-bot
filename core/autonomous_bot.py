@@ -476,32 +476,16 @@ class AutonomousBot:
                     position['filled_amount'] = filled_amount
                     
                     # ALSO recover avg_fill_price if missing (required by SellMonitor)
+                    # Use BUY order limit price as fallback - close enough for stop-loss
                     if not position.get('avg_fill_price') or position.get('avg_fill_price') == 0:
-                        # Try to get actual fill price from BUY order
-                        buy_order_id = position.get('order_id')
-                        if buy_order_id:
-                            try:
-                                buy_order = self.client.get_order(buy_order_id)
-                                if buy_order:
-                                    # API may return 'price' or 'average_price'
-                                    avg_price = buy_order.get('average_price') or buy_order.get('price', 0)
-                                    if avg_price and avg_price > 0:
-                                        logger.info(f"✅ Recovered avg_fill_price from BUY order API: ${avg_price:.4f}")
-                                        position['avg_fill_price'] = avg_price
-                                    else:
-                                        # Fallback to position price
-                                        fallback_price = position.get('price', 0.01)
-                                        logger.warning(f"⚠️ API returned invalid price, using fallback: ${fallback_price:.4f}")
-                                        position['avg_fill_price'] = fallback_price
-                                else:
-                                    logger.warning(f"⚠️ Could not fetch BUY order, using fallback price")
-                                    position['avg_fill_price'] = position.get('price', 0.01)
-                            except Exception as e:
-                                logger.warning(f"⚠️ Error fetching BUY order: {e}, using fallback")
-                                position['avg_fill_price'] = position.get('price', 0.01)
+                        fallback_price = position.get('price', 0)
+                        if fallback_price > 0:
+                            logger.info(f"✅ Using BUY order price as avg_fill_price: ${fallback_price:.4f}")
+                            logger.info(f"   (This is fallback - normally set by BuyMonitor)")
+                            position['avg_fill_price'] = fallback_price
                         else:
-                            logger.warning(f"⚠️ No BUY order_id found, using position price as fallback")
-                            position['avg_fill_price'] = position.get('price', 0.01)
+                            logger.warning(f"⚠️ No valid price found - using minimal fallback $0.01")
+                            position['avg_fill_price'] = 0.01
                     
                     self.state_manager.save_state(self.state)
                 else:
