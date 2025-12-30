@@ -387,9 +387,91 @@ def main():
                         break
                 
                 if not has_open_position:
-                    logger.info("⚠️  Positions exist but all have < 1.0 shares (dust)")
-                    logger.info("   Ignoring dust - proceeding with normal balance check")
-                    logger.info("")
+                    # None of the positions have significant shares
+                    # But check if we have frozen balance (indicates pending order)
+                    logger.info("⚠️  Positions exist but all have < 1.0 shares")
+                    logger.info("   Checking if any are PENDING orders (not just dust)...")
+                    
+                    try:
+                        balances = client.get_balances()
+                        if not balances or 'tokens' not in balances:
+                            logger.warning("   Could not get balances - treating as dust")
+                            logger.info("")
+                        else:
+                            # Check USDT token for frozen balance
+                            USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955'.lower()
+                            tokens = balances['tokens']
+                            
+                            if USDT_ADDRESS in tokens:
+                                usdt_data = tokens[USDT_ADDRESS]
+                                frozen_str = usdt_data.get('frozen', '0')
+                                frozen_balance = float(frozen_str)
+                                
+                                logger.info(f"   USDT frozen balance: ${frozen_balance:.2f}")
+                                
+                                if frozen_balance >= 1.0:
+                                    logger.warning("   ⚠️  FOUND: Frozen balance indicates PENDING order!")
+                                    logger.info("")
+                                    logger.info("🔄 AUTO-RECOVERY:")
+                                    logger.info("   You have an active PENDING order waiting to fill")
+                                    logger.info("   Bot will monitor this order until it fills or times out")
+                                    logger.info("")
+                                    
+                                    # Find position with matching frozen amount
+                                    recovered_market = None
+                                    for pos in positions:
+                                        market_id = pos.get('market_id')
+                                        # Match based on market_id from positions list
+                                        # We'll recover to BUY_MONITORING to wait for fill
+                                        if market_id:
+                                            recovered_market = pos
+                                            break
+                                    
+                                    if not recovered_market and positions:
+                                        # Fallback: use first position
+                                        recovered_market = positions[0]
+                                    
+                                    if recovered_market:
+                                        market_id = recovered_market.get('market_id')
+                                        
+                                        logger.info(f"   Market: #{market_id}")
+                                        logger.info(f"   Frozen: ${frozen_balance:.2f}")
+                                        logger.info("")
+                                        logger.info("💡 Bot will SKIP balance check and monitor order")
+                                        logger.info("")
+                                        
+                                        # Force state to BUY_PLACED (order exists but we don't have order_id)
+                                        # Bot will transition to BUY_MONITORING and try to recover order_id there
+                                        bot.state['stage'] = 'BUY_PLACED'
+                                        bot.state['current_position'] = {
+                                            'market_id': market_id,
+                                            'token_id': recovered_market.get('token_id', ''),
+                                            'market_title': recovered_market.get('title', f"Recovered market #{market_id}"),
+                                            'order_id': 'unknown',  # Will be resolved in BUY_MONITORING
+                                            'side': 'BUY',
+                                            'price': 0.314,  # Approximate from UI (31.4¢)
+                                            'amount_usdt': frozen_balance,
+                                            'placed_at': get_timestamp()
+                                        }
+                                        bot.state_manager.save_state(bot.state)
+                                        
+                                        logger.info("✅ State recovered and saved")
+                                        logger.info(f"📍 Bot will start in BUY_PLACED → BUY_MONITORING")
+                                        logger.info("")
+                                        
+                                        has_open_position = True
+                                else:
+                                    logger.info("   No significant frozen balance - these are dust/old positions")
+                                    logger.info("")
+                            else:
+                                logger.warning("   USDT token not found in balances")
+                                logger.info("   Treating positions as dust")
+                                logger.info("")
+                                
+                    except Exception as e:
+                        logger.warning(f"   Could not check frozen balance: {e}")
+                        logger.info("   Treating positions as dust")
+                        logger.info("")
             else:
                 logger.info("✅ No orphaned positions found")
                 logger.info("")

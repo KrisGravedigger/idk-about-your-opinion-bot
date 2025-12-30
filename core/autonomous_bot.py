@@ -533,6 +533,57 @@ class AutonomousBot:
         order_id = position['order_id']
         market_id = position['market_id']
         
+        # SELF-HEALING: If order_id is 'unknown', try to find it from frozen balance
+        if order_id == 'unknown':
+            logger.warning("⚠️ order_id is 'unknown' - attempting to recover...")
+            logger.info("   This happens when bot recovered from orphaned PENDING order")
+            logger.info("")
+            
+            # Strategy: Check if position now has shares (order filled while bot was down)
+            try:
+                verified_shares = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side="YES"
+                )
+                tokens = float(verified_shares)
+                
+                if tokens >= 1.0:
+                    logger.info(f"✅ Order already filled! Found {tokens:.4f} tokens")
+                    logger.info("   Skipping monitoring - moving to BUY_FILLED")
+                    
+                    # Update state with filled data
+                    position['filled_amount'] = tokens
+                    position['avg_fill_price'] = position.get('price', 0.01)
+                    position['filled_usdt'] = tokens * position['avg_fill_price']
+                    position['fill_timestamp'] = get_timestamp()
+                    
+                    self.state['stage'] = 'BUY_FILLED'
+                    self.state_manager.save_state(self.state)
+                    return True
+                else:
+                    logger.warning(f"⚠️ Order not filled yet (only {tokens:.4f} tokens)")
+                    logger.warning("   Cannot monitor without order_id")
+                    logger.warning("   Options:")
+                    logger.warning("   1. Wait for order to fill (check UI)")
+                    logger.warning("   2. Cancel order manually and restart bot")
+                    logger.warning("   3. Bot will retry in next cycle")
+                    logger.info("")
+                    logger.info("   Resetting to SCANNING to avoid infinite loop")
+                    
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return True
+                    
+            except Exception as e:
+                logger.error(f"❌ Could not verify position: {e}")
+                logger.info("   Resetting to SCANNING")
+                
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return True
+        
         # SELF-HEALING: Verify order is still active before starting monitor
         logger.info("🔍 Verifying order status before monitoring...")
         try:
