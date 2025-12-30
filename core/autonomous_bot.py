@@ -84,8 +84,9 @@ class AutonomousBot:
         self.order_manager = OrderManager(client)
         self.tracker = PositionTracker()
         
-        # State will be loaded/initialized in run()
-        self.state = None
+        # CHANGED: Load state immediately in constructor
+        # This allows autonomous_bot_main.py to modify state before run()
+        self.state = self.state_manager.load_state()
         
         # Config shortcuts
         self.cycle_delay = config.get('CYCLE_DELAY_SECONDS', 10)
@@ -126,8 +127,10 @@ class AutonomousBot:
         logger.info("")
         
         try:
-            # Load or initialize state
-            self.state = self.state_manager.load_state()
+            # State already loaded in __init__
+            # But reload here to catch any changes made in autonomous_bot_main.py
+            if self.state is None:
+                self.state = self.state_manager.load_state()
             
             cycle_count = 0
             

@@ -366,6 +366,10 @@ def main():
                         logger.info("💡 Bot will SKIP balance check and proceed to close position")
                         logger.info("")
                         
+                        # CRITICAL: Load bot.state before modifying
+                        if bot.state is None:
+                            bot.state = bot.state_manager.load_state()
+                        
                         # Force state to BUY_FILLED so bot will place SELL
                         bot.state['stage'] = 'BUY_FILLED'
                         bot.state['current_position'] = {
@@ -439,6 +443,11 @@ def main():
                                         logger.info("")
                                         logger.info("💡 Bot will SKIP balance check and monitor order")
                                         logger.info("")
+                                        
+                                        # CRITICAL: Load bot.state before modifying
+                                        # (bot.state is None until bot.run() is called)
+                                        if bot.state is None:
+                                            bot.state = bot.state_manager.load_state()
                                         
                                         # Force state to BUY_PLACED (order exists but we don't have order_id)
                                         # Bot will transition to BUY_MONITORING and try to recover order_id there
