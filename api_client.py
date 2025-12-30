@@ -1071,15 +1071,26 @@ class OpinionClient:
             resolved_markets = set()
             
             for pos in positions:
-                market_id = pos.get('market_id')
-                shares = float(pos.get('shares_owned', 0))
+                # pos is already a dict (get_positions() converts Pydantic to dict)
+                # But let's be defensive - handle both dict and Pydantic model
+                if isinstance(pos, dict):
+                    market_id = pos.get('market_id')
+                    shares = float(pos.get('shares_owned', 0))
+                else:
+                    # Pydantic model - use attribute access
+                    market_id = getattr(pos, 'market_id', None)
+                    shares = float(getattr(pos, 'shares_owned', 0))
                 
-                if shares <= 0:
-                    continue  # Skip empty positions
+                if not market_id or shares <= 0:
+                    continue  # Skip invalid or empty positions
                 
                 # Check if market is resolved
-                if self.is_market_resolved(market_id):
-                    resolved_markets.add(market_id)
+                try:
+                    if self.is_market_resolved(market_id):
+                        resolved_markets.add(market_id)
+                except Exception as e:
+                    logger.debug(f"Could not check if market {market_id} is resolved: {e}")
+                    continue
             
             if not resolved_markets:
                 logger.info("✅ No resolved positions to cleanup")
