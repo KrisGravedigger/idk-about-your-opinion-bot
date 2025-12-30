@@ -373,14 +373,18 @@ class AutonomousBot:
         order_id = position['order_id']
         market_id = position['market_id']
         
-        # SELF-HEALING: Verify order still exists before starting monitor
-        # (handles case where order was manually cancelled or market resolved)
+        # SELF-HEALING: Verify order is still active before starting monitor
         logger.info("🔍 Verifying order status before monitoring...")
         try:
-            order_check = self.client.get_order(order_id)
+            order_status = self.client.get_order_status(order_id)
             
-            if not order_check:
-                logger.warning("⚠️ Order not found in API - may have been cancelled")
+            # If order doesn't exist or is in terminal state (can't be monitored)
+            if not order_status or order_status in ['cancelled', 'canceled', 'expired', 'filled']:
+                if order_status:
+                    logger.warning(f"⚠️ Order status is '{order_status}' - order is not active")
+                else:
+                    logger.warning("⚠️ Order not found in API")
+                
                 logger.info("🔄 Checking if position exists (tokens to sell)...")
                 
                 # Check if we have tokens from this position
@@ -392,11 +396,16 @@ class AutonomousBot:
                 
                 if tokens >= 1.0:  # Have significant position
                     logger.info(f"✅ Found position with {tokens:.4f} tokens")
-                    logger.info(f"   Order was cancelled but position exists - switching to SELL")
+                    
+                    if order_status == 'filled':
+                        logger.info(f"   Order was filled - switching to BUY_FILLED")
+                    else:
+                        logger.info(f"   Order was {order_status or 'not found'} but position exists")
+                        logger.info(f"   This may be partial fill - switching to SELL")
                     
                     # Update state as if BUY was filled
                     position['filled_amount'] = tokens
-                    position['avg_fill_price'] = position.get('price', 0.01)  # Use order price as fallback
+                    position['avg_fill_price'] = position.get('price', 0.01)
                     position['filled_usdt'] = tokens * position['avg_fill_price']
                     position['fill_timestamp'] = get_timestamp()
                     
@@ -406,15 +415,19 @@ class AutonomousBot:
                     
                 else:
                     logger.warning(f"⚠️ No significant position found (only {tokens:.4f} tokens)")
+                    logger.info(f"   Order was {order_status or 'not found'} without fill")
                     logger.info("   Resetting to SCANNING for new market")
                     
                     self.state_manager.reset_position(self.state)
                     self.state['stage'] = 'SCANNING'
                     self.state_manager.save_state(self.state)
                     return True
+            
+            # Order exists and is active - proceed with normal monitoring
+            logger.info(f"✅ Order is active (status: {order_status}) - starting monitor")
                     
         except Exception as e:
-            logger.warning(f"⚠️ Could not verify order existence: {e}")
+            logger.warning(f"⚠️ Could not verify order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
         
         # Calculate timeout
@@ -708,13 +721,18 @@ class AutonomousBot:
         sell_order_id = position['sell_order_id']
         market_id = position['market_id']
         
-        # SELF-HEALING: Verify order still exists before starting monitor
+        # SELF-HEALING: Verify order is still active before starting monitor
         logger.info("🔍 Verifying SELL order status before monitoring...")
         try:
-            order_check = self.client.get_order(sell_order_id)
+            order_status = self.client.get_order_status(sell_order_id)
             
-            if not order_check:
-                logger.warning("⚠️ SELL order not found in API - may have been cancelled")
+            # If order doesn't exist or is in terminal state
+            if not order_status or order_status in ['cancelled', 'canceled', 'expired', 'filled']:
+                if order_status:
+                    logger.warning(f"⚠️ SELL order status is '{order_status}' - order is not active")
+                else:
+                    logger.warning("⚠️ SELL order not found in API")
+                
                 logger.info("🔄 Checking if position still exists...")
                 
                 # Check if we still have tokens
@@ -726,8 +744,13 @@ class AutonomousBot:
                 
                 if tokens >= 1.0:  # Still have tokens
                     logger.info(f"✅ Still have {tokens:.4f} tokens")
-                    logger.info(f"   SELL order was cancelled but tokens remain")
-                    logger.info(f"   Going back to BUY_FILLED to place new SELL order")
+                    
+                    if order_status == 'filled':
+                        logger.info(f"   SELL order was filled but we still have tokens?")
+                        logger.info(f"   This is unusual - going back to BUY_FILLED")
+                    else:
+                        logger.info(f"   SELL order was {order_status or 'not found'} but tokens remain")
+                        logger.info(f"   Going back to BUY_FILLED to place new SELL order")
                     
                     # Update filled_amount in case it changed
                     position['filled_amount'] = tokens
@@ -744,17 +767,27 @@ class AutonomousBot:
                     
                 else:
                     logger.warning(f"⚠️ No tokens found (only {tokens:.4f})")
-                    logger.info("   Position may have been sold or redeemed externally")
-                    logger.info("   Marking as COMPLETED and resetting")
                     
-                    # Mark as completed (assume sold externally)
-                    self.state_manager.reset_position(self.state)
-                    self.state['stage'] = 'SCANNING'
-                    self.state_manager.save_state(self.state)
-                    return True
+                    if order_status == 'filled':
+                        logger.info("   SELL order was filled successfully")
+                        logger.info("   Marking as COMPLETED")
+                        self.state['stage'] = 'COMPLETED'
+                        self.state_manager.save_state(self.state)
+                        return True
+                    else:
+                        logger.info(f"   Order was {order_status or 'not found'} and no tokens remain")
+                        logger.info("   Resetting to SCANNING")
+                        
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+            
+            # Order exists and is active - proceed with normal monitoring
+            logger.info(f"✅ SELL order is active (status: {order_status}) - starting monitor")
                     
         except Exception as e:
-            logger.warning(f"⚠️ Could not verify SELL order existence: {e}")
+            logger.warning(f"⚠️ Could not verify SELL order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
         
         # Calculate timeout
