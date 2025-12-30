@@ -536,56 +536,93 @@ class AutonomousBot:
         order_id = position['order_id']
         market_id = position['market_id']
         
-        # SELF-HEALING: If order_id is 'unknown', try to find it from frozen balance
+        # SELF-HEALING: If order_id is 'unknown', find it from API
         if order_id == 'unknown':
-            logger.warning("⚠️ order_id is 'unknown' - attempting to recover...")
+            logger.warning("⚠️ order_id is 'unknown' - attempting to recover from API...")
             logger.info("   This happens when bot recovered from orphaned PENDING order")
             logger.info("")
             
-            # Strategy: Check if position now has shares (order filled while bot was down)
             try:
-                verified_shares = self.client.get_position_shares(
+                # Strategy 1: Find pending order on this market
+                logger.info("🔍 Searching for pending orders on this market...")
+                orders = self.client.get_my_orders(
                     market_id=market_id,
-                    outcome_side="YES"
+                    status='PENDING',
+                    limit=20
                 )
-                tokens = float(verified_shares)
                 
-                if tokens >= 1.0:
-                    logger.info(f"✅ Order already filled! Found {tokens:.4f} tokens")
-                    logger.info("   Skipping monitoring - moving to BUY_FILLED")
+                if orders:
+                    # Found pending order(s) on this market
+                    logger.info(f"✅ Found {len(orders)} pending order(s) on market #{market_id}")
                     
-                    # Update state with filled data
-                    position['filled_amount'] = tokens
-                    position['avg_fill_price'] = position.get('price', 0.01)
-                    position['filled_usdt'] = tokens * position['avg_fill_price']
-                    position['fill_timestamp'] = get_timestamp()
+                    # Use first pending order (should only be one per market)
+                    recovered_order = orders[0]
+                    recovered_order_id = recovered_order.get('order_id')
                     
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state_manager.save_state(self.state)
-                    return True
-                else:
-                    logger.warning(f"⚠️ Order not filled yet (only {tokens:.4f} tokens)")
-                    logger.warning("   Cannot monitor without order_id")
-                    logger.warning("   Options:")
-                    logger.warning("   1. Wait for order to fill (check UI)")
-                    logger.warning("   2. Cancel order manually and restart bot")
-                    logger.warning("   3. Bot will retry in next cycle")
+                    logger.info(f"   Order ID: {recovered_order_id}")
+                    logger.info(f"   Side: {recovered_order.get('side', 'UNKNOWN')}")
+                    logger.info(f"   Price: ${float(recovered_order.get('price', 0)):.4f}")
+                    logger.info(f"   Amount: ${float(recovered_order.get('maker_amount', 0)):.2f}")
                     logger.info("")
-                    logger.info("   Resetting to SCANNING to avoid infinite loop")
                     
-                    self.state_manager.reset_position(self.state)
-                    self.state['stage'] = 'SCANNING'
+                    # Update state with recovered order_id
+                    position['order_id'] = recovered_order_id
                     self.state_manager.save_state(self.state)
-                    return True
                     
+                    logger.info("✅ order_id recovered and saved to state")
+                    logger.info("📍 Continuing with normal BUY monitoring...")
+                    logger.info("")
+                    
+                    # Update local variable for monitoring below
+                    order_id = recovered_order_id
+                    
+                    # Fall through to normal monitoring code below
+                    
+                else:
+                    # No pending orders found - check if already filled
+                    logger.warning("⚠️ No pending orders found on this market")
+                    logger.info("   Checking if order already filled...")
+                    
+                    verified_shares = self.client.get_position_shares(
+                        market_id=market_id,
+                        outcome_side="YES"
+                    )
+                    tokens = float(verified_shares)
+                    
+                    if tokens >= 1.0:
+                        logger.info(f"✅ Order already filled! Found {tokens:.4f} tokens")
+                        logger.info("   Skipping monitoring - moving to BUY_FILLED")
+                        
+                        # Update state with filled data
+                        position['filled_amount'] = tokens
+                        position['avg_fill_price'] = position.get('price', 0.01)
+                        position['filled_usdt'] = tokens * position['avg_fill_price']
+                        position['fill_timestamp'] = get_timestamp()
+                        
+                        self.state['stage'] = 'BUY_FILLED'
+                        self.state_manager.save_state(self.state)
+                        return True
+                    else:
+                        logger.warning(f"⚠️ No pending order AND no filled position")
+                        logger.warning(f"   Order may have been cancelled or doesn't exist")
+                        logger.info("   Resetting to SCANNING to find new market")
+                        
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+                        
             except Exception as e:
-                logger.error(f"❌ Could not verify position: {e}")
+                logger.error(f"❌ Could not recover order_id: {e}")
                 logger.info("   Resetting to SCANNING")
                 
                 self.state_manager.reset_position(self.state)
                 self.state['stage'] = 'SCANNING'
                 self.state_manager.save_state(self.state)
                 return True
+        
+        # CRITICAL: If we recovered order_id above, this check now passes
+        # and we continue with normal monitoring
         
         # SELF-HEALING: Verify order is still active before starting monitor
         logger.info("🔍 Verifying order status before monitoring...")

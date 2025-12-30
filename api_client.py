@@ -614,6 +614,103 @@ class OpinionClient:
         except Exception as e:
             logger.error(f"Error cancelling order {order_id}: {e}")
             return False
+
+    def get_my_orders(
+        self,
+        market_id: Optional[int] = None,
+        status: Optional[str] = None,
+        limit: int = 20
+    ) -> list[dict]:
+        """
+        Get all orders for current user.
+        
+        Args:
+            market_id: Optional filter by market (None = all markets)
+            status: Optional filter by status ('PENDING', 'FILLED', 'CANCELLED', 'PARTIALLY_FILLED')
+            limit: Number of orders to return per page (max 20, default 20)
+            
+        Returns:
+            List of order dictionaries
+            
+        Note:
+            Status mapping:
+            - 'PENDING' → API uses "open"
+            - 'FILLED' → API uses "filled"
+            - 'CANCELLED' → API uses "cancelled"
+            - 'PARTIALLY_FILLED' → API uses "open" (same as pending)
+            - None → all statuses
+            
+        Example:
+            >>> client = OpinionClient()
+            >>> # Get all pending orders on market 1546
+            >>> orders = client.get_my_orders(market_id=1546, status='PENDING')
+            >>> if orders:
+            >>>     order_id = orders[0]['order_id']
+        """
+        # Map our status strings to API status strings
+        STATUS_API_MAP = {
+            'PENDING': 'open',
+            'FILLED': 'filled',
+            'CANCELLED': 'cancelled',
+            'PARTIALLY_FILLED': 'open'  # Partially filled orders are still "open"
+        }
+        
+        # Convert status to API format
+        api_status = ""
+        if status:
+            api_status = STATUS_API_MAP.get(status.upper(), status.lower())
+        
+        try:
+            # Call SDK method
+            response = self._client.get_my_orders(
+                market_id=market_id or 0,  # 0 = all markets
+                status=api_status,
+                limit=min(limit, 20),  # Cap at 20 (API limit)
+                page=1
+            )
+            
+            if response.errno != 0:
+                logger.error(f"API error fetching orders: {response.errmsg}")
+                return []
+            
+            # Extract orders from response
+            if not response.result or not hasattr(response.result, 'list'):
+                logger.debug("No orders in response")
+                return []
+            
+            orders = response.result.list
+            
+            # Convert Pydantic models to dicts
+            converted_orders = []
+            for order in orders:
+                if hasattr(order, 'model_dump'):
+                    order_dict = order.model_dump()
+                elif hasattr(order, 'dict'):
+                    order_dict = order.dict()
+                elif isinstance(order, dict):
+                    order_dict = order
+                else:
+                    continue
+                
+                # Convert numeric status to string for consistency
+                status_code = order_dict.get('status')
+                if status_code is not None:
+                    STATUS_MAP = {
+                        0: 'PENDING',
+                        1: 'FILLED',
+                        2: 'PARTIALLY_FILLED',
+                        3: 'CANCELLED'
+                    }
+                    order_dict['status_str'] = STATUS_MAP.get(status_code, f'UNKNOWN({status_code})')
+                
+                converted_orders.append(order_dict)
+            
+            logger.debug(f"Fetched {len(converted_orders)} orders")
+            return converted_orders
+            
+        except Exception as e:
+            logger.error(f"Error fetching orders: {e}")
+            return []
     
     # =========================================================================
     # BALANCE METHODS
