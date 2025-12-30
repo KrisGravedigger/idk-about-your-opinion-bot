@@ -555,8 +555,23 @@ class AutonomousBot:
                     # Found pending order(s) on this market
                     logger.info(f"✅ Found {len(orders)} pending order(s) on market #{market_id}")
                     
-                    # Use first pending order (should only be one per market)
-                    recovered_order = orders[0]
+                    # Find order with non-zero amount (skip dust/old orders)
+                    recovered_order = None
+                    for order in orders:
+                        # Check maker_amount field (could be in different fields depending on API response)
+                        amount = float(order.get('maker_amount', 0) or order.get('amount', 0) or order.get('maker_amount_in_quote_token', 0))
+                        
+                        if amount >= 0.10:  # Minimum meaningful order size
+                            recovered_order = order
+                            logger.info(f"   Selected order with amount: ${amount:.2f}")
+                            break
+                    
+                    if not recovered_order:
+                        logger.warning(f"⚠️ All {len(orders)} pending orders are dust (amount < $0.10)")
+                        logger.info("   No real order to recover - checking if position exists...")
+                        # Kod sprawdzający position (jak już jest poniżej)
+                        # ...
+                        return True
                     recovered_order_id = recovered_order.get('order_id')
                     
                     logger.info(f"   Order ID: {recovered_order_id}")
