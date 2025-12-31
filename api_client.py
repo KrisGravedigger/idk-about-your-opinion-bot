@@ -621,22 +621,22 @@ class OpinionClient:
         status: Optional[str] = None,
         limit: int = 20
     ) -> list[dict]:
-        # Map our status strings to API status strings
-        # API expects STRING: "open", "filled", "cancelled", or ""
-        STATUS_MAP = {
-            'PENDING': 'open',
-            'OPEN': 'open',
-            'FILLED': 'filled',
-            'PARTIALLY_FILLED': 'filled',
-            'CANCELLED': 'cancelled'
+        # Map our status strings to API status codes (integers)
+        # Despite what docs say, API backend expects INT, not string!
+        STATUS_CODE_MAP = {
+            'PENDING': 0,
+            'OPEN': 0,
+            'FILLED': 1,
+            'PARTIALLY_FILLED': 2,
+            'CANCELLED': 3
         }
-        
-        # Convert status to API format (string)
+
+        # Convert status to API format (int or empty string)
         api_status = ""  # Default: all statuses
         if status:
             status_upper = status.upper()
-            if status_upper in STATUS_MAP:
-                api_status = STATUS_MAP[status_upper]
+            if status_upper in STATUS_CODE_MAP:
+                api_status = STATUS_CODE_MAP[status_upper]
             else:
                 logger.warning(f"Unknown status '{status}', fetching all orders")
                 api_status = ""
@@ -646,9 +646,9 @@ class OpinionClient:
         try:
             # Call SDK method
             response = self._client.get_my_orders(
-                market_id=market_id or 0,  # 0 = all markets
-                status=api_status if api_status == "" else int(api_status),  # ← CAST to int!
-                limit=min(limit, 20),  # Cap at 20 (API limit)
+                market_id=market_id or 0,
+                status=api_status,  # ← Już jest int albo ""
+                limit=min(limit, 20),
                 page=1
             )
             
