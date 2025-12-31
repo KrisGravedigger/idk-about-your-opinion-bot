@@ -425,7 +425,7 @@ def main():
                                         # Get ALL pending orders (no market filter)
                                         all_pending_orders = client.get_my_orders(
                                             market_id=0,
-                                            status='OPEN',  # ✅ lub 'PENDING' (oba teraz działają po naprawie api_client)
+                                            status='FILLED', #(SIC!)
                                             limit=20
                                         )
                                         
@@ -438,6 +438,8 @@ def main():
                                             
                                             # Match if amounts are close (within $0.50)
                                             if abs(order_amount - frozen_balance) < 0.50:
+                                                order_filled = float(order.get('filled_amount', 0) or 0)
+                                                order_status = order.get('status_str', 'UNKNOWN')
                                                 logger.info(f"   ✅ Found matching order:")
                                                 logger.info(f"      Market: #{order_market_id}")
                                                 logger.info(f"      Order amount: ${order_amount:.2f}")

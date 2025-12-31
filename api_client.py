@@ -647,7 +647,7 @@ class OpinionClient:
             # Call SDK method
             response = self._client.get_my_orders(
                 market_id=market_id or 0,  # 0 = all markets
-                status=api_status,  # Now passing int (0/1/2/3) or "" 
+                status=api_status if api_status == "" else int(api_status),  # ← CAST to int!
                 limit=min(limit, 20),  # Cap at 20 (API limit)
                 page=1
             )
