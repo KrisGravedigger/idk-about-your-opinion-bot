@@ -621,17 +621,17 @@ class OpinionClient:
         status: Optional[str] = None,
         limit: int = 20
     ) -> list[dict]:
-        # Map our status strings to API status codes (integers)
-        # Despite what docs say, API backend expects INT, not string!
+        # Map our status strings to API status codes (as STRINGS!)
+        # SDK expects string representation of numbers: "0", "1", "2", "3"
         STATUS_CODE_MAP = {
-            'PENDING': 0,
-            'OPEN': 0,
-            'FILLED': 1,
-            'PARTIALLY_FILLED': 2,
-            'CANCELLED': 3
+            'PENDING': "0",
+            'OPEN': "0",
+            'FILLED': "1",
+            'PARTIALLY_FILLED': "2",
+            'CANCELLED': "3"
         }
 
-        # Convert status to API format (int or empty string)
+        # Convert status to API format (string number or empty string)
         api_status = ""  # Default: all statuses
         if status:
             status_upper = status.upper()
@@ -640,6 +640,8 @@ class OpinionClient:
             else:
                 logger.warning(f"Unknown status '{status}', fetching all orders")
                 api_status = ""
+                
+        logger.debug(f"Fetching orders: market_id={market_id or 0}, status='{api_status}', limit={limit}")
         
         logger.debug(f"Fetching orders: market_id={market_id or 0}, status='{api_status}', limit={limit}")
         
