@@ -361,7 +361,6 @@ def main():
                         logger.info(f"🔄 AUTO-RECOVERY:")
                         logger.info(f"   Market: #{market_id}")
                         logger.info(f"   Shares: {shares:.4f}")
-                        logger.info(f"   Action: Will place SELL to close position")
                         logger.info("")
                         
                         # Get market details to find token_id
@@ -385,21 +384,67 @@ def main():
                             logger.warning(f"   ⚠️ Error fetching market: {e}")
                             token_id = ''
                         
+                        # Check if SELL order already exists
+                        logger.info("   🔍 Checking if SELL order already exists...")
+                        existing_sell_order = None
+                        try:
+                            orders = client.get_my_orders(
+                                market_id=market_id,
+                                status='FILLED',
+                                limit=20
+                            )
+                            
+                            for order in orders:
+                                order_side = order.get('side', -1)
+                                filled_amount = float(order.get('filled_amount', 0) or 0)
+                                order_amount = float(order.get('order_amount', 0) or 0)
+                                
+                                # Side: 1=BUY, 2=SELL
+                                if order_side == 2 and filled_amount < order_amount:
+                                    existing_sell_order = order
+                                    logger.info(f"   ✅ Found existing SELL order: {order.get('order_id')[:40]}...")
+                                    logger.info(f"      Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
+                                    break
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ Could not check for existing orders: {e}")
+                        
                         logger.info("")
-                        logger.info("💡 Bot will SKIP balance check and proceed to close position")
+                        logger.info("💡 Bot will SKIP balance check and monitor position")
                         logger.info("")
                         
-                        # Force state to BUY_FILLED so bot will place SELL
-                        bot.state['stage'] = 'BUY_FILLED'
-                        bot.state['current_position'] = {
-                            'market_id': market_id,
-                            'token_id': token_id,  # ← FIXED!
-                            'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
-                            'filled_amount': shares,
-                            'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
-                            'filled_usdt': shares * pos.get('avg_price', 0.01),
-                            'fill_timestamp': get_timestamp()
-                        }
+                        # CRITICAL: Load bot.state before modifying
+                        if bot.state is None:
+                            bot.state = bot.state_manager.load_state()
+                        
+                        # If SELL order exists, go to SELL_MONITORING
+                        # Otherwise, go to BUY_FILLED to place new SELL
+                        if existing_sell_order:
+                            logger.info(f"   Action: Will MONITOR existing SELL order")
+                            bot.state['stage'] = 'SELL_PLACED'
+                            bot.state['current_position'] = {
+                                'market_id': market_id,
+                                'token_id': token_id,
+                                'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
+                                'filled_amount': shares,
+                                'avg_fill_price': 0.31,
+                                'filled_usdt': shares * 0.31,
+                                'fill_timestamp': get_timestamp(),
+                                'sell_order_id': existing_sell_order.get('order_id'),
+                                'sell_price': float(existing_sell_order.get('price', 0)),
+                                'sell_placed_at': get_timestamp()
+                            }
+                        else:
+                            logger.info(f"   Action: Will place NEW SELL order")
+                            bot.state['stage'] = 'BUY_FILLED'
+                            bot.state['current_position'] = {
+                                'market_id': market_id,
+                                'token_id': token_id,
+                                'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
+                                'filled_amount': shares,
+                                'avg_fill_price': pos.get('avg_price', 0.01),
+                                'filled_usdt': shares * pos.get('avg_price', 0.01),
+                                'fill_timestamp': get_timestamp()
+                            }
                         bot.state_manager.save_state(bot.state)
                         
                         logger.info("✅ State recovered and saved")
