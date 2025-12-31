@@ -369,8 +369,14 @@ def main():
                         try:
                             market_data = client.get_market(market_id)
                             if market_data:
-                                # Assume YES side (most common)
-                                token_id = market_data.get('yes_token_id', '')
+                                # market_data is Pydantic object, use attribute access
+                                token_id = getattr(market_data, 'yes_token_id', '')
+                                if not token_id:
+                                    # Try dict access as fallback
+                                    try:
+                                        token_id = market_data['yes_token_id'] if isinstance(market_data, dict) else ''
+                                    except:
+                                        token_id = ''
                                 logger.info(f"   ✅ Found token_id: {token_id[:40]}...")
                             else:
                                 logger.warning(f"   ⚠️ Could not fetch market data")
@@ -388,7 +394,7 @@ def main():
                         bot.state['current_position'] = {
                             'market_id': market_id,
                             'token_id': token_id,  # ← FIXED!
-                            'market_title': market_data.get('title', f"Recovered market #{market_id}") if market_data else f"Market #{market_id}",
+                            'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
                             'filled_amount': shares,
                             'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
                             'filled_usdt': shares * pos.get('avg_price', 0.01),
@@ -543,6 +549,12 @@ def main():
             logger.warning(f"⚠️ Could not check for orphaned positions: {e}")
             logger.info("   Proceeding with normal startup")
             logger.info("")
+            
+            # Check if we at least set has_open_position before exception
+            if bot.state and bot.state.get('stage') not in ['IDLE', 'SCANNING', 'COMPLETED']:
+                has_open_position = True
+                logger.info("   But state was already recovered - will skip balance check")
+                logger.info("")
     
     # =========================================================================
     # SKIP BALANCE CHECK IF RECOVERING POSITION
