@@ -424,8 +424,8 @@ def main():
                                         
                                         # Get ALL pending orders (no market filter)
                                         all_pending_orders = client.get_my_orders(
-                                            market_id=0,  # 0 = all markets
-                                            status='PENDING',
+                                            market_id=0,
+                                            status='OPEN',  # ✅ lub 'PENDING' (oba teraz działają po naprawie api_client)
                                             limit=20
                                         )
                                         

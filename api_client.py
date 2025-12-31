@@ -621,52 +621,27 @@ class OpinionClient:
         status: Optional[str] = None,
         limit: int = 20
     ) -> list[dict]:
-        """
-        Get all orders for current user.
-        
-        Args:
-            market_id: Optional filter by market (None = all markets)
-            status: Optional filter by status ('PENDING', 'FILLED', 'CANCELLED', 'PARTIALLY_FILLED')
-            limit: Number of orders to return per page (max 20, default 20)
-            
-        Returns:
-            List of order dictionaries
-            
-        Note:
-            Status codes (API uses integers):
-            0 = PENDING
-            1 = FILLED
-            2 = PARTIALLY_FILLED
-            3 = CANCELLED
-            "" (empty string) = all statuses
-            
-        Example:
-            >>> client = OpinionClient()
-            >>> # Get all pending orders on market 1546
-            >>> orders = client.get_my_orders(market_id=1546, status='PENDING')
-            >>> if orders:
-            >>>     order_id = orders[0]['order_id']
-        """
-        # Map our status strings to API status codes (integers)
-        # API expects int, not string like "open"/"filled"
-        STATUS_CODE_MAP = {
-            'PENDING': 0,
-            'FILLED': 1,
-            'PARTIALLY_FILLED': 2,
-            'CANCELLED': 3
+        # Map our status strings to API status strings
+        # API expects STRING: "open", "filled", "cancelled", or ""
+        STATUS_MAP = {
+            'PENDING': 'open',
+            'OPEN': 'open',
+            'FILLED': 'filled',
+            'PARTIALLY_FILLED': 'filled',
+            'CANCELLED': 'cancelled'
         }
         
-        # Convert status to API format (int or empty string)
+        # Convert status to API format (string)
         api_status = ""  # Default: all statuses
         if status:
             status_upper = status.upper()
-            if status_upper in STATUS_CODE_MAP:
-                api_status = STATUS_CODE_MAP[status_upper]
+            if status_upper in STATUS_MAP:
+                api_status = STATUS_MAP[status_upper]
             else:
                 logger.warning(f"Unknown status '{status}', fetching all orders")
                 api_status = ""
         
-        logger.debug(f"Fetching orders: market_id={market_id or 0}, status={api_status}, limit={limit}")
+        logger.debug(f"Fetching orders: market_id={market_id or 0}, status='{api_status}', limit={limit}")
         
         try:
             # Call SDK method

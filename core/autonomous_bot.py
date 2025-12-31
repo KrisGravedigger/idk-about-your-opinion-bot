@@ -547,7 +547,14 @@ class AutonomousBot:
                 logger.info("🔍 Searching for pending orders on this market...")
                 orders = self.client.get_my_orders(
                     market_id=market_id,
-                    status='PENDING',
+                    status='PENDING',  # ✅ Teraz będzie zamienione na "open" w api_client.py
+                    limit=20
+                )
+
+                # LUB bezpośrednio:
+                orders = self.client.get_my_orders(
+                    market_id=market_id,
+                    status='OPEN',  # ✅ Explicite używamy 'OPEN' co mapuje na "open"
                     limit=20
                 )
 
