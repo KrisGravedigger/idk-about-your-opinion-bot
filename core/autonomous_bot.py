@@ -543,18 +543,11 @@ class AutonomousBot:
             logger.info("")
             
             try:
-                # Strategy 1: Find pending order on this market
-                logger.info("🔍 Searching for pending orders on this market...")
+                # Use FILLED status (paradoxically includes pending orders with $0 filled)
+                # Same logic as in autonomous_bot_main.py recovery
                 orders = self.client.get_my_orders(
                     market_id=market_id,
-                    status='PENDING',  # ✅ Teraz będzie zamienione na "open" w api_client.py
-                    limit=20
-                )
-
-                # LUB bezpośrednio:
-                orders = self.client.get_my_orders(
-                    market_id=market_id,
-                    status='OPEN',  # ✅ Explicite używamy 'OPEN' co mapuje na "open"
+                    status='FILLED',  # Status "1" includes orders with any fill amount (even $0!)
                     limit=20
                 )
 
@@ -570,7 +563,28 @@ class AutonomousBot:
                     logger.info(f"      amount: {order.get('amount', 'N/A')}")
                     logger.info(f"      filled_amount: {order.get('filled_amount', 'N/A')}")
                     logger.info(f"      ALL KEYS: {list(order.keys())}")
-                
+
+                    # Check if order is truly pending (filled_amount near 0)
+                    order_amount = float(order.get('order_amount', 0) or 0)
+                    filled_amount = float(order.get('filled_amount', 0) or 0)
+                    
+                    logger.info(f"      order_amount: ${order_amount:.2f}")
+                    logger.info(f"      filled_amount: ${filled_amount:.2f}")
+                    
+                    # Skip if already significantly filled
+                    if filled_amount > 0.10:
+                        logger.info(f"      ⏭️  Skipping - already filled ${filled_amount:.2f}")
+                        continue
+                    
+                    # Skip if no meaningful order_amount
+                    if order_amount < 0.10:
+                        logger.info(f"      ⏭️  Skipping - dust order (amount < $0.10)")
+                        continue
+                    
+                    # This is our pending order!
+                    recovered_order_id = order.get('order_id')
+                    logger.info(f"   ✅ Selected order: {recovered_order_id}")
+
                 if orders:
                     # Found pending order(s) on this market
                     logger.info(f"✅ Found {len(orders)} pending order(s) on market #{market_id}")
