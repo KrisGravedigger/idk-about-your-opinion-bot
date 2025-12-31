@@ -363,6 +363,23 @@ def main():
                         logger.info(f"   Shares: {shares:.4f}")
                         logger.info(f"   Action: Will place SELL to close position")
                         logger.info("")
+                        
+                        # Get market details to find token_id
+                        logger.info("   Fetching market details for token_id...")
+                        try:
+                            market_data = client.get_market(market_id)
+                            if market_data:
+                                # Assume YES side (most common)
+                                token_id = market_data.get('yes_token_id', '')
+                                logger.info(f"   ✅ Found token_id: {token_id[:40]}...")
+                            else:
+                                logger.warning(f"   ⚠️ Could not fetch market data")
+                                token_id = ''
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ Error fetching market: {e}")
+                            token_id = ''
+                        
+                        logger.info("")
                         logger.info("💡 Bot will SKIP balance check and proceed to close position")
                         logger.info("")
                         
@@ -370,8 +387,8 @@ def main():
                         bot.state['stage'] = 'BUY_FILLED'
                         bot.state['current_position'] = {
                             'market_id': market_id,
-                            'token_id': pos.get('token_id', ''),
-                            'market_title': pos.get('title', f"Recovered market #{market_id}"),
+                            'token_id': token_id,  # ← FIXED!
+                            'market_title': market_data.get('title', f"Recovered market #{market_id}") if market_data else f"Market #{market_id}",
                             'filled_amount': shares,
                             'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
                             'filled_usdt': shares * pos.get('avg_price', 0.01),
