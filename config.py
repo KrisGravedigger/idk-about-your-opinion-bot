@@ -143,7 +143,7 @@ MAX_HOURS_UNTIL_CLOSE = None
 # Format: (min_percentage, max_percentage) for BID side volume
 # Example: (20, 80) = skip if bids are <20% or >80% of total volume
 # Set to None to disable filter
-ORDERBOOK_BALANCE_RANGE = (20, 80)  # Skip if <20% or >80% bids
+ORDERBOOK_BALANCE_RANGE = (45, 80)  # Skip if <20% or >80% bids
 
 # =============================================================================
 # TIMING / INTERVALS
