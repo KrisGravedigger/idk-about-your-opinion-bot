@@ -682,11 +682,13 @@ class AutonomousBot:
             # Status codes: PENDING, FILLED, PARTIALLY_FILLED, CANCELLED
             terminal_statuses = ['CANCELLED', 'FILLED']
             
-            if not order_status or order_status in terminal_statuses:
-                if order_status:
-                    logger.warning(f"⚠️ Order status is '{order_status}' - order is not active")
+            if order_status is None or order_status in terminal_statuses:
+                if order_status == 'CANCELLED':
+                    logger.warning(f"⚠️ BUY order is CANCELLED")
+                elif order_status == 'FILLED':
+                    logger.info(f"✅ BUY order already completed")
                 else:
-                    logger.warning("⚠️ Order not found in API")
+                    logger.warning("⚠️ BUY order not found in API")
                 
                 logger.info("🔄 Checking if position exists (tokens to sell)...")
                 
@@ -1027,18 +1029,50 @@ class AutonomousBot:
         # SELF-HEALING: Verify order is still active before starting monitor
         logger.info("🔍 Verifying SELL order status before monitoring...")
         try:
-            order_status = self.client.get_order_status(sell_order_id)
+            # Get full order details (not just status string)
+            order_details = self.client.get_order(sell_order_id)
             
-            # If order doesn't exist or is in terminal state
-            # Status codes: PENDING, FILLED, PARTIALLY_FILLED, CANCELLED
-            terminal_statuses = ['CANCELLED', 'FILLED', 'PARTIALLY_FILLED']
+            # Initialize variables (needed for scope outside if/else)
+            order_is_terminal = False
+            is_cancelled = False
+            is_fully_filled = False
+            order_status = 'UNKNOWN'
+            order_filled_amount = 0.0
+            order_amount = 0.0
+            fill_percentage = 0.0
             
-            if not order_status or order_status in terminal_statuses:
-                if order_status:
-                    logger.warning(f"⚠️ SELL order status is '{order_status}' - order is not active")
-                else:
-                    logger.warning("⚠️ SELL order not found in API")
+            if not order_details:
+                logger.warning("⚠️ SELL order not found in API")
+                order_is_terminal = True
+            else:
+                order_status = order_details.get('status_str', 'UNKNOWN')
+                order_filled_amount = float(order_details.get('filled_amount', 0) or 0)
+                order_amount = float(order_details.get('order_amount', 0) or 0)
                 
+                logger.info(f"   Order status: {order_status}")
+                logger.info(f"   Filled: ${order_filled_amount:.2f} / ${order_amount:.2f}")
+                
+                # Calculate fill percentage
+                fill_percentage = (order_filled_amount / order_amount * 100) if order_amount > 0 else 0
+                
+                # Check if order is TRULY terminal
+                # Don't trust status='FILLED' alone - check actual filled_amount
+                is_fully_filled = (fill_percentage >= 99.0)  # 99%+ = consider fully filled
+                is_cancelled = (order_status == 'CANCELLED')
+                
+                if is_cancelled:
+                    logger.warning(f"⚠️ SELL order was CANCELLED")
+                    order_is_terminal = True
+                elif is_fully_filled:
+                    logger.info(f"✅ SELL order is fully FILLED ({fill_percentage:.1f}% = ${order_filled_amount:.2f})")
+                    order_is_terminal = True
+                else:
+                    # Order is NOT terminal (0-98% filled) - still active
+                    logger.info(f"✅ Order is active ({fill_percentage:.1f}% filled) - starting monitor")
+                    order_is_terminal = False
+            
+            # If order is terminal, check position and decide what to do
+            if order_is_terminal:
                 logger.info("🔄 Checking if position still exists...")
                 
                 # Check if we still have tokens
@@ -1048,15 +1082,9 @@ class AutonomousBot:
                 )
                 tokens = float(verified_shares)
                 
-                if tokens >= 1.0:  # Still have tokens
+                if tokens >= 1.0:  # Still have significant tokens
                     logger.info(f"✅ Still have {tokens:.4f} tokens")
-                    
-                    if order_status in ['FILLED', 'PARTIALLY_FILLED']:
-                        logger.info(f"   SELL order was {order_status} but we still have tokens?")
-                        logger.info(f"   This is unusual - going back to BUY_FILLED")
-                    else:
-                        logger.info(f"   SELL order was {order_status or 'not found'} but tokens remain")
-                        logger.info(f"   Going back to BUY_FILLED to place new SELL order")
+                    logger.info(f"   Order is terminal but tokens remain - going back to BUY_FILLED to place new SELL")
                     
                     # Update filled_amount in case it changed
                     position['filled_amount'] = tokens
@@ -1072,25 +1100,23 @@ class AutonomousBot:
                     return True
                     
                 else:
-                    logger.warning(f"⚠️ No tokens found (only {tokens:.4f})")
+                    logger.warning(f"⚠️ No significant tokens found (only {tokens:.4f})")
                     
-                    if order_status in ['FILLED', 'PARTIALLY_FILLED']:
-                        logger.info(f"   SELL order was {order_status} successfully")
+                    if order_details and is_fully_filled:
+                        logger.info(f"   SELL order completed successfully")
                         logger.info("   Marking as COMPLETED")
                         self.state['stage'] = 'COMPLETED'
                         self.state_manager.save_state(self.state)
                         return True
                     else:
-                        logger.info(f"   Order was {order_status or 'not found'} and no tokens remain")
-                        logger.info("   Resetting to SCANNING")
+                        logger.info(f"   Order terminal without completion - resetting to SCANNING")
                         
                         self.state_manager.reset_position(self.state)
                         self.state['stage'] = 'SCANNING'
                         self.state_manager.save_state(self.state)
                         return True
             
-            # Order exists and is active - proceed with normal monitoring
-            logger.info(f"✅ SELL order is active (status: {order_status}) - starting monitor")
+            # If we reach here, order is NOT terminal - proceed with monitoring
                     
         except Exception as e:
             logger.warning(f"⚠️ Could not verify SELL order status: {e}")
