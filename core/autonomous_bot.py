@@ -211,8 +211,13 @@ class AutonomousBot:
                         shares = float(pos.get('shares_owned', 0))
                         
                         if shares >= 1.0:
+                            # Odczytaj outcome_side z API position
+                            outcome_side = pos.get('outcome_side_enum', 'YES')
+                            if isinstance(outcome_side, str):
+                                outcome_side = outcome_side.upper()  # API może zwrócić "Yes"/"No"
+                            
                             logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
-                            logger.warning(f"   Shares: {shares:.4f}")
+                            logger.warning(f"   Shares: {shares:.4f} {outcome_side}")
                             logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
                             
                             # Force state to BUY_FILLED so bot will place SELL
@@ -220,6 +225,7 @@ class AutonomousBot:
                             self.state['current_position'] = {
                                 'market_id': market_id,
                                 'token_id': pos.get('token_id', ''),
+                                'outcome_side': outcome_side,  # NOWE: z API
                                 'market_title': pos.get('title', f"Recovered market #{market_id}"),
                                 'filled_amount': shares,
                                 'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
@@ -315,7 +321,12 @@ class AutonomousBot:
                 shares = float(pos.get('shares_owned', 0))
                 
                 if shares >= 1.0:  # Significant position exists
-                    logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} tokens")
+                    # Odczytaj outcome_side z API position
+                    outcome_side = pos.get('outcome_side_enum', 'YES')
+                    if isinstance(outcome_side, str):
+                        outcome_side = outcome_side.upper()
+                    
+                    logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} {outcome_side} tokens")
                     logger.warning(f"   This may be from previous incomplete cycle")
                     logger.info(f"🔄 Recovering to SELL stage...")
                     
@@ -323,7 +334,8 @@ class AutonomousBot:
                     self.state['stage'] = 'BUY_FILLED'
                     self.state['current_position'] = {
                         'market_id': market_id,
-                        'token_id': pos.get('token_id', ''),  # Need to extract from position
+                        'token_id': pos.get('token_id', ''),
+                        'outcome_side': outcome_side,  # NOWE: z API
                         'market_title': f"Recovered market #{market_id}",
                         'filled_amount': shares,
                         'avg_fill_price': 0.01,  # Fallback - will be recalculated if needed
@@ -451,6 +463,7 @@ class AutonomousBot:
                         self.state['current_position'] = {
                             'market_id': selected.market_id,
                             'token_id': selected.yes_token_id,
+                            'outcome_side': selected.outcome_side,  # NOWE: z selected market
                             'market_title': selected.title,
                             'filled_amount': shares,
                             'avg_fill_price': buy_price,
@@ -488,6 +501,7 @@ class AutonomousBot:
             self.state['current_position'] = {
                 'market_id': selected.market_id,
                 'token_id': selected.yes_token_id,
+                'outcome_side': selected.outcome_side,  # NOWE: "YES" lub "NO"
                 'market_title': selected.title,
                 'is_bonus': selected.is_bonus,
                 'order_id': str(order_id),
@@ -693,14 +707,16 @@ class AutonomousBot:
                 logger.info("🔄 Checking if position exists (tokens to sell)...")
                 
                 # Check if we have tokens from this position
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 tokens = float(verified_shares)
                 
                 if tokens >= 1.0:  # Have significant position
-                    logger.info(f"✅ Found position with {tokens:.4f} tokens")
+                    outcome_side = position.get('outcome_side', 'YES')
+                    logger.info(f"✅ Found position with {tokens:.4f} {outcome_side} tokens")
                     
                     if order_status in ['FILLED', 'PARTIALLY_FILLED']:
                         logger.info(f"   Order was {order_status} - switching to BUY_FILLED")
@@ -758,9 +774,10 @@ class AutonomousBot:
             # Double-check with actual position shares
             try:
                 market_id = position['market_id']
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 verified_amount = float(verified_shares)
                 
@@ -828,9 +845,10 @@ class AutonomousBot:
             logger.info(f"🔄 Re-checking position from API...")
             
             try:
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 filled_amount = float(verified_shares)
                 
@@ -999,10 +1017,10 @@ class AutonomousBot:
             logger.info(f"🔄 Re-checking position from API...")
             
             try:
-                market_id = position['market_id']
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 filled_amount = float(verified_shares)
                 
@@ -1076,9 +1094,10 @@ class AutonomousBot:
                 logger.info("🔄 Checking if position still exists...")
                 
                 # Check if we still have tokens
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 tokens = float(verified_shares)
                 
