@@ -474,63 +474,10 @@ class MarketScanner:
             logger.debug(f"   NO bid: ${no_best_bid:.4f}, ask: ${no_best_ask:.4f}")
             logger.debug("")
             return None
-        
-        # Calculate spread
-        spread_abs, spread_pct = calculate_spread(best_bid, best_ask)
-        
-        # ========================================================================
-        # DEBUG: Spread logging
-        # ========================================================================
-        logger.debug(f"📏 Spread calculated:")
-        logger.debug(f"   Absolute: ${spread_abs:.4f}")
-        logger.debug(f"   Percentage: {spread_pct:.2f}%")
-        
+
         # Determine if bonus market
         is_bonus = market_id in self.bonus_markets
-        
-        # Get full orderbook if needed for advanced metrics
-        full_orderbook = None
-        needs_orderbook = any(
-            metric in scoring_profile.get('weights', {})
-            for metric in ['hourglass_advanced', 'hourglass_simple', 'liquidity_depth']
-        )
-        if needs_orderbook:
-            full_orderbook = {
-                'bids': bids,
-                'asks': asks
-            }
-        
-        # Create market object for scoring
-        market_obj = type('Market', (), {
-            'best_bid': best_bid,
-            'best_ask': best_ask,
-            'spread_pct': spread_pct,
-            'volume_24h': market.get('volume24h', 0),  # From API if available
-            'is_bonus': is_bonus,
-        })()
-        
-        # ========================================================================
-        # DEBUG: Success - about to score
-        # ========================================================================
-        logger.debug("✅ PASSED all filters! Calculating score...")
-        logger.debug(f"   Bonus market: {'Yes 🌟' if is_bonus else 'No'}")
-        logger.debug(f"   24h volume: ${market.get('volume24h', 0):.2f}")
-        
-        # Calculate score using new scoring system
-        score = calculate_market_score(
-            market=market_obj,
-            orderbook=full_orderbook,
-            weights=scoring_profile.get('weights', {}),
-            bonus_multiplier=scoring_profile.get('bonus_multiplier', 1.0),
-            invert_spread=scoring_profile.get('invert_spread', False)
-        )
-        
-        # ========================================================================
-        # DEBUG: Final score
-        # ========================================================================
-        logger.debug(f"🎯 Final score: {score:.4f}")
-        logger.debug("")
-        
+
         # Score each eligible outcome and pick the best
         best_outcome_score = None
         best_outcome_data = None
