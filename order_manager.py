@@ -189,23 +189,48 @@ class OrderManager:
         # =====================================================================
         # Shares (YES/NO tokens) are NOT in get_token_balance() endpoint!
         # They must be retrieved from get_my_positions() which returns PositionData
-        # with shares_owned field. We always buy YES tokens.
+        # with shares_owned field.
         
         try:
             # RETRY LOGIC: API may need time to update position after fill
             actual_balance = 0.0
+            detected_outcome = "UNKNOWN"
             max_retries = 3
             
+            # Determine outcome_side from current bot state
+            # This should be passed from autonomous_bot, but we'll try to detect it
+            # TEMPORARY: Check both YES and NO, use whichever has balance
+            
             for attempt in range(1, max_retries + 1):
-                # Get actual shares from position (not from balance!)
-                actual_balance_decimal = self.client.get_position_shares(
+                # Try YES first
+                yes_balance_decimal = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"  # We always buy YES tokens
+                    outcome_side="YES"
                 )
-                actual_balance = float(actual_balance_decimal)
+                yes_balance = float(yes_balance_decimal)
+                
+                # Try NO
+                no_balance_decimal = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side="NO"
+                )
+                no_balance = float(no_balance_decimal)
+                
+                # Use whichever has balance
+                if yes_balance > 0:
+                    actual_balance = yes_balance
+                    detected_outcome = "YES"
+                    logger.debug(f"   Detected YES position: {actual_balance:.10f} tokens")
+                elif no_balance > 0:
+                    actual_balance = no_balance
+                    detected_outcome = "NO"
+                    logger.debug(f"   Detected NO position: {actual_balance:.10f} tokens")
+                else:
+                    actual_balance = 0.0
+                    detected_outcome = "UNKNOWN"
                 
                 if actual_balance > 0:
-                    logger.info(f"✅ Position found on attempt {attempt}: {actual_balance:.10f} tokens")
+                    logger.info(f"✅ Position found on attempt {attempt}: {actual_balance:.10f} {detected_outcome} tokens")
                     break
                 else:
                     if attempt < max_retries:
@@ -215,7 +240,7 @@ class OrderManager:
                     else:
                         logger.error(f"❌ After {max_retries} attempts, still no position found!")
             
-            logger.debug(f"   Position shares (YES): {actual_balance:.10f}")
+            logger.debug(f"   Position shares ({detected_outcome}): {actual_balance:.10f}")
             
             # FALLBACK: If API returns 0, use requested amount
             if actual_balance == 0 and amount_tokens > 0:
@@ -333,143 +358,8 @@ class OrderManager:
                 if check_count % 5 == 0:  # Log every 5th check
                     logger.info(f"⏳ Order still pending... (check #{check_count})")
             
-            time.sleep(check_interval)
+            time.sleep(check_interval)     
     
-    def check_if_outbid(
-        self,
-        my_price: float,
-        current_best_bid: float
-    ) -> tuple[bool, float]:
-        """
-        Check if our order has been outbid.
-        
-        Args:
-            my_price: Our current order price
-            current_best_bid: Current best bid in orderbook
-            
-        Returns:
-            Tuple of (is_outbid: bool, improvement_percent: float)
-        """
-        if current_best_bid <= my_price:
-            return (False, 0.0)
-        
-        improvement_pct = ((current_best_bid - my_price) / my_price) * 100
-        is_significant = improvement_pct >= MIN_IMPROVEMENT_PERCENT
-        
-        return (is_significant, improvement_pct)
-    
-    # =========================================================================
-    # RE-PRICING LOGIC
-    # =========================================================================
-    
-    def calculate_reprice(
-        self,
-        initial_price: float,
-        current_best_bid: float,
-        current_best_ask: float,
-        repricing_count: int
-    ) -> Optional[float]:
-        """
-        Calculate new price for re-pricing with capitulation limits.
-        
-        The "gradual capitulation" strategy:
-        1. Calculate new competitive price from current spread
-        2. Apply capitulation limit (never go below X% of initial price)
-        3. Return max(competitive_price, capitulation_limit)
-        
-        Args:
-            initial_price: Our original order price
-            current_best_bid: Current best bid in orderbook
-            current_best_ask: Current best ask in orderbook
-            repricing_count: Number of times already repriced
-            
-        Returns:
-            New price or None if max repricing reached
-        """
-        # Check max attempts
-        if repricing_count >= MAX_REPRICING_ATTEMPTS:
-            logger.warning(f"⚠️ Max repricing attempts ({MAX_REPRICING_ATTEMPTS}) reached")
-            return None
-        
-        from config import BUY_IMPROVEMENT_PERCENT, SAFETY_MARGIN_CENTS
-        
-        # Calculate capitulation limit (random within range)
-        capitulation_pct = random.uniform(
-            REPRICING_MIN_CAPITULATION_PERCENT,
-            REPRICING_MAX_CAPITULATION_PERCENT
-        )
-        min_acceptable_price = initial_price * (capitulation_pct / 100)
-        
-        # Calculate competitive price using market making strategy
-        gap = current_best_ask - current_best_bid
-        improvement = gap * (BUY_IMPROVEMENT_PERCENT / 100)
-        competitive_price = current_best_bid + improvement
-        
-        # Safety check: don't cross spread
-        max_safe_price = current_best_ask - SAFETY_MARGIN_CENTS
-        if competitive_price >= max_safe_price:
-            competitive_price = max_safe_price
-        
-        # Apply capitulation limit
-        new_price = max(competitive_price, min_acceptable_price)
-        new_price = round_price(new_price)
-        
-        logger.debug(f"Re-price calculation (market making):")
-        logger.debug(f"   Initial price: {format_price(initial_price)}")
-        logger.debug(f"   Capitulation: {capitulation_pct:.1f}% (min: {format_price(min_acceptable_price)})")
-        logger.debug(f"   New best bid: {format_price(current_best_bid)}")
-        logger.debug(f"   Spread: {format_price(gap)}")
-        logger.debug(f"   Improvement: {BUY_IMPROVEMENT_PERCENT}% = {format_price(improvement)}")
-        logger.debug(f"   Competitive price: {format_price(competitive_price)}")
-        logger.debug(f"   Final new price: {format_price(new_price)}")
-        
-        return new_price
-    
-    def reprice_order(
-        self,
-        old_order_id: str,
-        market_id: int,
-        token_id: str,
-        new_price: float,
-        amount_usdt: float
-    ) -> Optional[dict]:
-        """
-        Cancel old order and place new order at updated price.
-        
-        Args:
-            old_order_id: Order ID to cancel
-            market_id: Market ID
-            token_id: Token ID
-            new_price: New limit price
-            amount_usdt: Order amount
-            
-        Returns:
-            New order result dict, or None on failure
-        """
-        # Cancel old order
-        logger.info(f"🔄 Re-pricing: Cancelling old order {old_order_id}")
-        
-        if not self.client.cancel_order(old_order_id):
-            logger.error("Failed to cancel old order")
-            return None
-        
-        logger.info(f"❌ Old order cancelled")
-        
-        # Small delay to ensure cancellation processed
-        time.sleep(1)
-        
-        # Place new order
-        logger.info(f"📤 Placing new order at {format_price(new_price)}")
-        
-        result = self.place_buy(
-            market_id=market_id,
-            token_id=token_id,
-            price=new_price,
-            amount_usdt=amount_usdt
-        )
-        
-        return result
-
 
 # =============================================================================
 # STATE MANAGEMENT HELPERS
@@ -557,49 +447,8 @@ def update_state_for_reprice(state: dict, new_order_id: str, new_price: float) -
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def place_initial_buy(
-    client: OpinionClient,
-    market_id: int,
-    token_id: str,
-    best_bid: float,
-    best_ask: float
-) -> Optional[dict]:
-    """
-    Convenience function to calculate price and place initial BUY order.
-    
-    Args:
-        client: OpinionClient instance
-        market_id: Target market ID
-        token_id: YES token ID
-        best_bid: Current best bid
-        best_ask: Current best ask
-        
-    Returns:
-        State dictionary with order details, or None on failure
-    """
-    manager = OrderManager(client)
-    
-    # Calculate price
-    price = manager.calculate_buy_price(best_bid, best_ask)
-    amount = manager.calculate_order_amount()
-    
-    # Place order
-    result = manager.place_buy(market_id, token_id, price, amount)
-    
-    if not result:
-        return None
-    
-    # Create state
-    state = create_buy_state(
-        market_id=market_id,
-        order_id=result.get('order_id', ''),
-        token_id=token_id,
-        price=price,
-        position_percent=PRICE_POSITION_BASE_PERCENT,
-        amount_usdt=amount
-    )
-    
-    return state
+# NOTE: place_initial_buy() removed - legacy code not used by autonomous_bot
+# autonomous_bot uses PricingStrategy + OrderManager.place_buy() directly
 
 
 # =============================================================================
@@ -646,9 +495,6 @@ if __name__ == "__main__":
         new_price = manager.calculate_reprice(initial, new_bid, new_ask, i)
         print(f"   Repricing #{i+1}: {format_price(new_price)}")
     
-    # Test max repricing
-    max_price = manager.calculate_reprice(initial, new_bid, new_ask, MAX_REPRICING_ATTEMPTS)
-    print(f"   After max attempts: {max_price}")
     
     print()
     print("✅ Order manager calculation tests complete!")

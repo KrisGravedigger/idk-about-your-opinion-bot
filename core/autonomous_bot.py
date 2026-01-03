@@ -215,11 +215,37 @@ class AutonomousBot:
                             logger.warning(f"   Shares: {shares:.4f}")
                             logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
                             
+                            # Get outcome_side to determine which token_id to use
+                            outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+                            logger.info(f"   Position side: {outcome_side_enum}")
+                            
+                            # Fetch market details to get token_id
+                            logger.info(f"   Fetching market details to recover token_id...")
+                            try:
+                                market_details = self.client.get_market(market_id)
+                                
+                                if market_details:
+                                    # Extract correct token_id based on outcome_side
+                                    if outcome_side_enum.lower() == 'yes':
+                                        token_id = market_details.get('yes_token_id', '')
+                                    else:
+                                        token_id = market_details.get('no_token_id', '')
+                                    
+                                    logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                                else:
+                                    logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                                    token_id = ''
+                                    
+                            except Exception as e:
+                                logger.error(f"   ❌ Error fetching market details: {e}")
+                                token_id = ''
+                            
                             # Force state to BUY_FILLED so bot will place SELL
                             self.state['stage'] = 'BUY_FILLED'
                             self.state['current_position'] = {
                                 'market_id': market_id,
-                                'token_id': pos.get('token_id', ''),
+                                'token_id': token_id,
+                                'outcome_side': outcome_side_enum,
                                 'market_title': pos.get('title', f"Recovered market #{market_id}"),
                                 'filled_amount': shares,
                                 'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
@@ -315,7 +341,12 @@ class AutonomousBot:
                 shares = float(pos.get('shares_owned', 0))
                 
                 if shares >= 1.0:  # Significant position exists
-                    logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} tokens")
+                    # Odczytaj outcome_side z API position
+                    outcome_side = pos.get('outcome_side_enum', 'YES')
+                    if isinstance(outcome_side, str):
+                        outcome_side = outcome_side.upper()
+                    
+                    logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} {outcome_side} tokens")
                     logger.warning(f"   This may be from previous incomplete cycle")
                     logger.info(f"🔄 Recovering to SELL stage...")
                     
@@ -323,7 +354,8 @@ class AutonomousBot:
                     self.state['stage'] = 'BUY_FILLED'
                     self.state['current_position'] = {
                         'market_id': market_id,
-                        'token_id': pos.get('token_id', ''),  # Need to extract from position
+                        'token_id': pos.get('token_id', ''),
+                        'outcome_side': outcome_side,  # NOWE: z API
                         'market_title': f"Recovered market #{market_id}",
                         'filled_amount': shares,
                         'avg_fill_price': 0.01,  # Fallback - will be recalculated if needed
@@ -451,6 +483,7 @@ class AutonomousBot:
                         self.state['current_position'] = {
                             'market_id': selected.market_id,
                             'token_id': selected.yes_token_id,
+                            'outcome_side': selected.outcome_side,  # NOWE: z selected market
                             'market_title': selected.title,
                             'filled_amount': shares,
                             'avg_fill_price': buy_price,
@@ -488,6 +521,7 @@ class AutonomousBot:
             self.state['current_position'] = {
                 'market_id': selected.market_id,
                 'token_id': selected.yes_token_id,
+                'outcome_side': selected.outcome_side,  # NOWE: "YES" lub "NO"
                 'market_title': selected.title,
                 'is_bonus': selected.is_bonus,
                 'order_id': str(order_id),
@@ -592,12 +626,33 @@ class AutonomousBot:
                     # Find order with non-zero amount (skip dust/old orders)
                     recovered_order = None
                     for order in orders:
-                        # Check maker_amount field (could be in different fields depending on API response)
-                        amount = float(order.get('maker_amount', 0) or order.get('amount', 0) or order.get('maker_amount_in_quote_token', 0))
-                        
+                        # CRITICAL: Extract order amount from correct API field
+                        # API returns different field names depending on order type:
+                        # - 'order_amount' = total USDT value (main field for BUY orders)
+                        # - 'maker_amount' = deprecated/old field
+                        # - 'amount' = not present in current API
+                        order_amount_str = order.get('order_amount', 0)
+                        maker_amount_str = order.get('maker_amount', 0) 
+                        amount_str = order.get('amount', 0)
+
+                        # Try order_amount first (correct field for BUY orders)
+                        if order_amount_str and order_amount_str != 'N/A':
+                            try:
+                                amount = float(order_amount_str)
+                            except (ValueError, TypeError):
+                                amount = 0.0
+                        else:
+                            # Fallback to other fields
+                            try:
+                                amount = float(maker_amount_str or amount_str or 0)
+                            except (ValueError, TypeError):
+                                amount = 0.0
+
+                        logger.debug(f"   Order amount extracted: ${amount:.2f}")
+
                         if amount >= 0.10:  # Minimum meaningful order size
                             recovered_order = order
-                            logger.info(f"   Selected order with amount: ${amount:.2f}")
+                            logger.info(f"   ✅ Selected order with amount: ${amount:.2f}")
                             break
                     
                     if not recovered_order:
@@ -616,15 +671,58 @@ class AutonomousBot:
                     
                     # Update state with recovered order_id
                     position['order_id'] = recovered_order_id
+
+
+                    # CRITICAL FIX: Recover token_id from market details
+                    # Without valid token_id, liquidity checks will crash
+                    logger.info("🔍 Recovering token_id from market details...")
+
+                    try:
+                        # Extract outcome side from recovered order
+                        # API returns outcome_side_enum: "Yes" or "No" (capitalized)
+                        outcome_side_enum = recovered_order.get('outcome_side_enum', 'Yes')
+                        logger.debug(f"   Outcome side: {outcome_side_enum}")
+                        
+                        # Fetch market using EXISTING get_market() method
+                        market_details = self.client.get_market(market_id)
+                        
+                        if not market_details:
+                            logger.warning(f"   ⚠️ Could not fetch market #{market_id} details")
+                            token_id = 'unknown'
+                            position['token_id'] = token_id
+                        else:
+                            # Extract correct token_id based on outcome side
+                            # Market dict has: 'yes_token_id' and 'no_token_id' fields
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id = market_details.get('yes_token_id', '')
+                            else:
+                                token_id = market_details.get('no_token_id', '')
+                            
+                            if token_id:
+                                logger.info(f"   ✅ Recovered token_id: {token_id[:20] if len(token_id) > 20 else token_id}...")
+                                position['token_id'] = token_id
+                                position['outcome_side'] = outcome_side_enum
+                            else:
+                                logger.warning(f"   ⚠️ No token_id found in market details")
+                                token_id = 'unknown'
+                                position['token_id'] = token_id
+
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to recover token_id: {e}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
+                        token_id = 'unknown'
+                        position['token_id'] = token_id
+
                     self.state_manager.save_state(self.state)
-                    
+
                     logger.info("✅ order_id recovered and saved to state")
                     logger.info("📍 Continuing with normal BUY monitoring...")
                     logger.info("")
-                    
+
                     # Update local variable for monitoring below
                     order_id = recovered_order_id
-                    
+
                     # Fall through to normal monitoring code below
                     
                 else:
@@ -693,14 +791,38 @@ class AutonomousBot:
                 logger.info("🔄 Checking if position exists (tokens to sell)...")
                 
                 # Check if we have tokens from this position
-                verified_shares = self.client.get_position_shares(
-                    market_id=market_id,
-                    outcome_side="YES"
-                )
-                tokens = float(verified_shares)
+                # RETRY LOGIC: Position may not be visible immediately after fill
+                verified_shares = None
+                max_retries = 3
+                retry_delay = 2  # seconds
+
+                for attempt in range(1, max_retries + 1):
+                    verified_shares = self.client.get_position_shares(
+                        market_id=market_id,
+                        outcome_side="YES"
+                    )
+                    tokens = float(verified_shares)
+                    
+                    if tokens > 0:
+                        logger.info(f"✅ Position found on attempt {attempt}: {tokens:.4f} tokens")
+                        break
+                    
+                    if attempt < max_retries:
+                        logger.info(f"⚠️ Attempt {attempt}/{max_retries}: Position not visible yet")
+                        logger.info(f"   Retrying in {retry_delay} seconds...")
+                        import time
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"⚠️ After {max_retries} attempts, still no position")
+
+                if verified_shares is None:
+                    tokens = 0.0
+                else:
+                    tokens = float(verified_shares)
                 
                 if tokens >= 1.0:  # Have significant position
-                    logger.info(f"✅ Found position with {tokens:.4f} tokens")
+                    outcome_side = position.get('outcome_side', 'YES')
+                    logger.info(f"✅ Found position with {tokens:.4f} {outcome_side} tokens")
                     
                     if order_status in ['FILLED', 'PARTIALLY_FILLED']:
                         logger.info(f"   Order was {order_status} - switching to BUY_FILLED")
@@ -720,13 +842,36 @@ class AutonomousBot:
                     
                 else:
                     logger.warning(f"⚠️ No significant position found (only {tokens:.4f} tokens)")
-                    logger.info(f"   Order was {order_status or 'not found'} without fill")
-                    logger.info("   Resetting to SCANNING for new market")
                     
-                    self.state_manager.reset_position(self.state)
-                    self.state['stage'] = 'SCANNING'
-                    self.state_manager.save_state(self.state)
-                    return True
+                    # CRITICAL: This may be API timing delay!
+                    # Order status updated faster than position data
+                    if order_status == 'FILLED':
+                        logger.info(f"   Order status='FILLED' but position not visible yet")
+                        logger.info(f"   This is likely API timing delay (position update lag)")
+                        logger.info(f"   🔄 RETRYING: Will check again in next monitoring cycle")
+                        logger.info(f"   Bot will proceed to normal monitoring which includes retry logic")
+                        
+                        # DON'T reset! Let monitor handle this with retries
+                        # Normal monitoring has fill checks that will eventually see the position
+                        logger.info(f"✅ Order is active (timing issue) - proceeding to monitor")
+                        # Fall through to normal monitoring code below
+                        
+                    elif order_status == 'CANCELLED':
+                        logger.info(f"   Order was CANCELLED without fill - reset to find new market")
+                        
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+                        
+                    else:
+                        logger.warning(f"   Order not found in API and no position exists")
+                        logger.info(f"   Resetting to SCANNING for new market")
+                        
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
             
             # Order exists and is active - proceed with normal monitoring
             logger.info(f"✅ Order is active (status: {order_status}) - starting monitor")
@@ -758,9 +903,10 @@ class AutonomousBot:
             # Double-check with actual position shares
             try:
                 market_id = position['market_id']
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 verified_amount = float(verified_shares)
                 
@@ -818,8 +964,73 @@ class AutonomousBot:
         
         position = self.state['current_position']
         market_id = position['market_id']
-        token_id = position['token_id']
+        token_id = position.get('token_id')
         filled_amount = position['filled_amount']
+        
+        # =====================================================================
+        # CRITICAL VALIDATION: Check token_id is valid string (not int/None)
+        # =====================================================================
+        logger.info(f"🔍 DEBUG: token_id={token_id}, type={type(token_id).__name__}")
+        
+        if not token_id or isinstance(token_id, int):
+            logger.error(f"❌ Invalid token_id detected: {token_id} (type: {type(token_id).__name__})")
+            logger.error(f"   This is legacy bug from old state.json!")
+            logger.info(f"🔄 Attempting recovery from market details...")
+            
+            try:
+                # Fetch market to get correct token_id
+                market_details = self.client.get_market(market_id)
+                
+                if not market_details:
+                    logger.error(f"   ❌ Could not fetch market #{market_id}")
+                    logger.error(f"   Cannot place SELL without valid token_id")
+                    logger.info(f"   Resetting to SCANNING")
+                    
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return False
+                
+                # Get outcome_side from position (defaults to YES if missing)
+                outcome_side = position.get('outcome_side', 'YES')
+                logger.info(f"   Position outcome_side: {outcome_side}")
+                
+                # Extract correct token_id
+                if outcome_side.upper() == 'YES':
+                    token_id = market_details.get('yes_token_id', '')
+                else:
+                    token_id = market_details.get('no_token_id', '')
+                
+                if not token_id:
+                    logger.error(f"   ❌ Market details missing token_id field!")
+                    logger.error(f"   Cannot proceed without valid token_id")
+                    logger.info(f"   Resetting to SCANNING")
+                    
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return False
+                
+                logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                
+                # Update state with valid token_id
+                position['token_id'] = token_id
+                self.state_manager.save_state(self.state)
+                
+                logger.info(f"   💾 State updated with valid token_id")
+                
+            except Exception as e:
+                logger.error(f"   ❌ Recovery failed: {e}")
+                logger.error(f"   Cannot place SELL without valid token_id")
+                logger.info(f"   Resetting to SCANNING")
+                
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return False
+        
+        # Validation passed - token_id is now valid string
+        logger.info(f"✅ token_id validated: {token_id[:20]}...")
         
         # SAFETY CHECK: Verify filled_amount is valid before attempting SELL
         if not filled_amount or filled_amount <= 0:
@@ -828,9 +1039,10 @@ class AutonomousBot:
             logger.info(f"🔄 Re-checking position from API...")
             
             try:
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 filled_amount = float(verified_shares)
                 
@@ -999,10 +1211,10 @@ class AutonomousBot:
             logger.info(f"🔄 Re-checking position from API...")
             
             try:
-                market_id = position['market_id']
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 filled_amount = float(verified_shares)
                 
@@ -1076,9 +1288,10 @@ class AutonomousBot:
                 logger.info("🔄 Checking if position still exists...")
                 
                 # Check if we still have tokens
+                outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side
                 )
                 tokens = float(verified_shares)
                 

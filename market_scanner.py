@@ -151,7 +151,8 @@ class MarketScore:
     """
     market_id: int
     title: str
-    yes_token_id: str
+    yes_token_id: str          # Actually "chosen_token_id" (can be YES or NO)
+    outcome_side: str          # NEW: "YES" or "NO"
     best_bid: float
     best_ask: float
     spread_abs: float
@@ -161,7 +162,7 @@ class MarketScore:
     
     def __repr__(self):
         bonus_indicator = " 🌟" if self.is_bonus else ""
-        return f"Market #{self.market_id}: {self.title[:30]}...{bonus_indicator} (Score: {self.score:.2f})"
+        return f"Market #{self.market_id} ({self.outcome_side}): {self.title[:30]}...{bonus_indicator} (Score: {self.score:.2f})"
 
 
 class MarketScanner:
@@ -212,57 +213,170 @@ class MarketScanner:
         market_id = market.get('market_id')
         title = market.get('market_title', 'Unknown')
         yes_token_id = market.get('yes_token_id')
-        # TEMPORARY DEBUG for market #2178
-        if market_id == 2178:
-            logger.info(f"🎯 ANALYZING MARKET #2178 - Blackpink")
-            logger.info(f"   Title: {title}")
-        
+        no_token_id = market.get('no_token_id')
+
         # ========================================================================
-        # DEBUG: Market entry logging
+        # CRITICAL: Initialize variables that are used later
+        # This must be BEFORE any early return statements!
         # ========================================================================
-        logger.debug("")
-        logger.debug("="*70)
-        logger.debug(f"🔍 ANALYZING Market #{market_id}")
-        logger.debug(f"   Title: {title[:60]}")
-        logger.debug("="*70)
-               
-        if not yes_token_id:
-            logger.debug(f"❌ REJECTED: No yes_token_id field")
+        yes_bid_percentage = None
+        no_bid_percentage = None
+        yes_best_bid = 0
+        yes_best_ask = 0
+        no_best_bid = 0
+        no_best_ask = 0
+
+        if not yes_token_id or not no_token_id:
+            logger.debug(f"❌ REJECTED: Missing token IDs")
+            logger.debug("")
+            return None
+
+        # Import config values
+        from config import (
+            OUTCOME_MIN_PROBABILITY,
+            OUTCOME_MAX_PROBABILITY,
+            OUTCOME_PROBABILITY_METHOD
+        )
+
+        # Fetch BOTH orderbooks
+        logger.debug(f"📡 Fetching YES orderbook: {yes_token_id[:20]}...")
+        yes_orderbook = self.client.get_market_orderbook(yes_token_id)
+
+        logger.debug(f"📡 Fetching NO orderbook: {no_token_id[:20]}...")
+        no_orderbook = self.client.get_market_orderbook(no_token_id)
+
+        if not yes_orderbook or not no_orderbook:
+            logger.debug(f"❌ REJECTED: Missing orderbook data")
             logger.debug("")
             return None
         
-        # Fetch orderbook
-        logger.debug(f"📡 Fetching orderbook for token: {yes_token_id[:20]}...")
-        orderbook = self.client.get_market_orderbook(yes_token_id)
         
-        if not orderbook:
-            logger.debug(f"❌ REJECTED: No orderbook data from API")
-            logger.debug(f"   Token ID: {yes_token_id}")
-            logger.debug("")
-            return None
         
-        bids = orderbook.get('bids', [])
-        asks = orderbook.get('asks', [])
-        
-        # ========================================================================
-        # DEBUG: Orderbook structure logging
-        # ========================================================================
-        logger.debug(f"📊 Orderbook received:")
-        logger.debug(f"   Bids: {len(bids)} orders")
-        logger.debug(f"   Asks: {len(asks)} orders")
-        
-        # Check minimum orders requirement
-        if len(bids) < MIN_ORDERBOOK_ORDERS:
-            logger.debug(f"❌ REJECTED: Insufficient bids")
-            logger.debug(f"   Found: {len(bids)} bids")
+        yes_bids = yes_orderbook.get('bids', [])
+        yes_asks = yes_orderbook.get('asks', [])
+        no_bids = no_orderbook.get('bids', [])
+        no_asks = no_orderbook.get('asks', [])
+                       
+        # Check minimum orders for YES
+        if len(yes_bids) < MIN_ORDERBOOK_ORDERS or len(yes_asks) < MIN_ORDERBOOK_ORDERS:
+            logger.debug(f"❌ REJECTED: Insufficient YES orderbook")
+            logger.debug(f"   YES bids: {len(yes_bids)}, asks: {len(yes_asks)}")
             logger.debug(f"   Need: {MIN_ORDERBOOK_ORDERS} minimum")
             logger.debug("")
             return None
-        
-        if len(asks) < MIN_ORDERBOOK_ORDERS:
-            logger.debug(f"Market {market_id} has insufficient asks ({len(asks)}), skipping")
+
+        # Check minimum orders for NO
+        if len(no_bids) < MIN_ORDERBOOK_ORDERS or len(no_asks) < MIN_ORDERBOOK_ORDERS:
+            logger.debug(f"❌ REJECTED: Insufficient NO orderbook")
+            logger.debug(f"   NO bids: {len(no_bids)}, asks: {len(no_asks)}")
+            logger.debug("")
             return None
-        
+
+        # Extract best prices for YES
+        yes_bid_prices = [safe_float(bid.get('price', 0)) for bid in yes_bids]
+        yes_ask_prices = [safe_float(ask.get('price', 0)) for ask in yes_asks]
+
+        yes_best_bid = max(yes_bid_prices) if yes_bid_prices else 0
+        yes_best_ask = min(yes_ask_prices) if yes_ask_prices else 0
+
+        # Extract best prices for NO
+        no_bid_prices = [safe_float(bid.get('price', 0)) for bid in no_bids]
+        no_ask_prices = [safe_float(ask.get('price', 0)) for ask in no_asks]
+
+        no_best_bid = max(no_bid_prices) if no_bid_prices else 0
+        no_best_ask = min(no_ask_prices) if no_ask_prices else 0
+
+        # ========================================================================
+        # OUTCOME PROBABILITY FILTERING
+        # ========================================================================
+        logger.debug(f"🎯 Outcome probability filtering:")
+        logger.debug(f"   Config range: {OUTCOME_MIN_PROBABILITY*100:.0f}%-{OUTCOME_MAX_PROBABILITY*100:.0f}%")
+        logger.debug(f"   Method: {OUTCOME_PROBABILITY_METHOD}")
+
+        # Calculate implied probabilities
+        if OUTCOME_PROBABILITY_METHOD == 'mid_price':
+            yes_prob = (yes_best_bid + yes_best_ask) / 2
+            no_prob = (no_best_bid + no_best_ask) / 2
+        elif OUTCOME_PROBABILITY_METHOD == 'best_bid':
+            yes_prob = yes_best_bid
+            no_prob = no_best_bid
+        else:
+            logger.error(f"Unknown OUTCOME_PROBABILITY_METHOD: {OUTCOME_PROBABILITY_METHOD}")
+            return None
+
+        logger.debug(f"   YES implied probability: {yes_prob*100:.1f}%")
+        logger.debug(f"   NO implied probability: {no_prob*100:.1f}%")
+
+        # Determine which outcomes to consider
+        outcomes_to_check = []
+
+        # Check YES eligibility
+        yes_eligible = False
+        if OUTCOME_MIN_PROBABILITY <= yes_prob <= OUTCOME_MAX_PROBABILITY:
+            # Additional balance check if enabled
+            if ORDERBOOK_BALANCE_RANGE is not None and yes_bid_percentage is not None:
+                min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
+                if min_bid_pct <= yes_bid_percentage <= max_bid_pct:
+                    yes_eligible = True
+                    logger.debug(f"   ✅ YES eligible ({yes_prob*100:.1f}% prob, {yes_bid_percentage:.1f}% balance)")
+                else:
+                    logger.debug(f"   ❌ YES skipped (balance {yes_bid_percentage:.1f}% outside {min_bid_pct}-{max_bid_pct}%)")
+            else:
+                # Balance filter disabled or couldn't calculate
+                yes_eligible = True
+                logger.debug(f"   ✅ YES eligible ({yes_prob*100:.1f}% within range)")
+        else:
+            logger.debug(f"   ❌ YES skipped ({yes_prob*100:.1f}% outside range)")
+
+        if yes_eligible:
+            outcomes_to_check.append({
+                'side': 'YES',
+                'token_id': yes_token_id,
+                'bids': yes_bids,
+                'asks': yes_asks,
+                'best_bid': yes_best_bid,
+                'best_ask': yes_best_ask,
+                'probability': yes_prob
+            })
+
+        # Check NO eligibility
+        no_eligible = False
+        if OUTCOME_MIN_PROBABILITY <= no_prob <= OUTCOME_MAX_PROBABILITY:
+            # Additional balance check if enabled
+            if ORDERBOOK_BALANCE_RANGE is not None and no_bid_percentage is not None:
+                min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
+                if min_bid_pct <= no_bid_percentage <= max_bid_pct:
+                    no_eligible = True
+                    logger.debug(f"   ✅ NO eligible ({no_prob*100:.1f}% prob, {no_bid_percentage:.1f}% balance)")
+                else:
+                    logger.debug(f"   ❌ NO skipped (balance {no_bid_percentage:.1f}% outside {min_bid_pct}-{max_bid_pct}%)")
+            else:
+                # Balance filter disabled or couldn't calculate
+                no_eligible = True
+                logger.debug(f"   ✅ NO eligible ({no_prob*100:.1f}% within range)")
+        else:
+            logger.debug(f"   ❌ NO skipped ({no_prob*100:.1f}% outside range)")
+
+        if no_eligible:
+            outcomes_to_check.append({
+                'side': 'NO',
+                'token_id': no_token_id,
+                'bids': no_bids,
+                'asks': no_asks,
+                'best_bid': no_best_bid,
+                'best_ask': no_best_ask,
+                'probability': no_prob
+            })
+
+        if not outcomes_to_check:
+            logger.info(f"❌ REJECTED: Both outcomes outside probability range")
+            logger.info(f"   YES: {yes_prob*100:.1f}%, NO: {no_prob*100:.1f}%")
+            logger.info("")
+            return None
+
+        logger.debug(f"   📊 {len(outcomes_to_check)} outcome(s) eligible for scoring")
+        logger.debug("")
+
         # ========================================================================
         # NEW FILTERS: Time-based and orderbook balance
         # ========================================================================
@@ -312,140 +426,138 @@ class MarketScanner:
                 # No end_at field in market data
                 logger.debug(f"⚠️  Market {market_id}: No end_at field (skipping time filter)")
         
+        # ========================================================================
         # Filter 2: Check orderbook balance (if enabled)
+        # ========================================================================
         logger.debug(f"⚖️  Balance filter check:")
-        logger.debug(f"   Config: ORDERBOOK_BALANCE_RANGE = {ORDERBOOK_BALANCE_RANGE}")
-        
+        logger.debug(f"   Config: ORDERBOOK_BALANCE_RANGE = {ORDERBOOK_BALANCE_RANGE}")       
+
         if ORDERBOOK_BALANCE_RANGE is not None:
-            # Show sample data for debugging
-            if len(bids) > 0:
-                logger.debug(f"   First bid: {bids[0]}")
-            if len(asks) > 0:
-                logger.debug(f"   First ask: {asks[0]}")
+            # Sprawdź YES orderbook balance
+            if len(yes_bids) > 0:
+                logger.debug(f"   YES first bid: {yes_bids[0]}")
+            if len(yes_asks) > 0:
+                logger.debug(f"   YES first ask: {yes_asks[0]}")
             
-            bid_percentage = calculate_orderbook_balance(bids, asks)
-            logger.debug(f"   Calculated balance: {bid_percentage:.1f}% bids" if bid_percentage else "   Could not calculate balance")
+            yes_bid_percentage = calculate_orderbook_balance(yes_bids, yes_asks)
+            logger.debug(f"   YES balance: {yes_bid_percentage:.1f}% bids" if yes_bid_percentage else "   YES: Could not calculate balance")
             
-            if bid_percentage is not None:
-                min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
-                logger.debug(f"   Acceptable range: {min_bid_pct}-{max_bid_pct}%")
-                
-                if bid_percentage < min_bid_pct or bid_percentage > max_bid_pct:
-                    logger.info(
-                        f"❌ REJECTED: Orderbook unbalanced "
-                        f"({bid_percentage:.1f}% bids, range: {min_bid_pct}-{max_bid_pct}%)"
-                    )
-                    logger.info("")
-                    return None
-                
-                logger.info(f"✅ Balance OK ({bid_percentage:.1f}% bids within {min_bid_pct}-{max_bid_pct}%)")
-            else:
-                # Could not calculate balance → skip for safety
-                logger.info(f"❌ REJECTED: Could not calculate orderbook balance")
-                logger.info("")
-                return None
+            # Sprawdź NO orderbook balance
+            if len(no_bids) > 0:
+                logger.debug(f"   NO first bid: {no_bids[0]}")
+            if len(no_asks) > 0:
+                logger.debug(f"   NO first ask: {no_asks[0]}")
+            
+            no_bid_percentage = calculate_orderbook_balance(no_bids, no_asks)
+            logger.debug(f"   NO balance: {no_bid_percentage:.1f}% bids" if no_bid_percentage else "   NO: Could not calculate balance")
+            
+            logger.debug(f"   Balance filtering deferred to per-outcome stage")
         else:
             logger.debug(f"   Balance filter DISABLED (ORDERBOOK_BALANCE_RANGE = None)")
         
-        # Extract best prices
-        # API may not return sorted orderbook, so find actual best prices
-        # Best bid = highest bid price
-        # Best ask = lowest ask price
-        bid_prices = [safe_float(bid.get('price', 0)) for bid in bids]
-        ask_prices = [safe_float(ask.get('price', 0)) for ask in asks]
         
-        best_bid = max(bid_prices) if bid_prices else 0
-        best_ask = min(ask_prices) if ask_prices else 0
         
         # ========================================================================
         # DEBUG: Price logging
         # ========================================================================
-        logger.debug(f"💰 Extracted prices:")
-        logger.debug(f"   Best bid: ${best_bid:.4f}")
-        logger.debug(f"   Best ask: ${best_ask:.4f}")
-        
-        # Validate prices
-        if best_bid <= 0 or best_ask <= 0:
-            logger.debug(f"❌ REJECTED: Invalid prices")
-            logger.debug(f"   Best bid: ${best_bid:.4f} (must be > 0)")
-            logger.debug(f"   Best ask: ${best_ask:.4f} (must be > 0)")
+                
+        # Validate YES prices
+        if yes_best_bid <= 0 or yes_best_ask <= 0 or yes_best_bid >= yes_best_ask:
+            logger.debug(f"❌ REJECTED: Invalid YES prices")
+            logger.debug(f"   YES bid: ${yes_best_bid:.4f}, ask: ${yes_best_ask:.4f}")
             logger.debug("")
             return None
-        
-        if best_bid >= best_ask:
-            logger.debug(f"❌ REJECTED: Crossed book (bid >= ask)")
-            logger.debug(f"   Best bid: ${best_bid:.4f}")
-            logger.debug(f"   Best ask: ${best_ask:.4f}")
-            logger.debug(f"   Problem: Bid should be < Ask")
+
+        # Validate NO prices
+        if no_best_bid <= 0 or no_best_ask <= 0 or no_best_bid >= no_best_ask:
+            logger.debug(f"❌ REJECTED: Invalid NO prices")
+            logger.debug(f"   NO bid: ${no_best_bid:.4f}, ask: ${no_best_ask:.4f}")
             logger.debug("")
             return None
-        
-        # Calculate spread
-        spread_abs, spread_pct = calculate_spread(best_bid, best_ask)
-        
-        # ========================================================================
-        # DEBUG: Spread logging
-        # ========================================================================
-        logger.debug(f"📏 Spread calculated:")
-        logger.debug(f"   Absolute: ${spread_abs:.4f}")
-        logger.debug(f"   Percentage: {spread_pct:.2f}%")
-        
+
         # Determine if bonus market
         is_bonus = market_id in self.bonus_markets
-        
-        # Get full orderbook if needed for advanced metrics
-        full_orderbook = None
-        needs_orderbook = any(
-            metric in scoring_profile.get('weights', {})
-            for metric in ['hourglass_advanced', 'hourglass_simple', 'liquidity_depth']
-        )
-        if needs_orderbook:
-            full_orderbook = {
-                'bids': bids,
-                'asks': asks
-            }
-        
-        # Create market object for scoring
-        market_obj = type('Market', (), {
-            'best_bid': best_bid,
-            'best_ask': best_ask,
-            'spread_pct': spread_pct,
-            'volume_24h': market.get('volume24h', 0),  # From API if available
-            'is_bonus': is_bonus,
-        })()
-        
-        # ========================================================================
-        # DEBUG: Success - about to score
-        # ========================================================================
-        logger.debug("✅ PASSED all filters! Calculating score...")
-        logger.debug(f"   Bonus market: {'Yes 🌟' if is_bonus else 'No'}")
-        logger.debug(f"   24h volume: ${market.get('volume24h', 0):.2f}")
-        
-        # Calculate score using new scoring system
-        score = calculate_market_score(
-            market=market_obj,
-            orderbook=full_orderbook,
-            weights=scoring_profile.get('weights', {}),
-            bonus_multiplier=scoring_profile.get('bonus_multiplier', 1.0),
-            invert_spread=scoring_profile.get('invert_spread', False)
-        )
-        
-        # ========================================================================
-        # DEBUG: Final score
-        # ========================================================================
-        logger.debug(f"🎯 Final score: {score:.4f}")
+
+        # Score each eligible outcome and pick the best
+        best_outcome_score = None
+        best_outcome_data = None
+
+        for outcome_data in outcomes_to_check:
+            side = outcome_data['side']
+            best_bid = outcome_data['best_bid']
+            best_ask = outcome_data['best_ask']
+            
+            # Calculate spread
+            spread_abs, spread_pct = calculate_spread(best_bid, best_ask)
+            
+            logger.debug(f"📊 Scoring {side}:")
+            logger.debug(f"   Bid: ${best_bid:.4f}, Ask: ${best_ask:.4f}")
+            logger.debug(f"   Spread: {spread_pct:.2f}%")
+            
+            # Create market object for scoring
+            market_obj = type('Market', (), {
+                'best_bid': best_bid,
+                'best_ask': best_ask,
+                'spread_pct': spread_pct,
+                'volume_24h': market.get('volume24h', 0),
+                'is_bonus': is_bonus,
+            })()
+            
+            # Get full orderbook if needed for advanced metrics
+            full_orderbook = None
+            needs_orderbook = any(
+                metric in scoring_profile.get('weights', {})
+                for metric in ['hourglass_advanced', 'hourglass_simple', 'liquidity_depth']
+            )
+            if needs_orderbook:
+                full_orderbook = {
+                    'bids': outcome_data['bids'],
+                    'asks': outcome_data['asks']
+                }
+            
+            # Calculate score
+            score = calculate_market_score(
+                market=market_obj,
+                orderbook=full_orderbook,
+                weights=scoring_profile.get('weights', {}),
+                bonus_multiplier=scoring_profile.get('bonus_multiplier', 1.0),
+                invert_spread=scoring_profile.get('invert_spread', False)
+            )
+            
+            logger.debug(f"   🎯 Score: {score:.4f}")
+            
+            # Track best outcome
+            if best_outcome_score is None or score > best_outcome_score:
+                best_outcome_score = score
+                best_outcome_data = {
+                    'side': side,
+                    'token_id': outcome_data['token_id'],
+                    'best_bid': best_bid,
+                    'best_ask': best_ask,
+                    'spread_abs': spread_abs,
+                    'spread_pct': spread_pct,
+                    'score': score,
+                    'probability': outcome_data['probability']
+                }
+
+        if not best_outcome_data:
+            logger.debug(f"❌ No outcome scored positively")
+            return None
+
+        logger.debug(f"✅ BEST OUTCOME: {best_outcome_data['side']} (score: {best_outcome_data['score']:.4f})")
         logger.debug("")
-        
+
         return MarketScore(
             market_id=market_id,
             title=title,
-            yes_token_id=yes_token_id,
-            best_bid=best_bid,
-            best_ask=best_ask,
-            spread_abs=spread_abs,
-            spread_pct=spread_pct,
+            yes_token_id=best_outcome_data['token_id'],  # Actually chosen_token_id
+            outcome_side=best_outcome_data['side'],      # NEW: "YES" or "NO"
+            best_bid=best_outcome_data['best_bid'],
+            best_ask=best_outcome_data['best_ask'],
+            spread_abs=best_outcome_data['spread_abs'],
+            spread_pct=best_outcome_data['spread_pct'],
             is_bonus=is_bonus,
-            score=score
+            score=best_outcome_data['score']
         )
          
     def scan_and_rank(self, limit: int = 10, scoring_profile: Optional[Union[str, dict]] = None) -> list[MarketScore]:

@@ -119,6 +119,24 @@ IMPROVEMENT_WIDE = 0.30    # $0.30 better than best
 SAFETY_MARGIN_CENTS = 0.001  # $0.001 minimum distance
 
 # =============================================================================
+# OUTCOME SELECTION FILTERS
+# =============================================================================
+
+# Filter outcomes by implied probability (not entire markets)
+# Skip outcomes that are too certain or too unlikely
+# Format: Min and max probability (0.0 - 1.0) to consider outcome
+# Example: (0.20, 0.80) = only consider outcomes with 20-80% probability
+# Set to (0.0, 1.0) to disable (accept all outcomes)
+
+OUTCOME_MIN_PROBABILITY = 0.20  # Skip if implied probability < 20%
+OUTCOME_MAX_PROBABILITY = 0.80  # Skip if implied probability > 80%
+
+# How to calculate implied probability:
+# 'mid_price' = (best_bid + best_ask) / 2  (recommended)
+# 'best_bid' = use best_bid only (more conservative)
+OUTCOME_PROBABILITY_METHOD = 'mid_price'
+
+# =============================================================================
 # MARKET FILTERS
 # =============================================================================
 

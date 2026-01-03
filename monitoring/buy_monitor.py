@@ -173,11 +173,21 @@ class BuyMonitor:
                 if check_count - last_liquidity_check >= LIQUIDITY_CHECK_INTERVAL:
                     logger.debug(f"[{check_time}] 🔍 Checking liquidity...")
                     
-                    liquidity = self.liquidity_checker.check_liquidity(
-                        market_id=market_id,
-                        token_id=token_id,
-                        initial_best_bid=initial_best_bid
-                    )
+                    # DEFENSIVE: Check if token_id is valid before liquidity check
+                    # Recovery may not have token_id immediately available
+                    if not token_id or token_id == 'unknown' or isinstance(token_id, int):
+                        logger.warning(f"⚠️ Invalid token_id for liquidity check")
+                        logger.warning(f"   token_id: {token_id} (type: {type(token_id).__name__})")
+                        logger.info(f"   Skipping liquidity deterioration detection for this cycle")
+                        logger.info(f"   Bot will still monitor order fill status")
+                        liquidity = {'is_acceptable': True}  # Skip check, assume OK
+                    else:
+                        # Normal liquidity check with valid token_id
+                        liquidity = self.liquidity_checker.check_liquidity(
+                            market_id=market_id,
+                            token_id=token_id,
+                            initial_best_bid=initial_best_bid
+                        )
                     
                     if not liquidity['ok']:
                         logger.warning("")
