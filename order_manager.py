@@ -189,16 +189,16 @@ class OrderManager:
         # =====================================================================
         # Shares (YES/NO tokens) are NOT in get_token_balance() endpoint!
         # They must be retrieved from get_my_positions() which returns PositionData
-        # with shares_owned field. We always buy YES tokens.
+        # with shares_owned field.
         
         try:
             # RETRY LOGIC: API may need time to update position after fill
             actual_balance = 0.0
+            detected_outcome = "UNKNOWN"
             max_retries = 3
             
             # Determine outcome_side from current bot state
             # This should be passed from autonomous_bot, but we'll try to detect it
-            # For now, we'll add a parameter to this function
             # TEMPORARY: Check both YES and NO, use whichever has balance
             
             for attempt in range(1, max_retries + 1):
@@ -228,28 +228,6 @@ class OrderManager:
                 else:
                     actual_balance = 0.0
                     detected_outcome = "UNKNOWN"
-                yes_balance = float(yes_balance_decimal)
-                
-                # Try NO
-                no_balance_decimal = self.client.get_position_shares(
-                    market_id=market_id,
-                    outcome_side="NO"
-                )
-                no_balance = float(no_balance_decimal)
-                
-                # Use whichever has balance
-                if yes_balance > 0:
-                    actual_balance = yes_balance
-                    detected_outcome = "YES"
-                    logger.debug(f"   Detected YES position: {actual_balance:.10f} tokens")
-                elif no_balance > 0:
-                    actual_balance = no_balance
-                    detected_outcome = "NO"
-                    logger.debug(f"   Detected NO position: {actual_balance:.10f} tokens")
-                else:
-                    actual_balance = 0.0
-                    detected_outcome = "UNKNOWN"
-                actual_balance = float(actual_balance_decimal)
                 
                 if actual_balance > 0:
                     logger.info(f"✅ Position found on attempt {attempt}: {actual_balance:.10f} {detected_outcome} tokens")
@@ -262,7 +240,7 @@ class OrderManager:
                     else:
                         logger.error(f"❌ After {max_retries} attempts, still no position found!")
             
-            logger.debug(f"   Position shares (YES): {actual_balance:.10f}")
+            logger.debug(f"   Position shares ({detected_outcome}): {actual_balance:.10f}")
             
             # FALLBACK: If API returns 0, use requested amount
             if actual_balance == 0 and amount_tokens > 0:
@@ -469,49 +447,8 @@ def update_state_for_reprice(state: dict, new_order_id: str, new_price: float) -
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
-def place_initial_buy(
-    client: OpinionClient,
-    market_id: int,
-    token_id: str,
-    best_bid: float,
-    best_ask: float
-) -> Optional[dict]:
-    """
-    Convenience function to calculate price and place initial BUY order.
-    
-    Args:
-        client: OpinionClient instance
-        market_id: Target market ID
-        token_id: YES token ID
-        best_bid: Current best bid
-        best_ask: Current best ask
-        
-    Returns:
-        State dictionary with order details, or None on failure
-    """
-    manager = OrderManager(client)
-    
-    # Calculate price
-    price = manager.calculate_buy_price(best_bid, best_ask)
-    amount = manager.calculate_order_amount()
-    
-    # Place order
-    result = manager.place_buy(market_id, token_id, price, amount)
-    
-    if not result:
-        return None
-    
-    # Create state
-    state = create_buy_state(
-        market_id=market_id,
-        order_id=result.get('order_id', ''),
-        token_id=token_id,
-        price=price,
-        position_percent=PRICE_POSITION_BASE_PERCENT,
-        amount_usdt=amount
-    )
-    
-    return state
+# NOTE: place_initial_buy() removed - legacy code not used by autonomous_bot
+# autonomous_bot uses PricingStrategy + OrderManager.place_buy() directly
 
 
 # =============================================================================
