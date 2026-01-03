@@ -215,6 +215,17 @@ class MarketScanner:
         yes_token_id = market.get('yes_token_id')
         no_token_id = market.get('no_token_id')
 
+        # ========================================================================
+        # CRITICAL: Initialize variables that are used later
+        # This must be BEFORE any early return statements!
+        # ========================================================================
+        yes_bid_percentage = None
+        no_bid_percentage = None
+        yes_best_bid = 0
+        yes_best_ask = 0
+        no_best_bid = 0
+        no_best_ask = 0
+
         if not yes_token_id or not no_token_id:
             logger.debug(f"❌ REJECTED: Missing token IDs")
             logger.debug("")
@@ -419,11 +430,7 @@ class MarketScanner:
         # Filter 2: Check orderbook balance (if enabled)
         # ========================================================================
         logger.debug(f"⚖️  Balance filter check:")
-        logger.debug(f"   Config: ORDERBOOK_BALANCE_RANGE = {ORDERBOOK_BALANCE_RANGE}")
-
-        # Initialize variables (needed for later sections)
-        yes_bid_percentage = None
-        no_bid_percentage = None
+        logger.debug(f"   Config: ORDERBOOK_BALANCE_RANGE = {ORDERBOOK_BALANCE_RANGE}")       
 
         if ORDERBOOK_BALANCE_RANGE is not None:
             # Sprawdź YES orderbook balance
