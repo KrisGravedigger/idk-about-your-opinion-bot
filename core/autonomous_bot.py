@@ -211,21 +211,41 @@ class AutonomousBot:
                         shares = float(pos.get('shares_owned', 0))
                         
                         if shares >= 1.0:
-                            # Odczytaj outcome_side z API position
-                            outcome_side = pos.get('outcome_side_enum', 'YES')
-                            if isinstance(outcome_side, str):
-                                outcome_side = outcome_side.upper()  # API może zwrócić "Yes"/"No"
-                            
                             logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
-                            logger.warning(f"   Shares: {shares:.4f} {outcome_side}")
+                            logger.warning(f"   Shares: {shares:.4f}")
                             logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
+                            
+                            # Get outcome_side to determine which token_id to use
+                            outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+                            logger.info(f"   Position side: {outcome_side_enum}")
+                            
+                            # Fetch market details to get token_id
+                            logger.info(f"   Fetching market details to recover token_id...")
+                            try:
+                                market_details = self.client.get_market(market_id)
+                                
+                                if market_details:
+                                    # Extract correct token_id based on outcome_side
+                                    if outcome_side_enum.lower() == 'yes':
+                                        token_id = market_details.get('yes_token_id', '')
+                                    else:
+                                        token_id = market_details.get('no_token_id', '')
+                                    
+                                    logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                                else:
+                                    logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                                    token_id = ''
+                                    
+                            except Exception as e:
+                                logger.error(f"   ❌ Error fetching market details: {e}")
+                                token_id = ''
                             
                             # Force state to BUY_FILLED so bot will place SELL
                             self.state['stage'] = 'BUY_FILLED'
                             self.state['current_position'] = {
                                 'market_id': market_id,
-                                'token_id': pos.get('token_id', ''),
-                                'outcome_side': outcome_side,  # NOWE: z API
+                                'token_id': token_id,
+                                'outcome_side': outcome_side_enum,
                                 'market_title': pos.get('title', f"Recovered market #{market_id}"),
                                 'filled_amount': shares,
                                 'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
@@ -944,48 +964,73 @@ class AutonomousBot:
         
         position = self.state['current_position']
         market_id = position['market_id']
-        token_id = position.get('token_id')  # Use .get() for safety
+        token_id = position.get('token_id')
         filled_amount = position['filled_amount']
         
-        # CRITICAL DEBUG: Log token_id before using it
-        logger.info(f"🔍 DEBUG: token_id from state: {token_id}")
-        logger.info(f"   Type: {type(token_id).__name__}")
-        logger.info(f"   Value: {repr(token_id)}")
+        # =====================================================================
+        # CRITICAL VALIDATION: Check token_id is valid string (not int/None)
+        # =====================================================================
+        logger.info(f"🔍 DEBUG: token_id={token_id}, type={type(token_id).__name__}")
         
-        # DEFENSIVE: Validate token_id before proceeding
-        if not token_id or token_id == 'unknown' or isinstance(token_id, int):
-            logger.error(f"❌ Invalid token_id in BUY_FILLED stage!")
-            logger.error(f"   token_id: {token_id} (type: {type(token_id).__name__})")
-            logger.error(f"   This should have been set during recovery or order placement")
-            logger.error(f"   Attempting to recover from market details...")
+        if not token_id or isinstance(token_id, int):
+            logger.error(f"❌ Invalid token_id detected: {token_id} (type: {type(token_id).__name__})")
+            logger.error(f"   This is legacy bug from old state.json!")
+            logger.info(f"🔄 Attempting recovery from market details...")
             
             try:
                 # Fetch market to get correct token_id
-                outcome_side = position.get('outcome_side', 'YES')
-                logger.info(f"   Outcome side: {outcome_side}")
+                market_details = self.client.get_market(market_id)
                 
-                market_details = self.scanner.client.get_market(market_id)
-                
-                if market_details:
-                    if outcome_side.upper() == 'YES':
-                        token_id = market_details.get('yes_token_id', '')
-                    else:
-                        token_id = market_details.get('no_token_id', '')
-                    
-                    if token_id:
-                        logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
-                        position['token_id'] = token_id
-                        self.state_manager.save_state(self.state)
-                    else:
-                        logger.error(f"   ❌ Could not recover token_id from market")
-                        return False
-                else:
+                if not market_details:
                     logger.error(f"   ❌ Could not fetch market #{market_id}")
-                    return False
+                    logger.error(f"   Cannot place SELL without valid token_id")
+                    logger.info(f"   Resetting to SCANNING")
                     
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return False
+                
+                # Get outcome_side from position (defaults to YES if missing)
+                outcome_side = position.get('outcome_side', 'YES')
+                logger.info(f"   Position outcome_side: {outcome_side}")
+                
+                # Extract correct token_id
+                if outcome_side.upper() == 'YES':
+                    token_id = market_details.get('yes_token_id', '')
+                else:
+                    token_id = market_details.get('no_token_id', '')
+                
+                if not token_id:
+                    logger.error(f"   ❌ Market details missing token_id field!")
+                    logger.error(f"   Cannot proceed without valid token_id")
+                    logger.info(f"   Resetting to SCANNING")
+                    
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return False
+                
+                logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                
+                # Update state with valid token_id
+                position['token_id'] = token_id
+                self.state_manager.save_state(self.state)
+                
+                logger.info(f"   💾 State updated with valid token_id")
+                
             except Exception as e:
                 logger.error(f"   ❌ Recovery failed: {e}")
+                logger.error(f"   Cannot place SELL without valid token_id")
+                logger.info(f"   Resetting to SCANNING")
+                
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
                 return False
+        
+        # Validation passed - token_id is now valid string
+        logger.info(f"✅ token_id validated: {token_id[:20]}...")
         
         # SAFETY CHECK: Verify filled_amount is valid before attempting SELL
         if not filled_amount or filled_amount <= 0:
