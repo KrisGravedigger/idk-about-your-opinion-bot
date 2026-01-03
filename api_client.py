@@ -314,7 +314,15 @@ class OpinionClient:
             }
             
         except Exception as e:
-            token_display = token_id[:20] + "..." if token_id else "None"
+            # DEFENSIVE: Handle both string and int token_id (prevent crash on slice)
+            if not token_id:
+                token_display = "None"
+            elif isinstance(token_id, int):
+                token_display = f"<int:{token_id}>"  # Show wrong type for debugging
+            else:
+                # String - safe to slice
+                token_str = str(token_id)
+                token_display = token_str[:20] + "..." if len(token_str) > 20 else token_str
             logger.error(f"Error fetching orderbook for token {token_display}: {e}")
             return None
     
