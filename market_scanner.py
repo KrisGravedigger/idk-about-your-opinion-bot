@@ -460,10 +460,7 @@ class MarketScanner:
         # ========================================================================
         # DEBUG: Price logging
         # ========================================================================
-        logger.debug(f"💰 Extracted prices:")
-        logger.debug(f"   Best bid: ${best_bid:.4f}")
-        logger.debug(f"   Best ask: ${best_ask:.4f}")
-        
+                
         # Validate YES prices
         if yes_best_bid <= 0 or yes_best_ask <= 0 or yes_best_bid >= yes_best_ask:
             logger.debug(f"❌ REJECTED: Invalid YES prices")
