@@ -260,7 +260,21 @@ class MarketScanner:
             logger.debug(f"   NO bids: {len(no_bids)}, asks: {len(no_asks)}")
             logger.debug("")
             return None
-        
+
+        # Extract best prices for YES
+        yes_bid_prices = [safe_float(bid.get('price', 0)) for bid in yes_bids]
+        yes_ask_prices = [safe_float(ask.get('price', 0)) for ask in yes_asks]
+
+        yes_best_bid = max(yes_bid_prices) if yes_bid_prices else 0
+        yes_best_ask = min(yes_ask_prices) if yes_ask_prices else 0
+
+        # Extract best prices for NO
+        no_bid_prices = [safe_float(bid.get('price', 0)) for bid in no_bids]
+        no_ask_prices = [safe_float(ask.get('price', 0)) for ask in no_asks]
+
+        no_best_bid = max(no_bid_prices) if no_bid_prices else 0
+        no_best_ask = min(no_ask_prices) if no_ask_prices else 0
+
         # ========================================================================
         # OUTCOME PROBABILITY FILTERING
         # ========================================================================
@@ -439,19 +453,7 @@ class MarketScanner:
             yes_bid_percentage = None
             no_bid_percentage = None
         
-        # Extract best prices for YES
-        yes_bid_prices = [safe_float(bid.get('price', 0)) for bid in yes_bids]
-        yes_ask_prices = [safe_float(ask.get('price', 0)) for ask in yes_asks]
-
-        yes_best_bid = max(yes_bid_prices) if yes_bid_prices else 0
-        yes_best_ask = min(yes_ask_prices) if yes_ask_prices else 0
-
-        # Extract best prices for NO
-        no_bid_prices = [safe_float(bid.get('price', 0)) for bid in no_bids]
-        no_ask_prices = [safe_float(ask.get('price', 0)) for ask in no_asks]
-
-        no_best_bid = max(no_bid_prices) if no_bid_prices else 0
-        no_best_ask = min(no_ask_prices) if no_ask_prices else 0
+        
         
         # ========================================================================
         # DEBUG: Price logging
