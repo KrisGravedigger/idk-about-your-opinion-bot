@@ -707,12 +707,34 @@ class AutonomousBot:
                 logger.info("🔄 Checking if position exists (tokens to sell)...")
                 
                 # Check if we have tokens from this position
-                outcome_side = position.get('outcome_side', 'YES')
-                verified_shares = self.client.get_position_shares(
-                    market_id=market_id,
-                    outcome_side=outcome_side
-                )
-                tokens = float(verified_shares)
+                # RETRY LOGIC: Position may not be visible immediately after fill
+                verified_shares = None
+                max_retries = 3
+                retry_delay = 2  # seconds
+
+                for attempt in range(1, max_retries + 1):
+                    verified_shares = self.client.get_position_shares(
+                        market_id=market_id,
+                        outcome_side="YES"
+                    )
+                    tokens = float(verified_shares)
+                    
+                    if tokens > 0:
+                        logger.info(f"✅ Position found on attempt {attempt}: {tokens:.4f} tokens")
+                        break
+                    
+                    if attempt < max_retries:
+                        logger.info(f"⚠️ Attempt {attempt}/{max_retries}: Position not visible yet")
+                        logger.info(f"   Retrying in {retry_delay} seconds...")
+                        import time
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"⚠️ After {max_retries} attempts, still no position")
+
+                if verified_shares is None:
+                    tokens = 0.0
+                else:
+                    tokens = float(verified_shares)
                 
                 if tokens >= 1.0:  # Have significant position
                     outcome_side = position.get('outcome_side', 'YES')
@@ -736,13 +758,36 @@ class AutonomousBot:
                     
                 else:
                     logger.warning(f"⚠️ No significant position found (only {tokens:.4f} tokens)")
-                    logger.info(f"   Order was {order_status or 'not found'} without fill")
-                    logger.info("   Resetting to SCANNING for new market")
                     
-                    self.state_manager.reset_position(self.state)
-                    self.state['stage'] = 'SCANNING'
-                    self.state_manager.save_state(self.state)
-                    return True
+                    # CRITICAL: This may be API timing delay!
+                    # Order status updated faster than position data
+                    if order_status == 'FILLED':
+                        logger.info(f"   Order status='FILLED' but position not visible yet")
+                        logger.info(f"   This is likely API timing delay (position update lag)")
+                        logger.info(f"   🔄 RETRYING: Will check again in next monitoring cycle")
+                        logger.info(f"   Bot will proceed to normal monitoring which includes retry logic")
+                        
+                        # DON'T reset! Let monitor handle this with retries
+                        # Normal monitoring has fill checks that will eventually see the position
+                        logger.info(f"✅ Order is active (timing issue) - proceeding to monitor")
+                        # Fall through to normal monitoring code below
+                        
+                    elif order_status == 'CANCELLED':
+                        logger.info(f"   Order was CANCELLED without fill - reset to find new market")
+                        
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+                        
+                    else:
+                        logger.warning(f"   Order not found in API and no position exists")
+                        logger.info(f"   Resetting to SCANNING for new market")
+                        
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
             
             # Order exists and is active - proceed with normal monitoring
             logger.info(f"✅ Order is active (status: {order_status}) - starting monitor")
