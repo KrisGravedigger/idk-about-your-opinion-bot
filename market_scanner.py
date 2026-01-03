@@ -418,10 +418,12 @@ class MarketScanner:
         # ========================================================================
         # Filter 2: Check orderbook balance (if enabled)
         # ========================================================================
-        # NOTE: Ten filtr sprawdza balans dla KAŻDEGO outcome osobno
-        # Jeśli któryś outcome jest zbyt niezbalansowany, zostanie odrzucony później
         logger.debug(f"⚖️  Balance filter check:")
         logger.debug(f"   Config: ORDERBOOK_BALANCE_RANGE = {ORDERBOOK_BALANCE_RANGE}")
+
+        # Initialize variables (needed for later sections)
+        yes_bid_percentage = None
+        no_bid_percentage = None
 
         if ORDERBOOK_BALANCE_RANGE is not None:
             # Sprawdź YES orderbook balance
@@ -442,16 +444,9 @@ class MarketScanner:
             no_bid_percentage = calculate_orderbook_balance(no_bids, no_asks)
             logger.debug(f"   NO balance: {no_bid_percentage:.1f}% bids" if no_bid_percentage else "   NO: Could not calculate balance")
             
-            # NOTE: Nie odrzucamy tutaj całego marketu
-            # Zamiast tego, później w sekcji outcome filtering,
-            # odrzucimy konkretny outcome jeśli jest niezbalansowany
-            # (kod będzie dodany poniżej w sekcji OUTCOME PROBABILITY FILTERING)
-            
             logger.debug(f"   Balance filtering deferred to per-outcome stage")
         else:
             logger.debug(f"   Balance filter DISABLED (ORDERBOOK_BALANCE_RANGE = None)")
-            yes_bid_percentage = None
-            no_bid_percentage = None
         
         
         
