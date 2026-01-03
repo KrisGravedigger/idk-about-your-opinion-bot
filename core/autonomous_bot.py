@@ -651,15 +651,58 @@ class AutonomousBot:
                     
                     # Update state with recovered order_id
                     position['order_id'] = recovered_order_id
+
+
+                    # CRITICAL FIX: Recover token_id from market details
+                    # Without valid token_id, liquidity checks will crash
+                    logger.info("🔍 Recovering token_id from market details...")
+
+                    try:
+                        # Extract outcome side from recovered order
+                        # API returns outcome_side_enum: "Yes" or "No" (capitalized)
+                        outcome_side_enum = recovered_order.get('outcome_side_enum', 'Yes')
+                        logger.debug(f"   Outcome side: {outcome_side_enum}")
+                        
+                        # Fetch market using EXISTING get_market() method
+                        market_details = self.client.get_market(market_id)
+                        
+                        if not market_details:
+                            logger.warning(f"   ⚠️ Could not fetch market #{market_id} details")
+                            token_id = 'unknown'
+                            position['token_id'] = token_id
+                        else:
+                            # Extract correct token_id based on outcome side
+                            # Market dict has: 'yes_token_id' and 'no_token_id' fields
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id = market_details.get('yes_token_id', '')
+                            else:
+                                token_id = market_details.get('no_token_id', '')
+                            
+                            if token_id:
+                                logger.info(f"   ✅ Recovered token_id: {token_id[:20] if len(token_id) > 20 else token_id}...")
+                                position['token_id'] = token_id
+                                position['outcome_side'] = outcome_side_enum
+                            else:
+                                logger.warning(f"   ⚠️ No token_id found in market details")
+                                token_id = 'unknown'
+                                position['token_id'] = token_id
+
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to recover token_id: {e}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
+                        token_id = 'unknown'
+                        position['token_id'] = token_id
+
                     self.state_manager.save_state(self.state)
-                    
+
                     logger.info("✅ order_id recovered and saved to state")
                     logger.info("📍 Continuing with normal BUY monitoring...")
                     logger.info("")
-                    
+
                     # Update local variable for monitoring below
                     order_id = recovered_order_id
-                    
+
                     # Fall through to normal monitoring code below
                     
                 else:
