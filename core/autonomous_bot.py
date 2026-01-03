@@ -944,8 +944,48 @@ class AutonomousBot:
         
         position = self.state['current_position']
         market_id = position['market_id']
-        token_id = position['token_id']
+        token_id = position.get('token_id')  # Use .get() for safety
         filled_amount = position['filled_amount']
+        
+        # CRITICAL DEBUG: Log token_id before using it
+        logger.info(f"🔍 DEBUG: token_id from state: {token_id}")
+        logger.info(f"   Type: {type(token_id).__name__}")
+        logger.info(f"   Value: {repr(token_id)}")
+        
+        # DEFENSIVE: Validate token_id before proceeding
+        if not token_id or token_id == 'unknown' or isinstance(token_id, int):
+            logger.error(f"❌ Invalid token_id in BUY_FILLED stage!")
+            logger.error(f"   token_id: {token_id} (type: {type(token_id).__name__})")
+            logger.error(f"   This should have been set during recovery or order placement")
+            logger.error(f"   Attempting to recover from market details...")
+            
+            try:
+                # Fetch market to get correct token_id
+                outcome_side = position.get('outcome_side', 'YES')
+                logger.info(f"   Outcome side: {outcome_side}")
+                
+                market_details = self.scanner.client.get_market(market_id)
+                
+                if market_details:
+                    if outcome_side.upper() == 'YES':
+                        token_id = market_details.get('yes_token_id', '')
+                    else:
+                        token_id = market_details.get('no_token_id', '')
+                    
+                    if token_id:
+                        logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                        position['token_id'] = token_id
+                        self.state_manager.save_state(self.state)
+                    else:
+                        logger.error(f"   ❌ Could not recover token_id from market")
+                        return False
+                else:
+                    logger.error(f"   ❌ Could not fetch market #{market_id}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"   ❌ Recovery failed: {e}")
+                return False
         
         # SAFETY CHECK: Verify filled_amount is valid before attempting SELL
         if not filled_amount or filled_amount <= 0:
