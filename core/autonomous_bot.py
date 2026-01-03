@@ -606,12 +606,33 @@ class AutonomousBot:
                     # Find order with non-zero amount (skip dust/old orders)
                     recovered_order = None
                     for order in orders:
-                        # Check maker_amount field (could be in different fields depending on API response)
-                        amount = float(order.get('maker_amount', 0) or order.get('amount', 0) or order.get('maker_amount_in_quote_token', 0))
-                        
+                        # CRITICAL: Extract order amount from correct API field
+                        # API returns different field names depending on order type:
+                        # - 'order_amount' = total USDT value (main field for BUY orders)
+                        # - 'maker_amount' = deprecated/old field
+                        # - 'amount' = not present in current API
+                        order_amount_str = order.get('order_amount', 0)
+                        maker_amount_str = order.get('maker_amount', 0) 
+                        amount_str = order.get('amount', 0)
+
+                        # Try order_amount first (correct field for BUY orders)
+                        if order_amount_str and order_amount_str != 'N/A':
+                            try:
+                                amount = float(order_amount_str)
+                            except (ValueError, TypeError):
+                                amount = 0.0
+                        else:
+                            # Fallback to other fields
+                            try:
+                                amount = float(maker_amount_str or amount_str or 0)
+                            except (ValueError, TypeError):
+                                amount = 0.0
+
+                        logger.debug(f"   Order amount extracted: ${amount:.2f}")
+
                         if amount >= 0.10:  # Minimum meaningful order size
                             recovered_order = order
-                            logger.info(f"   Selected order with amount: ${amount:.2f}")
+                            logger.info(f"   ✅ Selected order with amount: ${amount:.2f}")
                             break
                     
                     if not recovered_order:
