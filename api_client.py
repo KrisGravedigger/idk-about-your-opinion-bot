@@ -254,7 +254,22 @@ class OpinionClient:
                 logger.error(f"API error fetching market {market_id}: {response.errmsg}")
                 return None
             
-            return response.result.data if response.result else None
+            # Extract market data
+            result = response.result.data if response.result else None
+            
+            if not result:
+                return None
+            
+            # Convert Pydantic model to dict for easier use
+            if hasattr(result, 'model_dump'):
+                return result.model_dump()
+            elif hasattr(result, 'dict'):
+                return result.dict()
+            elif isinstance(result, dict):
+                return result
+            else:
+                # Fallback: return as-is (will require attribute access)
+                return result
             
         except Exception as e:
             logger.error(f"Error fetching market {market_id}: {e}")

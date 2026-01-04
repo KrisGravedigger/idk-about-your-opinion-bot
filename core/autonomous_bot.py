@@ -206,9 +206,9 @@ class AutonomousBot:
                     logger.warning("=" * 60)
                     
                     # Minimum shares to consider position significant
-                    # $0.50 worth @ typical prices ($0.10-0.90) = 0.55-5 shares
-                    # This catches most partial fills while filtering true dust
-                    DUST_THRESHOLD = 0.5  # shares
+                    # 1.0 share = minimum to avoid SELL order errors
+                    # Partial fills are typically 5+ shares, so this is safe
+                    DUST_THRESHOLD = 1.0  # shares
 
                     # Count and filter positions
                     dust_count = 0
@@ -249,13 +249,14 @@ class AutonomousBot:
                             market_details = self.client.get_market(market_id)
                             
                             if market_details:
-                                # Extract correct token_id based on outcome_side
+                                # Extract correct token_id based on outcome_side_enum
+                                # NOTE: market_details is Pydantic model, use attribute access
                                 if outcome_side_enum.lower() == 'yes':
-                                    token_id = market_details.get('yes_token_id', '')
+                                    token_id = getattr(market_details, 'yes_token_id', '')
                                 else:
-                                    token_id = market_details.get('no_token_id', '')
+                                    token_id = getattr(market_details, 'no_token_id', '')
                                 
-                                logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                                logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
                             else:
                                 logger.error(f"   ❌ Could not fetch market details for #{market_id}")
                                 token_id = ''
@@ -265,12 +266,28 @@ class AutonomousBot:
                             token_id = ''
                         
                         # Force state to BUY_FILLED so bot will place SELL
-                        # Try to get real avg_price from position, fallback to 0.01 only if unavailable
+                        # Try to get real avg_price from position, fallback to calculation
                         avg_price = pos.get('avg_price', 0)
+
                         if avg_price <= 0:
-                            logger.warning(f"⚠️ Position missing avg_price, using minimal fallback $0.01")
-                            logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                            avg_price = 0.01
+                            # Try to calculate from position value (if API provides it)
+                            # Common field names: 'total_value', 'value', 'cost_basis', 'invested'
+                            total_value = (
+                                pos.get('total_value', 0) or 
+                                pos.get('value', 0) or 
+                                pos.get('cost_basis', 0) or 
+                                pos.get('invested', 0)
+                            )
+                            
+                            if total_value > 0 and shares > 0:
+                                avg_price = total_value / shares
+                                logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
+                                logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
+                            else:
+                                logger.warning(f"⚠️ Cannot calculate avg_price - no value field in position")
+                                logger.warning(f"   Using minimal fallback $0.01")
+                                logger.warning(f"   Stop-loss may not work correctly with fallback price")
+                                avg_price = 0.01
 
                         self.state['stage'] = 'BUY_FILLED'
                         self.state['current_position'] = {
@@ -369,21 +386,26 @@ class AutonomousBot:
             positions = self.client.get_positions()
 
             # Same threshold as pre-stage check for consistency
-            DUST_THRESHOLD = 0.5  # shares
+            DUST_THRESHOLD = 1.0  # shares
 
             # Filter out dust positions
             dust_count = 0
             significant_positions = []
 
             for pos in positions:
+                # TEMPORARY DEBUG: Log position fields
+                if len(significant_positions) == 0:  # Only log first position
+                    logger.debug(f"🔍 DEBUG Position fields: {list(pos.keys())}")
+                    logger.debug(f"   shares_owned: {pos.get('shares_owned')}")
+                    logger.debug(f"   avg_price: {pos.get('avg_price', 'MISSING')}")
+                    logger.debug(f"   All keys: {pos.keys()}")
+                
                 market_id = pos.get('market_id')
                 shares = float(pos.get('shares_owned', 0))
                 
                 if shares < DUST_THRESHOLD:
                     dust_count += 1
                     continue  # Ignore dust positions
-                
-                significant_positions.append((market_id, shares, pos))
 
             # Log dust filtering
             if dust_count > 0:
@@ -408,15 +430,20 @@ class AutonomousBot:
                     
                     if market_details:
                         # Extract correct token_id based on outcome_side
+                        # NOTE: market_details is Pydantic model, use attribute access not .get()
                         if outcome_side_enum.lower() == 'yes':
-                            token_id = market_details.get('yes_token_id', '')
+                            token_id = getattr(market_details, 'yes_token_id', '')
                         else:
-                            token_id = market_details.get('no_token_id', '')
+                            token_id = getattr(market_details, 'no_token_id', '')
                         
-                        logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                        logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
                     else:
                         logger.error(f"   ❌ Could not fetch market details for #{market_id}")
                         token_id = ''
+                        
+                except Exception as e:
+                    logger.error(f"   ❌ Error fetching market details: {e}")
+                    token_id = ''
                         
                 except Exception as e:
                     logger.error(f"   ❌ Error fetching market details: {e}")
