@@ -1081,7 +1081,34 @@ class AutonomousBot:
         
         # Validation passed - token_id is now valid string
         logger.info(f"✅ token_id validated: {token_id[:20]}...")
-        
+
+        # =====================================================================
+        # DUST POSITION CHECK: Verify position is large enough to sell
+        # =====================================================================
+        # API requires makerAmountInBaseToken >= 1.0 for SELL orders
+        # Positions < 1.0 shares (dust) cannot be sold and should be abandoned
+        MIN_SELLABLE_SHARES = 1.0
+
+        if filled_amount < MIN_SELLABLE_SHARES:
+            logger.warning("=" * 70)
+            logger.warning(f"⚠️  DUST POSITION DETECTED!")
+            logger.warning(f"   Position has {filled_amount:.4f} shares (< {MIN_SELLABLE_SHARES} minimum)")
+            logger.warning(f"   API requires makerAmountInBaseToken >= 1.0 for SELL orders")
+            logger.warning(f"   This position cannot be sold - likely from partial fill")
+            logger.warning("=" * 70)
+            logger.info("")
+            logger.info("💡 Action: Abandoning dust position and resetting to SCANNING")
+            logger.info("   Dust positions are typically worth < $1 and not worth selling")
+            logger.info("")
+
+            # Reset and find new market
+            self.state_manager.reset_position(self.state)
+            self.state['stage'] = 'SCANNING'
+            self.state_manager.save_state(self.state)
+            return True
+
+        logger.info(f"✅ Position size OK: {filled_amount:.4f} shares (>= {MIN_SELLABLE_SHARES} minimum)")
+
         # SAFETY CHECK: Verify filled_amount is valid before attempting SELL
         if not filled_amount or filled_amount <= 0:
             logger.error(f"❌ Invalid filled_amount in state: {filled_amount}")
