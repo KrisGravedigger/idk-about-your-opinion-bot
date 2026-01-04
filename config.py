@@ -54,12 +54,12 @@ MULTI_SIG_ADDRESS = _multi_sig_raw if _multi_sig_raw else None
 
 # Total capital available for the bot (in USDT)
 # This is the maximum amount the bot can deploy
-TOTAL_CAPITAL_USDT = 20
+TOTAL_CAPITAL_USDT = 220
 
 # Percentage of total capital to allocate per market
 # 100 = use all capital on one market at a time
 # 50 = split capital across two markets (future feature)
-CAPITAL_ALLOCATION_PERCENT = 90
+CAPITAL_ALLOCATION_PERCENT = 100
 
 # Automatically reinvest capital after closing a position?
 # True = bot searches for next market after SELL fills
@@ -71,13 +71,13 @@ AUTO_REINVEST = True
 # 'percentage' = use CAPITAL_PERCENTAGE of current balance
 CAPITAL_MODE = 'percentage'           # 'fixed' | 'percentage'
 CAPITAL_AMOUNT_USDT = 20.0           # Used when CAPITAL_MODE = 'fixed'
-CAPITAL_PERCENTAGE = 60.0           # Used when CAPITAL_MODE = 'percentage' (1-100)
+CAPITAL_PERCENTAGE = 90.0           # Used when CAPITAL_MODE = 'percentage' (1-100)
 
 # Safety thresholds
-MIN_BALANCE_TO_CONTINUE_USDT = 20.0   # Bot exits if balance drops below this
+MIN_BALANCE_TO_CONTINUE_USDT = 140.0   # Bot exits if balance drops below this
 
 # Platform Constraints (Opinion.trade requirements)
-MIN_POSITION_SIZE_USDT = 10.0         # Minimum order size allowed by platform
+MIN_POSITION_SIZE_USDT = 140.0         # Minimum order size allowed by platform
 MIN_POSITION_FOR_POINTS_USDT = 10.0  # Minimum size to earn airdrop points
 WARN_IF_BELOW_POINTS_THRESHOLD = True  # Log warning if position < 10 USDT
 
@@ -128,8 +128,8 @@ SAFETY_MARGIN_CENTS = 0.001  # $0.001 minimum distance
 # Example: (0.20, 0.80) = only consider outcomes with 20-80% probability
 # Set to (0.0, 1.0) to disable (accept all outcomes)
 
-OUTCOME_MIN_PROBABILITY = 0.20  # Skip if implied probability < 20%
-OUTCOME_MAX_PROBABILITY = 0.80  # Skip if implied probability > 80%
+OUTCOME_MIN_PROBABILITY = 0.30  # Skip if implied probability < 20%
+OUTCOME_MAX_PROBABILITY = 0.84  # Skip if implied probability > 80%
 
 # How to calculate implied probability:
 # 'mid_price' = (best_bid + best_ask) / 2  (recommended)
@@ -202,10 +202,10 @@ LIQUIDITY_SPREAD_THRESHOLD = 15.0
 
 # Maximum time to wait for BUY order to fill (hours)
 # After this time, monitor will return 'timeout' status
-BUY_ORDER_TIMEOUT_HOURS = 24
+BUY_ORDER_TIMEOUT_HOURS = 8
 
 # Maximum time to wait for SELL order to fill (hours)
-SELL_ORDER_TIMEOUT_HOURS = 24
+SELL_ORDER_TIMEOUT_HOURS = 8
 
 # =============================================================================
 # STOP-LOSS PROTECTION (SELL orders)

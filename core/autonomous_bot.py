@@ -205,59 +205,90 @@ class AutonomousBot:
                     logger.warning(f"   API shows: {len(positions)} active position(s)")
                     logger.warning("=" * 60)
                     
-                    # Find first position with significant shares
+                    # Minimum shares to consider position significant
+                    # $0.50 worth @ typical prices ($0.10-0.90) = 0.55-5 shares
+                    # This catches most partial fills while filtering true dust
+                    DUST_THRESHOLD = 0.5  # shares
+
+                    # Count and filter positions
+                    dust_count = 0
+                    significant_positions = []
+
                     for pos in positions:
                         market_id = pos.get('market_id')
                         shares = float(pos.get('shares_owned', 0))
                         
-                        if shares >= 1.0:
-                            logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
-                            logger.warning(f"   Shares: {shares:.4f}")
-                            logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
+                        # Same threshold as pre-stage check
+                        DUST_THRESHOLD = 0.5  # shares
+
+                        if shares < DUST_THRESHOLD:
+                            dust_count += 1
+                            continue  # Ignore dust positions
+                        
+                        significant_positions.append((market_id, shares, pos))
+
+                    # Log dust filtering
+                    if dust_count > 0:
+                        logger.debug(f"🧹 Ignored {dust_count} dust position(s) (< 1.0 shares)")
+
+                    # Find first significant position to recover
+                    if significant_positions:
+                        market_id, shares, pos = significant_positions[0]
+                        
+                        logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
+                        logger.warning(f"   Shares: {shares:.4f}")
+                        logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
+                        
+                        # Get outcome_side to determine which token_id to use
+                        outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+                        logger.info(f"   Position side: {outcome_side_enum}")
+                        
+                        # Fetch market details to get token_id
+                        logger.info(f"   Fetching market details to recover token_id...")
+                        try:
+                            market_details = self.client.get_market(market_id)
                             
-                            # Get outcome_side to determine which token_id to use
-                            outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
-                            logger.info(f"   Position side: {outcome_side_enum}")
-                            
-                            # Fetch market details to get token_id
-                            logger.info(f"   Fetching market details to recover token_id...")
-                            try:
-                                market_details = self.client.get_market(market_id)
-                                
-                                if market_details:
-                                    # Extract correct token_id based on outcome_side
-                                    if outcome_side_enum.lower() == 'yes':
-                                        token_id = market_details.get('yes_token_id', '')
-                                    else:
-                                        token_id = market_details.get('no_token_id', '')
-                                    
-                                    logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                            if market_details:
+                                # Extract correct token_id based on outcome_side
+                                if outcome_side_enum.lower() == 'yes':
+                                    token_id = market_details.get('yes_token_id', '')
                                 else:
-                                    logger.error(f"   ❌ Could not fetch market details for #{market_id}")
-                                    token_id = ''
-                                    
-                            except Exception as e:
-                                logger.error(f"   ❌ Error fetching market details: {e}")
+                                    token_id = market_details.get('no_token_id', '')
+                                
+                                logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                            else:
+                                logger.error(f"   ❌ Could not fetch market details for #{market_id}")
                                 token_id = ''
-                            
-                            # Force state to BUY_FILLED so bot will place SELL
-                            self.state['stage'] = 'BUY_FILLED'
-                            self.state['current_position'] = {
-                                'market_id': market_id,
-                                'token_id': token_id,
-                                'outcome_side': outcome_side_enum,
-                                'market_title': pos.get('title', f"Recovered market #{market_id}"),
-                                'filled_amount': shares,
-                                'avg_fill_price': pos.get('avg_price', 0.01),  # Fallback
-                                'filled_usdt': shares * pos.get('avg_price', 0.01),
-                                'fill_timestamp': get_timestamp()
-                            }
-                            self.state_manager.save_state(self.state)
-                            
-                            # Change stage to BUY_FILLED for this execution
-                            stage = 'BUY_FILLED'
-                            logger.info("✅ State recovered - will execute BUY_FILLED handler")
-                            break
+                                
+                        except Exception as e:
+                            logger.error(f"   ❌ Error fetching market details: {e}")
+                            token_id = ''
+                        
+                        # Force state to BUY_FILLED so bot will place SELL
+                        # Try to get real avg_price from position, fallback to 0.01 only if unavailable
+                        avg_price = pos.get('avg_price', 0)
+                        if avg_price <= 0:
+                            logger.warning(f"⚠️ Position missing avg_price, using minimal fallback $0.01")
+                            logger.warning(f"   Stop-loss may not work correctly with fallback price")
+                            avg_price = 0.01
+
+                        self.state['stage'] = 'BUY_FILLED'
+                        self.state['current_position'] = {
+                            'market_id': market_id,
+                            'token_id': token_id,  # ← FIXED: use recovered token_id, not pos.get()
+                            'market_title': pos.get('title', f"Recovered market #{market_id}"),
+                            'filled_amount': shares,
+                            'avg_fill_price': avg_price,
+                            'filled_usdt': shares * avg_price,
+                            'fill_timestamp': get_timestamp()
+                        }
+                        self.state_manager.save_state(self.state)
+                        
+                        # Change stage to BUY_FILLED for this execution
+                        stage = 'BUY_FILLED'
+                        logger.info("✅ State recovered - will execute BUY_FILLED handler")
+                        # NOTE: We're in _execute_stage(), not run() loop
+                        # Can't use break here - just continue to execute BUY_FILLED handler below
                             
             except Exception as e:
                 logger.debug(f"Pre-stage check failed (non-critical): {e}")
@@ -336,34 +367,80 @@ class AutonomousBot:
             
             # Check if we have any active positions with tokens (indicating partial fill)
             positions = self.client.get_positions()
+
+            # Same threshold as pre-stage check for consistency
+            DUST_THRESHOLD = 0.5  # shares
+
+            # Filter out dust positions
+            dust_count = 0
+            significant_positions = []
+
             for pos in positions:
                 market_id = pos.get('market_id')
                 shares = float(pos.get('shares_owned', 0))
                 
-                if shares >= 1.0:  # Significant position exists
-                    # Odczytaj outcome_side z API position
-                    outcome_side = pos.get('outcome_side_enum', 'YES')
-                    if isinstance(outcome_side, str):
-                        outcome_side = outcome_side.upper()
+                if shares < DUST_THRESHOLD:
+                    dust_count += 1
+                    continue  # Ignore dust positions
+                
+                significant_positions.append((market_id, shares, pos))
+
+            # Log dust filtering
+            if dust_count > 0:
+                logger.debug(f"🧹 Ignored {dust_count} dust position(s) in orphan check (< {DUST_THRESHOLD} shares)")
+
+            # Process first significant position
+            if significant_positions:
+                market_id, shares, pos = significant_positions[0]
+                
+                logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} tokens")
+                logger.warning(f"   This may be from previous incomplete cycle")
+                logger.info(f"🔄 Recovering to SELL stage...")
+                
+                # Get outcome_side to determine which token_id to use
+                outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+                logger.info(f"   Position side: {outcome_side_enum}")
+                
+                # Fetch market details to get token_id
+                logger.info(f"   Fetching market details to recover token_id...")
+                try:
+                    market_details = self.client.get_market(market_id)
                     
-                    logger.warning(f"⚠️ Found existing position in market {market_id} with {shares:.4f} {outcome_side} tokens")
-                    logger.warning(f"   This may be from previous incomplete cycle")
-                    logger.info(f"🔄 Recovering to SELL stage...")
-                    
-                    # Recover state as if we're ready to SELL
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state['current_position'] = {
-                        'market_id': market_id,
-                        'token_id': pos.get('token_id', ''),
-                        'outcome_side': outcome_side,  # NOWE: z API
-                        'market_title': f"Recovered market #{market_id}",
-                        'filled_amount': shares,
-                        'avg_fill_price': 0.01,  # Fallback - will be recalculated if needed
-                        'filled_usdt': shares * 0.01,
-                        'fill_timestamp': get_timestamp()
-                    }
-                    self.state_manager.save_state(self.state)
-                    return True
+                    if market_details:
+                        # Extract correct token_id based on outcome_side
+                        if outcome_side_enum.lower() == 'yes':
+                            token_id = market_details.get('yes_token_id', '')
+                        else:
+                            token_id = market_details.get('no_token_id', '')
+                        
+                        logger.info(f"   ✅ Recovered token_id: {token_id[:20]}...")
+                    else:
+                        logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                        token_id = ''
+                        
+                except Exception as e:
+                    logger.error(f"   ❌ Error fetching market details: {e}")
+                    token_id = ''
+                
+                # Recover state with real avg_price if available
+                avg_price = pos.get('avg_price', 0)
+                if avg_price <= 0:
+                    logger.warning(f"⚠️ Recovered position missing avg_price, using minimal fallback $0.01")
+                    logger.warning(f"   Stop-loss may not work correctly with fallback price")
+                    avg_price = 0.01
+
+                self.state['stage'] = 'BUY_FILLED'
+                self.state['current_position'] = {
+                    'market_id': market_id,
+                    'token_id': token_id,
+                    'market_title': f"Recovered market #{market_id}",
+                    'filled_amount': shares,
+                    'avg_fill_price': avg_price,
+                    'filled_usdt': shares * avg_price,
+                    'fill_timestamp': get_timestamp()
+                }
+                self.state_manager.save_state(self.state)
+                return True
                     
         except Exception as e:
             logger.warning(f"⚠️ Could not check for existing orders: {e}")
@@ -1060,6 +1137,7 @@ class AutonomousBot:
                             position['avg_fill_price'] = fallback_price
                         else:
                             logger.warning(f"⚠️ No valid price found - using minimal fallback $0.01")
+                            logger.warning(f"   Stop-loss may not work correctly with fallback price")
                             position['avg_fill_price'] = 0.01
                     
                     self.state_manager.save_state(self.state)
@@ -1194,9 +1272,9 @@ class AutonomousBot:
                 logger.info(f"✅ Using BUY order price as avg_fill_price: ${fallback_price:.4f}")
                 logger.info(f"   (Recovery after restart - normally set by BuyMonitor)")
                 position['avg_fill_price'] = fallback_price
-                self.state_manager.save_state(self.state)
             else:
                 logger.error(f"❌ Cannot recover avg_fill_price - no valid price in state!")
+                logger.error(f"   Stop-loss will not work without valid buy price")
                 logger.error(f"   Resetting to SCANNING to avoid errors")
                 
                 self.state_manager.reset_position(self.state)
