@@ -340,126 +340,129 @@ def main():
     
     if not has_open_position:
         logger.info("🔍 Checking API for orphaned positions...")
-        
+
         try:
-            positions = client.get_positions()
-            
+            # Get only significant positions (filters out dust < 1.0 shares automatically)
+            positions = client.get_significant_positions(min_shares=1.0)
+
             if positions:
                 logger.warning("=" * 70)
                 logger.warning("⚠️  ORPHANED POSITION DETECTED!")
                 logger.warning(f"   state.json says: {existing_state.get('stage', 'UNKNOWN')}")
-                logger.warning(f"   But API shows: {len(positions)} active position(s)")
+                logger.warning(f"   But API shows: {len(positions)} significant position(s)")
                 logger.warning("=" * 70)
                 logger.info("")
-                
-                # Find first position with significant shares
-                for pos in positions:
-                    market_id = pos.get('market_id')
-                    shares = float(pos.get('shares_owned', 0))
-                    
-                    if shares >= 1.0:
-                        logger.info(f"🔄 AUTO-RECOVERY:")
-                        logger.info(f"   Market: #{market_id}")
-                        logger.info(f"   Shares: {shares:.4f}")
-                        logger.info("")
-                        
-                        # Get market details to find token_id
-                        logger.info("   Fetching market details for token_id...")
-                        try:
-                            market_data = client.get_market(market_id)
-                            if market_data:
-                                # market_data is Pydantic object, use attribute access
-                                token_id = getattr(market_data, 'yes_token_id', '')
-                                if not token_id:
-                                    # Try dict access as fallback
-                                    try:
-                                        token_id = market_data['yes_token_id'] if isinstance(market_data, dict) else ''
-                                    except:
-                                        token_id = ''
-                                logger.info(f"   ✅ Found token_id: {token_id[:40]}...")
-                            else:
-                                logger.warning(f"   ⚠️ Could not fetch market data")
+
+                # Take first significant position (dust already filtered)
+                pos = positions[0]
+                market_id = pos.get('market_id')
+                shares = float(pos.get('shares_owned', 0))
+
+                logger.info(f"🔄 AUTO-RECOVERY:")
+                logger.info(f"   Market: #{market_id}")
+                logger.info(f"   Shares: {shares:.4f}")
+                logger.info("")
+
+                # Get market details to find token_id
+                logger.info("   Fetching market details for token_id...")
+                try:
+                    market_data = client.get_market(market_id)
+                    if market_data:
+                        # market_data is Pydantic object, use attribute access
+                        token_id = getattr(market_data, 'yes_token_id', '')
+                        if not token_id:
+                            # Try dict access as fallback
+                            try:
+                                token_id = market_data['yes_token_id'] if isinstance(market_data, dict) else ''
+                            except:
                                 token_id = ''
-                        except Exception as e:
-                            logger.warning(f"   ⚠️ Error fetching market: {e}")
-                            token_id = ''
-                        
-                        # Check if SELL order already exists
-                        logger.info("   🔍 Checking if SELL order already exists...")
-                        existing_sell_order = None
-                        try:
-                            orders = client.get_my_orders(
-                                market_id=market_id,
-                                status='FILLED',
-                                limit=20
-                            )
-                            
-                            for order in orders:
-                                order_side = order.get('side', -1)
-                                filled_amount = float(order.get('filled_amount', 0) or 0)
-                                order_amount = float(order.get('order_amount', 0) or 0)
-                                
-                                # Side: 1=BUY, 2=SELL
-                                if order_side == 2 and filled_amount < order_amount:
-                                    existing_sell_order = order
-                                    logger.info(f"   ✅ Found existing SELL order: {order.get('order_id')[:40]}...")
-                                    logger.info(f"      Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
-                                    break
-                        except Exception as e:
-                            logger.warning(f"   ⚠️ Could not check for existing orders: {e}")
-                        
-                        logger.info("")
-                        logger.info("💡 Bot will SKIP balance check and monitor position")
-                        logger.info("")
-                        
-                        # CRITICAL: Load bot.state before modifying
-                        if bot.state is None:
-                            bot.state = bot.state_manager.load_state()
-                        
-                        # If SELL order exists, go to SELL_MONITORING
-                        # Otherwise, go to BUY_FILLED to place new SELL
-                        if existing_sell_order:
-                            logger.info(f"   Action: Will MONITOR existing SELL order")
-                            bot.state['stage'] = 'SELL_PLACED'
-                            bot.state['current_position'] = {
-                                'market_id': market_id,
-                                'token_id': token_id,
-                                'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
-                                'filled_amount': shares,
-                                'avg_fill_price': 0.31,
-                                'filled_usdt': shares * 0.31,
-                                'fill_timestamp': get_timestamp(),
-                                'sell_order_id': existing_sell_order.get('order_id'),
-                                'sell_price': float(existing_sell_order.get('price', 0)),
-                                'sell_placed_at': get_timestamp()
-                            }
-                        else:
-                            logger.info(f"   Action: Will place NEW SELL order")
-                            bot.state['stage'] = 'BUY_FILLED'
-                            bot.state['current_position'] = {
-                                'market_id': market_id,
-                                'token_id': token_id,
-                                'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
-                                'filled_amount': shares,
-                                'avg_fill_price': pos.get('avg_price', 0.01),
-                                'filled_usdt': shares * pos.get('avg_price', 0.01),
-                                'fill_timestamp': get_timestamp()
-                            }
-                        bot.state_manager.save_state(bot.state)
-                        
-                        logger.info("✅ State recovered and saved")
-                        logger.info(f"📍 Bot will start in BUY_FILLED → SELL_PLACED")
-                        logger.info("")
-                        
-                        has_open_position = True
-                        break
-                
-                if not has_open_position:
-                    # None of the positions have significant shares
-                    # But check if we have frozen balance (indicates pending order)
-                    logger.info("⚠️  Positions exist but all have < 1.0 shares")
+                        logger.info(f"   ✅ Found token_id: {token_id[:40]}...")
+                    else:
+                        logger.warning(f"   ⚠️ Could not fetch market data")
+                        token_id = ''
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Error fetching market: {e}")
+                    token_id = ''
+
+                # Check if SELL order already exists
+                logger.info("   🔍 Checking if SELL order already exists...")
+                existing_sell_order = None
+                try:
+                    orders = client.get_my_orders(
+                        market_id=market_id,
+                        status='FILLED',
+                        limit=20
+                    )
+
+                    for order in orders:
+                        order_side = order.get('side', -1)
+                        filled_amount = float(order.get('filled_amount', 0) or 0)
+                        order_amount = float(order.get('order_amount', 0) or 0)
+
+                        # Side: 1=BUY, 2=SELL
+                        if order_side == 2 and filled_amount < order_amount:
+                            existing_sell_order = order
+                            logger.info(f"   ✅ Found existing SELL order: {order.get('order_id')[:40]}...")
+                            logger.info(f"      Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
+                            break
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Could not check for existing orders: {e}")
+
+                logger.info("")
+                logger.info("💡 Bot will SKIP balance check and monitor position")
+                logger.info("")
+
+                # CRITICAL: Load bot.state before modifying
+                if bot.state is None:
+                    bot.state = bot.state_manager.load_state()
+
+                # If SELL order exists, go to SELL_MONITORING
+                # Otherwise, go to BUY_FILLED to place new SELL
+                if existing_sell_order:
+                    logger.info(f"   Action: Will MONITOR existing SELL order")
+                    bot.state['stage'] = 'SELL_PLACED'
+                    bot.state['current_position'] = {
+                        'market_id': market_id,
+                        'token_id': token_id,
+                        'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
+                        'filled_amount': shares,
+                        'avg_fill_price': 0.31,
+                        'filled_usdt': shares * 0.31,
+                        'fill_timestamp': get_timestamp(),
+                        'sell_order_id': existing_sell_order.get('order_id'),
+                        'sell_price': float(existing_sell_order.get('price', 0)),
+                        'sell_placed_at': get_timestamp()
+                    }
+                else:
+                    logger.info(f"   Action: Will place NEW SELL order")
+                    bot.state['stage'] = 'BUY_FILLED'
+                    bot.state['current_position'] = {
+                        'market_id': market_id,
+                        'token_id': token_id,
+                        'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
+                        'filled_amount': shares,
+                        'avg_fill_price': pos.get('avg_price', 0.01),
+                        'filled_usdt': shares * pos.get('avg_price', 0.01),
+                        'fill_timestamp': get_timestamp()
+                    }
+                bot.state_manager.save_state(bot.state)
+
+                logger.info("✅ State recovered and saved")
+                logger.info(f"📍 Bot will start in BUY_FILLED → SELL_PLACED")
+                logger.info("")
+
+                has_open_position = True
+
+            else:
+                # No significant positions found (dust < 1.0 shares or no positions at all)
+                # Check if this is pending order with frozen balance (not just old dust)
+                # Get ALL positions (including dust) to check frozen balance
+                all_positions = client.get_positions()
+
+                if all_positions:
+                    logger.info("⚠️  No significant positions (all have < 1.0 shares)")
                     logger.info("   Checking if any are PENDING orders (not just dust)...")
-                    
+
                     try:
                         balances = client.get_balances()
                         if not balances or 'tokens' not in balances:
@@ -469,56 +472,52 @@ def main():
                             # Check USDT token for frozen balance
                             USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955'.lower()
                             tokens = balances['tokens']
-                            
+
                             if USDT_ADDRESS in tokens:
                                 usdt_data = tokens[USDT_ADDRESS]
                                 frozen_str = usdt_data.get('frozen', '0')
                                 frozen_balance = float(frozen_str)
-                                
+
                                 logger.info(f"   USDT frozen balance: ${frozen_balance:.2f}")
-                                
+
                                 if frozen_balance >= 1.0:
                                     logger.warning("   ⚠️  FOUND: Frozen balance indicates PENDING order!")
                                     logger.info("")
                                     logger.info("🔄 AUTO-RECOVERY:")
-                                    # ...
-                                    
-                                    # CRITICAL FIX: Find the market with PENDING order, not just any position
-                                    # Strategy: Query pending orders across ALL markets, find one matching frozen amount
+
+                                    # Find the market with PENDING order
                                     recovered_market = None
-                                    
+
                                     try:
                                         logger.info("   🔍 Searching for pending order matching frozen balance...")
-                                        
+
                                         # Get ALL pending orders (no market filter)
                                         all_pending_orders = client.get_my_orders(
                                             market_id=0,
-                                            status='FILLED', #(SIC!)
+                                            status='FILLED',  # (SIC!)
                                             limit=20
                                         )
-                                        
+
                                         logger.info(f"   Found {len(all_pending_orders)} pending orders across all markets")
-                                        
+
                                         # Find order with amount close to frozen balance
                                         for order in all_pending_orders:
                                             order_market_id = order.get('market_id')
                                             order_amount = float(order.get('order_amount', 0) or 0)
-                                            
+
                                             # Match if amounts are close (within $0.50)
                                             if abs(order_amount - frozen_balance) < 0.50:
-                                                order_filled = float(order.get('filled_amount', 0) or 0)
-                                                order_status = order.get('status_str', 'UNKNOWN')
                                                 logger.info(f"   ✅ Found matching order:")
                                                 logger.info(f"      Market: #{order_market_id}")
                                                 logger.info(f"      Order amount: ${order_amount:.2f}")
                                                 logger.info(f"      Frozen balance: ${frozen_balance:.2f}")
-                                                
+
                                                 # Find corresponding position (if exists)
-                                                for pos in positions:
+                                                for pos in all_positions:
                                                     if pos.get('market_id') == order_market_id:
                                                         recovered_market = pos
                                                         break
-                                                
+
                                                 # If no position found, create minimal one
                                                 if not recovered_market:
                                                     recovered_market = {
@@ -526,34 +525,34 @@ def main():
                                                         'token_id': order.get('outcome_side', 'YES'),  # Fallback
                                                         'title': order.get('market_title', f"Market #{order_market_id}")
                                                     }
-                                                
+
                                                 break
-                                        
+
                                         if not recovered_market:
                                             logger.warning("   ⚠️ Could not find order matching frozen balance")
                                             logger.info("   Using first position as fallback")
-                                            if positions:
-                                                recovered_market = positions[0]
-                                                
+                                            if all_positions:
+                                                recovered_market = all_positions[0]
+
                                     except Exception as e:
                                         logger.warning(f"   Error searching for pending order: {e}")
                                         logger.info("   Using first position as fallback")
-                                        if positions:
-                                            recovered_market = positions[0]
-                                    
-                                    if not recovered_market and positions:
+                                        if all_positions:
+                                            recovered_market = all_positions[0]
+
+                                    if not recovered_market and all_positions:
                                         # Fallback: use first position
-                                        recovered_market = positions[0]
-                                    
+                                        recovered_market = all_positions[0]
+
                                     if recovered_market:
                                         market_id = recovered_market.get('market_id')
-                                        
+
                                         logger.info(f"   Market: #{market_id}")
                                         logger.info(f"   Frozen: ${frozen_balance:.2f}")
                                         logger.info("")
                                         logger.info("💡 Bot will SKIP balance check and monitor order")
                                         logger.info("")
-                                        
+
                                         # Force state to BUY_PLACED (order exists but we don't have order_id)
                                         # Bot will transition to BUY_MONITORING and try to recover order_id there
                                         bot.state['stage'] = 'BUY_PLACED'
@@ -568,11 +567,11 @@ def main():
                                             'placed_at': get_timestamp()
                                         }
                                         bot.state_manager.save_state(bot.state)
-                                        
+
                                         logger.info("✅ State recovered and saved")
                                         logger.info(f"📍 Bot will start in BUY_PLACED → BUY_MONITORING")
                                         logger.info("")
-                                        
+
                                         has_open_position = True
                                 else:
                                     logger.info("   No significant frozen balance - these are dust/old positions")
@@ -581,14 +580,14 @@ def main():
                                 logger.warning("   USDT token not found in balances")
                                 logger.info("   Treating positions as dust")
                                 logger.info("")
-                                
+
                     except Exception as e:
                         logger.warning(f"   Could not check frozen balance: {e}")
                         logger.info("   Treating positions as dust")
                         logger.info("")
-            else:
-                logger.info("✅ No orphaned positions found")
-                logger.info("")
+                else:
+                    logger.info("✅ No orphaned positions found")
+                    logger.info("")
                 
         except Exception as e:
             logger.warning(f"⚠️ Could not check for orphaned positions: {e}")

@@ -903,26 +903,26 @@ class OpinionClient:
     def get_positions(self, market_id: Optional[int] = None) -> list[dict]:
         """
         Get all positions, optionally filtered by market.
-        
+
         Args:
             market_id: Optional market ID to filter by
-            
+
         Returns:
             List of position dictionaries
         """
         try:
             response = self._client.get_my_positions()
-            
+
             if response.errno != 0:
                 logger.error(f"API error fetching positions: {response.errmsg}")
                 return []
-            
+
             # Try different possible response structures
             positions = []
-            
+
             if hasattr(response, 'result') and response.result:
                 result = response.result
-                
+
                 # Try result.list (similar to markets endpoint)
                 if hasattr(result, 'list'):
                     positions = result.list
@@ -945,13 +945,13 @@ class OpinionClient:
                         result_dict = result.__dict__
                     else:
                         result_dict = {}
-                    
+
                     # Look for positions in any key
                     for key in ['list', 'data', 'positions', 'items']:
                         if key in result_dict:
                             positions = result_dict[key]
                             break
-            
+
             # Convert Pydantic models to dicts
             if positions:
                 converted_positions = []
@@ -965,20 +965,68 @@ class OpinionClient:
                     else:
                         converted_positions.append(pos)
                 positions = converted_positions
-            
+
             logger.debug(f"Fetched {len(positions)} positions")
-            
+
             # Filter by market if specified
             if market_id is not None:
                 positions = [p for p in positions if p.get('market_id') == market_id]
                 logger.debug(f"Filtered to {len(positions)} positions for market {market_id}")
-            
+
             return positions
-            
+
         except Exception as e:
             logger.error(f"Error fetching positions: {e}")
             logger.debug(f"Exception details: {type(e).__name__}: {str(e)}")
             return []
+
+    def get_significant_positions(
+        self,
+        market_id: Optional[int] = None,
+        min_shares: float = 1.0
+    ) -> list[dict]:
+        """
+        Get positions with at least min_shares tokens.
+
+        Filters out dust positions that cannot be sold due to
+        API minimum order size restrictions (makerAmountInBaseToken >= 1).
+
+        Args:
+            market_id: Optional market ID to filter by
+            min_shares: Minimum shares to consider significant (default: 1.0)
+
+        Returns:
+            List of position dictionaries with shares_owned >= min_shares
+
+        Example:
+            >>> client = OpinionClient()
+            >>> positions = client.get_significant_positions(min_shares=1.0)
+            >>> # Returns only positions with >= 1.0 shares (can be sold)
+        """
+        all_positions = self.get_positions(market_id=market_id)
+
+        if not all_positions:
+            return []
+
+        significant = []
+        dust_count = 0
+
+        for pos in all_positions:
+            shares = float(pos.get('shares_owned', 0))
+
+            if shares < min_shares:
+                dust_count += 1
+                continue
+
+            significant.append(pos)
+
+        if dust_count > 0:
+            logger.debug(
+                f"Filtered {dust_count} dust position(s) "
+                f"(< {min_shares} shares) from {len(all_positions)} total"
+            )
+
+        return significant
     
     def redeem_positions(self, market_id: int) -> Optional[str]:
         """
