@@ -54,7 +54,7 @@ MULTI_SIG_ADDRESS = _multi_sig_raw if _multi_sig_raw else None
 
 # Total capital available for the bot (in USDT)
 # This is the maximum amount the bot can deploy
-TOTAL_CAPITAL_USDT = 220
+TOTAL_CAPITAL_USDT = 80
 
 # Percentage of total capital to allocate per market
 # 100 = use all capital on one market at a time
@@ -74,10 +74,10 @@ CAPITAL_AMOUNT_USDT = 20.0           # Used when CAPITAL_MODE = 'fixed'
 CAPITAL_PERCENTAGE = 90.0           # Used when CAPITAL_MODE = 'percentage' (1-100)
 
 # Safety thresholds
-MIN_BALANCE_TO_CONTINUE_USDT = 140.0   # Bot exits if balance drops below this
+MIN_BALANCE_TO_CONTINUE_USDT = 50.0   # Bot exits if balance drops below this
 
 # Platform Constraints (Opinion.trade requirements)
-MIN_POSITION_SIZE_USDT = 140.0         # Minimum order size allowed by platform
+MIN_POSITION_SIZE_USDT = 50.0         # Minimum order size allowed by platform
 MIN_POSITION_FOR_POINTS_USDT = 10.0  # Minimum size to earn airdrop points
 WARN_IF_BELOW_POINTS_THRESHOLD = True  # Log warning if position < 10 USDT
 
