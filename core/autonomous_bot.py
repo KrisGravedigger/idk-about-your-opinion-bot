@@ -1083,6 +1083,73 @@ class AutonomousBot:
         logger.info(f"✅ token_id validated: {token_id[:20]}...")
 
         # =====================================================================
+        # MANUAL SALE DETECTION: Check if position was sold manually
+        # =====================================================================
+        # If user manually sold tokens via web interface, state.json will have
+        # incorrect filled_amount. We need to detect this and reset state.
+        logger.info("🔍 Verifying actual position vs state.json...")
+
+        try:
+            outcome_side = position.get('outcome_side', 'YES')
+            verified_shares = self.client.get_position_shares(
+                market_id=market_id,
+                outcome_side=outcome_side
+            )
+            actual_tokens = float(verified_shares)
+            expected_tokens = filled_amount
+
+            logger.info(f"   Expected: {expected_tokens:.4f} tokens (from state.json)")
+            logger.info(f"   Actual: {actual_tokens:.4f} tokens (from API)")
+
+            # Check if actual position is significantly smaller than expected
+            if expected_tokens > 0:
+                difference = expected_tokens - actual_tokens
+                difference_pct = (difference / expected_tokens) * 100
+
+                logger.info(f"   Difference: {difference:.4f} tokens ({difference_pct:.1f}%)")
+
+                # If >95% of tokens are missing, position was likely sold manually
+                MANUAL_SALE_THRESHOLD = 95.0
+
+                if difference_pct > MANUAL_SALE_THRESHOLD:
+                    logger.warning("=" * 70)
+                    logger.warning("⚠️  MANUAL SALE DETECTED!")
+                    logger.warning(f"   Expected {expected_tokens:.4f} tokens but found only {actual_tokens:.4f}")
+                    logger.warning(f"   {difference_pct:.1f}% of position is missing (threshold: {MANUAL_SALE_THRESHOLD}%)")
+                    logger.warning("   Position was likely sold manually via web interface")
+                    logger.warning("=" * 70)
+                    logger.info("")
+
+                    # Check if remaining tokens are dust (< 1.0)
+                    if actual_tokens < 1.0:
+                        logger.info("💡 Action: Remaining position is dust - resetting to SCANNING")
+                        logger.info(f"   Dust positions ({actual_tokens:.4f} tokens) cannot be sold")
+                        logger.info(f"   API requires minimum 1.0 tokens for SELL orders")
+                    else:
+                        logger.info("💡 Action: Resetting to SCANNING to find new market")
+                        logger.info(f"   Manual sale has left {actual_tokens:.4f} tokens")
+
+                    logger.info("")
+
+                    # Reset and find new market
+                    self.state_manager.reset_position(self.state)
+                    self.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.state)
+                    return True
+
+                # If difference is moderate (5-95%), update filled_amount to actual
+                elif difference_pct > 5.0:
+                    logger.warning(f"⚠️  Position mismatch: {difference_pct:.1f}% difference")
+                    logger.info(f"   Updating filled_amount to actual: {actual_tokens:.4f}")
+                    filled_amount = actual_tokens
+                    position['filled_amount'] = actual_tokens
+                    self.state_manager.save_state(self.state)
+
+        except Exception as e:
+            logger.warning(f"⚠️ Could not verify position (non-critical): {e}")
+            logger.info("   Proceeding with state.json values")
+
+        # =====================================================================
         # DUST POSITION CHECK: Verify position is large enough to sell
         # =====================================================================
         # API requires makerAmountInBaseToken >= 1.0 for SELL orders
@@ -1364,7 +1431,7 @@ class AutonomousBot:
             # If order is terminal, check position and decide what to do
             if order_is_terminal:
                 logger.info("🔄 Checking if position still exists...")
-                
+
                 # Check if we still have tokens
                 outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
@@ -1372,27 +1439,57 @@ class AutonomousBot:
                     outcome_side=outcome_side
                 )
                 tokens = float(verified_shares)
-                
+                expected_tokens = position.get('filled_amount', 0)
+
+                logger.info(f"   Expected: {expected_tokens:.4f} tokens (from state.json)")
+                logger.info(f"   Actual: {tokens:.4f} tokens (from API)")
+
+                # Check for manual sale (significant drop in position)
+                if expected_tokens > 0:
+                    difference = expected_tokens - tokens
+                    difference_pct = (difference / expected_tokens) * 100
+
+                    logger.info(f"   Difference: {difference:.4f} tokens ({difference_pct:.1f}%)")
+
+                    MANUAL_SALE_THRESHOLD = 95.0
+
+                    if difference_pct > MANUAL_SALE_THRESHOLD:
+                        logger.warning("=" * 70)
+                        logger.warning("⚠️  MANUAL SALE DETECTED!")
+                        logger.warning(f"   Expected {expected_tokens:.4f} tokens but found only {tokens:.4f}")
+                        logger.warning(f"   {difference_pct:.1f}% of position is missing (threshold: {MANUAL_SALE_THRESHOLD}%)")
+                        logger.warning("   Position was likely sold manually via web interface")
+                        logger.warning("=" * 70)
+                        logger.info("")
+                        logger.info("💡 Action: Manual sale detected - resetting to SCANNING")
+                        logger.info("")
+
+                        # Reset and find new market
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+
                 if tokens >= 1.0:  # Still have significant tokens
                     logger.info(f"✅ Still have {tokens:.4f} tokens")
                     logger.info(f"   Order is terminal but tokens remain - going back to BUY_FILLED to place new SELL")
-                    
+
                     # Update filled_amount in case it changed
                     position['filled_amount'] = tokens
-                    
+
                     # Remove old SELL order data
                     if 'sell_order_id' in position:
                         del position['sell_order_id']
                     if 'sell_price' in position:
                         del position['sell_price']
-                    
+
                     self.state['stage'] = 'BUY_FILLED'
                     self.state_manager.save_state(self.state)
                     return True
-                    
+
                 else:
                     logger.warning(f"⚠️ No significant tokens found (only {tokens:.4f})")
-                    
+
                     if order_details and is_fully_filled:
                         logger.info(f"   SELL order completed successfully")
                         logger.info("   Marking as COMPLETED")
@@ -1401,7 +1498,7 @@ class AutonomousBot:
                         return True
                     else:
                         logger.info(f"   Order terminal without completion - resetting to SCANNING")
-                        
+
                         self.state_manager.reset_position(self.state)
                         self.state['stage'] = 'SCANNING'
                         self.state_manager.save_state(self.state)
