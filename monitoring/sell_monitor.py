@@ -295,13 +295,23 @@ class SellMonitor:
                 # =============================================================
                 # CHECK: ORDER CANCELLED/EXPIRED
                 # =============================================================
-                if status_enum in ['Cancelled', 'Expired'] or status in [3, 4]:
+                # Support both US spelling (Canceled) and UK spelling (Cancelled)
+                if status_enum in ['Cancelled', 'Canceled', 'Expired'] or status in [3, 4]:
                     logger.error(f"[{check_time}] ❌ Order {status_enum}!")
                     logger.warning("")
-                    logger.warning(f"Order was {status_enum.lower()}")
-                    logger.warning("You still have tokens - can try placing new SELL order")
+                    logger.warning(f"⚠️  Order was {status_enum.lower()}")
+                    logger.warning(f"   Possible reasons:")
+                    logger.warning(f"   - Market was resolved before order filled")
+                    logger.warning(f"   - Order was manually canceled")
+                    logger.warning(f"   - Exchange/platform canceled the order")
                     logger.warning("")
-                    
+                    logger.warning(f"📊 Diagnostics:")
+                    logger.warning(f"   Market ID: {market_id}")
+                    logger.warning(f"   Token ID: {token_id}")
+                    logger.warning(f"   Order ID: {order_id}")
+                    logger.warning(f"   You still have tokens - bot will retry SELL order")
+                    logger.warning("")
+
                     return {
                         'status': status_enum.lower(),
                         'filled_amount': None,

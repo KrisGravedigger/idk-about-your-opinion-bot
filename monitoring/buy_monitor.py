@@ -264,16 +264,23 @@ class BuyMonitor:
                 # =============================================================
                 # CHECK: ORDER CANCELLED/EXPIRED
                 # =============================================================
-                if status_enum in ['Cancelled', 'Expired'] or status in [3, 4]:
+                # Support both US spelling (Canceled) and UK spelling (Cancelled)
+                if status_enum in ['Cancelled', 'Canceled', 'Expired'] or status in [3, 4]:
                     logger.error(f"[{check_time}] ❌ Order {status_enum}!")
                     logger.warning("")
-                    logger.warning(f"Order was {status_enum.lower()}")
-                    logger.warning("Possible causes:")
-                    logger.warning("   - Market was resolved")
-                    logger.warning("   - Order was cancelled manually")
-                    logger.warning("   - Insufficient balance")
+                    logger.warning(f"⚠️  Order was {status_enum.lower()}")
+                    logger.warning(f"   Possible reasons:")
+                    logger.warning(f"   - Market was resolved before order filled")
+                    logger.warning(f"   - Order was manually canceled")
+                    logger.warning(f"   - Exchange/platform canceled the order")
+                    logger.warning(f"   - Insufficient balance")
+                    logger.warning(f"   - Order expired")
                     logger.warning("")
-                    
+                    logger.warning(f"📊 Diagnostics:")
+                    logger.warning(f"   Order ID: {order_id}")
+                    logger.warning(f"   Bot will search for new market")
+                    logger.warning("")
+
                     return {
                         'status': status_enum.lower(),
                         'filled_amount': None,

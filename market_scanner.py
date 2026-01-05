@@ -384,19 +384,19 @@ class MarketScanner:
         # Filter 1: Check market end time (if enabled)
         if MIN_HOURS_UNTIL_CLOSE is not None or MAX_HOURS_UNTIL_CLOSE is not None:
             # Extract end time from market data
-            # Opinion.trade API uses 'end_at' (Unix timestamp in seconds)
-            end_at = market.get('end_at')  # Unix timestamp in seconds
-            
+            # Opinion.trade API uses 'cutoff_at' (Unix timestamp in seconds)
+            end_at = market.get('cutoff_at')  # Unix timestamp in seconds
+
             logger.debug(f"⏰ Time filter check:")
-            logger.debug(f"   end_at field: {end_at}")
+            logger.debug(f"   cutoff_at field: {end_at}")
             
             if end_at:
                 try:
                     from datetime import datetime, timezone
-                    
-                    # Parse end_at as Unix timestamp (in seconds)
+
+                    # Parse cutoff_at as Unix timestamp (in seconds)
                     end_time = datetime.fromtimestamp(end_at, tz=timezone.utc)
-                    logger.debug(f"   Parsed end time: {end_time}")
+                    logger.debug(f"   Parsed close time: {end_time}")
                     
                     now = datetime.now(timezone.utc)
                     hours_until_close = (end_time - now).total_seconds() / 3600
@@ -418,13 +418,13 @@ class MarketScanner:
                         return None
                 
                 except Exception as e:
-                    logger.debug(f"❌ REJECTED: Market {market_id}: Could not parse end_at timestamp: {e}")
+                    logger.debug(f"❌ REJECTED: Market {market_id}: Could not parse cutoff_at timestamp: {e}")
                     logger.debug("")
-                    # If we can't parse end_at and filters are enabled, skip for safety
+                    # If we can't parse cutoff_at and filters are enabled, skip for safety
                     return None
             else:
-                # No end_at field in market data
-                logger.debug(f"⚠️  Market {market_id}: No end_at field (skipping time filter)")
+                # No cutoff_at field in market data
+                logger.debug(f"⚠️  Market {market_id}: No cutoff_at field (skipping time filter)")
         
         # ========================================================================
         # Filter 2: Check orderbook balance (if enabled)
