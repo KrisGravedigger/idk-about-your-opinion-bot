@@ -161,9 +161,10 @@ def test_market_time_filtering():
 
         # Check its end time
         market_data = next((m for m in all_markets if m.get('market_id') == best_market.market_id), None)
-        if market_data and market_data.get('end_at'):
-            end_time = datetime.fromtimestamp(market_data['end_at'], tz=timezone.utc)
+        if market_data and market_data.get('cutoff_at'):
+            end_time = datetime.fromtimestamp(market_data['cutoff_at'], tz=timezone.utc)
             hours_until_close = (end_time - now).total_seconds() / 3600
+            print(f"   Cutoff time: {end_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
             print(f"   Hours until close: {hours_until_close:.1f}h")
 
             if hours_until_close < MIN_HOURS_UNTIL_CLOSE:
@@ -171,6 +172,9 @@ def test_market_time_filtering():
                 print(f"   🐛 BUG DETECTED: Time filter is NOT working!")
             else:
                 print(f"   ✅ VERIFIED: Market closes in > {MIN_HOURS_UNTIL_CLOSE}h")
+                print(f"   ✅ Time filter is WORKING correctly!")
+        else:
+            print(f"   ⚠️  No cutoff_at field for this market")
     else:
         print("❌ No market found (all filtered or no suitable markets)")
 
