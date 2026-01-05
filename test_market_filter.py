@@ -83,7 +83,21 @@ def test_market_time_filtering():
 
         print(f"\n📌 Market #{i}: {market_id}")
         print(f"   Title: {title}")
-        print(f"   end_at field: {end_at}")
+
+        # Check all possible time-related fields
+        time_fields = ['end_at', 'end_time', 'close_time', 'closing_time', 'expiry', 'expires_at']
+        found_time_field = None
+        for field in time_fields:
+            if field in market and market[field] is not None:
+                print(f"   ✅ Found time field '{field}': {market[field]}")
+                found_time_field = field
+                end_at = market[field]
+                break
+
+        if not found_time_field:
+            print(f"   ⚠️  No time fields found")
+            # Print first few fields to see structure
+            print(f"   Available fields: {list(market.keys())[:10]}")
 
         if end_at:
             markets_with_time += 1
@@ -136,7 +150,7 @@ def test_market_time_filtering():
     scanner = MarketScanner(client)
 
     print("🔍 Scanning for best market (this will apply all filters)...")
-    best_market = scanner.find_best_market()
+    best_market = scanner.get_best_market()
 
     if best_market:
         print(f"✅ Found best market:")
