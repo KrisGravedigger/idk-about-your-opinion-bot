@@ -85,7 +85,7 @@ def test_market_time_filtering():
         print(f"   Title: {title}")
 
         # Check all possible time-related fields
-        time_fields = ['end_at', 'end_time', 'close_time', 'closing_time', 'expiry', 'expires_at']
+        time_fields = ['end_at', 'cutoff_at', 'end_time', 'close_time', 'closing_time', 'expiry', 'expires_at']
         found_time_field = None
         for field in time_fields:
             if field in market and market[field] is not None:
