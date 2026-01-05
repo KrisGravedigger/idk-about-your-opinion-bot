@@ -981,10 +981,10 @@ class AutonomousBot:
             
             return True
         
-        elif status in ['cancelled', 'expired', 'timeout', 'deteriorated']:
+        elif status in ['cancelled', 'canceled', 'expired', 'timeout', 'deteriorated']:  # Support both US/UK spelling
             logger.warning(f"BUY order {status}: {result.get('reason')}")
             logger.info("Resetting to find new market...")
-            
+
             # Cancel order if still active
             if status in ['timeout', 'deteriorated']:
                 try:
@@ -1457,21 +1457,21 @@ class AutonomousBot:
             
             return True
         
-        elif status in ['cancelled', 'expired']:
+        elif status in ['cancelled', 'canceled', 'expired']:  # Support both US/UK spelling
             logger.warning(f"SELL order {status}: {result.get('reason')}")
             logger.info("Retrying SELL order...")
-            
+
             # Go back to BUY_FILLED to place new SELL
             self.state['stage'] = 'BUY_FILLED'
-            
+
             # Clear old SELL data
             if 'sell_order_id' in position:
                 del position['sell_order_id']
             if 'sell_price' in position:
                 del position['sell_price']
-            
+
             self.state_manager.save_state(self.state)
-            
+
             return True
         
         elif status == 'stop_loss_triggered':
