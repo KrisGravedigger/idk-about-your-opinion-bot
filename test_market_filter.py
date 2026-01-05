@@ -53,8 +53,8 @@ def test_market_time_filtering():
     client = OpinionClient()
 
     # Get all markets (raw, unfiltered)
-    print("🔍 Fetching all markets from API...")
-    all_markets = client.get_all_markets()
+    print("🔍 Fetching all active markets from API...")
+    all_markets = client.get_all_active_markets()
 
     if not all_markets:
         print("❌ Failed to fetch markets")
