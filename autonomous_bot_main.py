@@ -190,27 +190,31 @@ def main():
         MIN_POSITION_SIZE_USDT,
         MIN_POSITION_FOR_POINTS_USDT,
         WARN_IF_BELOW_POINTS_THRESHOLD,
-        
+
         # Pricing
         SAFETY_MARGIN_CENTS,
-        
+
         # Monitoring
         FILL_CHECK_INTERVAL_SECONDS,
         BUY_ORDER_TIMEOUT_HOURS,
         SELL_ORDER_TIMEOUT_HOURS,
-        
+
         # Liquidity
         LIQUIDITY_AUTO_CANCEL,
         LIQUIDITY_BID_DROP_THRESHOLD,
         LIQUIDITY_SPREAD_THRESHOLD,
-        
+
         # Stop-loss
         ENABLE_STOP_LOSS,
         STOP_LOSS_TRIGGER_PERCENT,
         STOP_LOSS_AGGRESSIVE_OFFSET,
-        
+
         # Bot config
-        BONUS_MARKETS_FILE
+        BONUS_MARKETS_FILE,
+        DEFAULT_SCORING_PROFILE,
+
+        # Telegram
+        TELEGRAM_HEARTBEAT_INTERVAL_HOURS
     )
     
     is_valid, errors, warnings = validate_config()
@@ -242,29 +246,36 @@ def main():
         'MIN_POSITION_SIZE_USDT': MIN_POSITION_SIZE_USDT,
         'MIN_POSITION_FOR_POINTS_USDT': MIN_POSITION_FOR_POINTS_USDT,
         'WARN_IF_BELOW_POINTS_THRESHOLD': WARN_IF_BELOW_POINTS_THRESHOLD,
-        
+
         # Pricing
         'SAFETY_MARGIN_CENTS': SAFETY_MARGIN_CENTS,
-        
+
         # Monitoring
         'FILL_CHECK_INTERVAL_SECONDS': FILL_CHECK_INTERVAL_SECONDS,
         'BUY_ORDER_TIMEOUT_HOURS': BUY_ORDER_TIMEOUT_HOURS,
         'SELL_ORDER_TIMEOUT_HOURS': SELL_ORDER_TIMEOUT_HOURS,
-        
+
         # Liquidity
         'LIQUIDITY_AUTO_CANCEL': LIQUIDITY_AUTO_CANCEL,
         'LIQUIDITY_BID_DROP_THRESHOLD': LIQUIDITY_BID_DROP_THRESHOLD,
         'LIQUIDITY_SPREAD_THRESHOLD': LIQUIDITY_SPREAD_THRESHOLD,
-        
+
         # Stop-loss
         'ENABLE_STOP_LOSS': ENABLE_STOP_LOSS,
         'STOP_LOSS_TRIGGER_PERCENT': STOP_LOSS_TRIGGER_PERCENT,
         'STOP_LOSS_AGGRESSIVE_OFFSET': STOP_LOSS_AGGRESSIVE_OFFSET,
-        
+
         # Bot config
         'BONUS_MARKETS_FILE': BONUS_MARKETS_FILE,
+        'SCORING_PROFILE': DEFAULT_SCORING_PROFILE,
         'CYCLE_DELAY_SECONDS': 10,
-        'MAX_CYCLES': args.max_cycles
+        'MAX_CYCLES': args.max_cycles,
+
+        # Telegram
+        'TELEGRAM_HEARTBEAT_INTERVAL_HOURS': TELEGRAM_HEARTBEAT_INTERVAL_HOURS,
+
+        # Logging
+        'LOG_FILE': 'opinion_farming_bot.log'
     }
     
     # Display config summary

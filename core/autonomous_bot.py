@@ -27,7 +27,7 @@ Usage:
 """
 
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from logger_config import setup_logger
 from utils import format_price, format_usdt, format_percent, get_timestamp
@@ -42,6 +42,8 @@ from monitoring.buy_monitor import BuyMonitor
 from monitoring.sell_monitor import SellMonitor
 from monitoring.liquidity_checker import LiquidityChecker
 from position_tracker import PositionTracker
+from pnl_statistics import PnLStatistics
+from telegram_notifications import TelegramNotifier
 
 logger = setup_logger(__name__)
 
@@ -79,18 +81,22 @@ class AutonomousBot:
         # Initialize all modules
         self.capital_manager = CapitalManager(config, client)
         self.state_manager = StateManager()
+        self.pnl_stats = PnLStatistics()  # Separate P&L statistics manager
+        self.telegram = TelegramNotifier()  # Telegram notifications
         self.scanner = MarketScanner(client)
         self.pricing = PricingStrategy(config)
         self.order_manager = OrderManager(client)
         self.tracker = PositionTracker()
-        
+
         # CHANGED: Load state immediately in constructor
         # This allows autonomous_bot_main.py to modify state before run()
         self.state = self.state_manager.load_state()
-        
+
         # Config shortcuts
         self.cycle_delay = config.get('CYCLE_DELAY_SECONDS', 10)
         self.max_cycles = config.get('MAX_CYCLES', None)  # None = infinite
+        self.heartbeat_interval_hours = config.get('TELEGRAM_HEARTBEAT_INTERVAL_HOURS', 1.0)
+        self.last_heartbeat = None  # Track last heartbeat time
         
         logger.info("🤖 Autonomous Bot initialized")
         logger.debug(f"   Modules loaded: {self._list_modules()}")
@@ -125,7 +131,23 @@ class AutonomousBot:
         logger.info("🚀 STARTING AUTONOMOUS BOT")
         logger.info("=" * 60)
         logger.info("")
-        
+
+        # Display current P&L statistics at startup
+        self.pnl_stats.display_summary(logger)
+
+        # Send Telegram notification: Bot started
+        try:
+            balance = self.client.get_usdt_balance()
+        except Exception as e:
+            logger.warning(f"Could not fetch balance for Telegram notification: {e}")
+            balance = 0.0
+
+        self.telegram.send_bot_start(
+            stats=self.pnl_stats.get_summary(),
+            config=self.config,
+            balance=balance
+        )
+
         try:
             # State already loaded in __init__
             # But reload here to catch any changes made in autonomous_bot_main.py
@@ -149,11 +171,14 @@ class AutonomousBot:
                 
                 # Execute stage handler
                 success = self._execute_stage(stage)
-                
+
                 if not success:
                     logger.error(f"Stage {stage} failed - pausing before retry")
                     time.sleep(self.cycle_delay * 3)  # Longer delay on error
-                
+
+                # Check if heartbeat should be sent
+                self._check_and_send_heartbeat()
+
                 # Brief pause between cycles
                 time.sleep(self.cycle_delay)
         
@@ -162,15 +187,36 @@ class AutonomousBot:
             logger.info("⛔ Bot stopped by user")
             logger.info("")
             self._display_session_summary()
+
+            # Send Telegram notification: Bot stopped
+            self.telegram.send_bot_stop(
+                stats=self.pnl_stats.get_summary(),
+                last_logs=self._get_recent_logs()
+            )
+
             return 0
-        
+
         except Exception as e:
             logger.exception(f"Unexpected error in main loop: {e}")
+
+            # Send Telegram notification: Bot stopped with error
+            self.telegram.send_bot_stop(
+                stats=self.pnl_stats.get_summary(),
+                last_logs=self._get_recent_logs()
+            )
+
             return 1
-        
+
         logger.info("")
         logger.info("✅ Bot execution completed")
         self._display_session_summary()
+
+        # Send Telegram notification: Bot stopped normally
+        self.telegram.send_bot_stop(
+            stats=self.pnl_stats.get_summary(),
+            last_logs=self._get_recent_logs()
+        )
+
         return 0
     
     def _execute_stage(self, stage: str) -> bool:
@@ -583,10 +629,19 @@ class AutonomousBot:
             
             # SAVE IMMEDIATELY - before any logging or validation
             self.state_manager.save_state(self.state)
-            
+
             logger.info(f"✅ State saved with order_id: {order_id}")
             logger.info(f"📍 Next stage: BUY_PLACED → BUY_MONITORING")
-            
+
+            # Send Telegram notification: BUY order placed
+            self.telegram.send_state_change(
+                new_stage='BUY_PLACED',
+                market_id=selected.market_id,
+                market_title=selected.title,
+                price=buy_price,
+                amount=position_size
+            )
+
             return True
             
         except Exception as e:
@@ -1292,10 +1347,19 @@ class AutonomousBot:
             position['sell_order_id'] = sell_order_id
             position['sell_price'] = sell_price
             position['sell_placed_at'] = get_timestamp()
-            
+
             self.state['stage'] = 'SELL_PLACED'
             self.state_manager.save_state(self.state)
-            
+
+            # Send Telegram notification: SELL order placed
+            self.telegram.send_state_change(
+                new_stage='SELL_PLACED',
+                market_id=position.get('market_id'),
+                market_title=position.get('market_title'),
+                price=sell_price,
+                amount=position.get('filled_amount', 0) * sell_price
+            )
+
             return True
             
         except Exception as e:
@@ -1574,10 +1638,24 @@ class AutonomousBot:
         elif status == 'stop_loss_triggered':
             logger.warning(f"🛑 Stop-loss triggered: {result.get('reason')}")
             logger.info("Position closed at loss - finding new market...")
-            
+
+            # Send Telegram notification: Stop-loss triggered
+            current_price = result.get('current_price', 0)
+            buy_price = position.get('avg_fill_price', 0)
+            pnl_percent = result.get('pnl_percent', 0)
+
+            self.telegram.send_stop_loss(
+                market_id=position.get('market_id', 0),
+                market_title=position.get('market_title', 'Unknown market'),
+                current_price=current_price,
+                buy_price=buy_price,
+                pnl_percent=pnl_percent,
+                action='triggered'
+            )
+
             # TODO: Could calculate P&L here if stop-loss order filled
             # For now, just reset and move on
-            
+
             # Update statistics (record as loss)
             stats = self.state['statistics']
             stats['losses'] += 1
@@ -1638,50 +1716,149 @@ class AutonomousBot:
     def _update_statistics(self, pnl):
         """
         Update statistics after completed trade.
-        
+
         Args:
             pnl: PositionPnL object
         """
+        # Update separate P&L statistics file
+        self.pnl_stats.update_after_trade(
+            pnl_usdt=float(pnl.pnl),
+            pnl_percent=float(pnl.pnl_percent)
+        )
+
+        # Also keep state.json statistics for backwards compatibility
+        # (in case state.json is used elsewhere)
         stats = self.state['statistics']
-        
+
         stats['total_trades'] += 1
-        
+
         if pnl.is_profitable():
             stats['wins'] += 1
             stats['consecutive_losses'] = 0  # Reset streak
         else:
             stats['losses'] += 1
             stats['consecutive_losses'] += 1
-        
+
         stats['total_pnl_usdt'] += float(pnl.pnl)
         stats['total_pnl_percent'] = (
-            (stats['total_pnl_usdt'] / stats['total_trades']) 
+            (stats['total_pnl_usdt'] / stats['total_trades'])
             if stats['total_trades'] > 0 else 0
         )
-        
+
         stats['win_rate_percent'] = (
             (stats['wins'] / stats['total_trades'] * 100)
             if stats['total_trades'] > 0 else 0
         )
-        
+
         self.state['last_updated_at'] = get_timestamp()
-    
+
+    def _check_and_send_heartbeat(self):
+        """Check if heartbeat should be sent and send it if needed."""
+        if self.heartbeat_interval_hours <= 0:
+            return  # Heartbeat disabled
+
+        from datetime import datetime
+
+        now = datetime.now()
+
+        # Send heartbeat if:
+        # 1. Never sent before, OR
+        # 2. Enough time has passed since last heartbeat
+        should_send = (
+            self.last_heartbeat is None or
+            (now - self.last_heartbeat).total_seconds() >= self.heartbeat_interval_hours * 3600
+        )
+
+        if not should_send:
+            return
+
+        # Gather information for heartbeat
+        stage = self.state.get('stage', 'IDLE')
+        position = self.state.get('current_position', {})
+        market_info = None
+        position_value = 0.0
+
+        # Get market info if in active position
+        if position and position.get('market_id'):
+            try:
+                market_id = position['market_id']
+                orderbook = self.client.get_orderbook(market_id)
+
+                if orderbook and 'bids' in orderbook and 'asks' in orderbook:
+                    bids = orderbook['bids']
+                    asks = orderbook['asks']
+
+                    if bids and asks:
+                        best_bid = float(bids[0][0])
+                        best_ask = float(asks[0][0])
+                        spread = best_ask - best_bid
+
+                        market_info = {
+                            'market_id': market_id,
+                            'spread': spread,
+                            'best_bid': best_bid,
+                            'best_ask': best_ask
+                        }
+
+                        # Calculate position value
+                        if 'filled_amount' in position:
+                            # Estimate position value using mid-price
+                            mid_price = (best_bid + best_ask) / 2
+                            position_value = float(position['filled_amount']) * mid_price
+
+            except Exception as e:
+                logger.debug(f"Could not fetch market info for heartbeat: {e}")
+
+        # Get current balance
+        try:
+            balance = self.client.get_usdt_balance()
+        except Exception as e:
+            logger.debug(f"Could not fetch balance for heartbeat: {e}")
+            balance = 0.0
+
+        # Send heartbeat
+        self.telegram.send_heartbeat(
+            stage=stage,
+            market_info=market_info,
+            balance=balance,
+            position_value=position_value
+        )
+
+        self.last_heartbeat = now
+        logger.debug(f"💓 Heartbeat sent at {now.strftime('%H:%M:%S')}")
+
+    def _get_recent_logs(self, num_lines: int = 20) -> List[str]:
+        """
+        Get last N lines from log file.
+
+        Args:
+            num_lines: Number of lines to retrieve
+
+        Returns:
+            List of log lines (max num_lines)
+        """
+        from pathlib import Path
+
+        # Try to read from log file
+        log_file = Path(self.config.get('LOG_FILE', 'opinion_farming_bot.log'))
+
+        if not log_file.exists():
+            return ["Log file not found"]
+
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                # Read all lines and get last N
+                lines = f.readlines()
+                return [line.strip() for line in lines[-num_lines:]]
+
+        except Exception as e:
+            logger.debug(f"Could not read log file: {e}")
+            return [f"Error reading logs: {e}"]
+
     def _display_session_summary(self):
-        """Display summary of current session."""
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info("SESSION SUMMARY".center(60))
-        logger.info("=" * 60)
-        
-        stats = self.state['statistics']
-        
-        logger.info(f"   Total trades: {stats['total_trades']}")
-        logger.info(f"   Wins: {stats['wins']} | Losses: {stats['losses']}")
-        logger.info(f"   Win rate: {stats['win_rate_percent']:.1f}%")
-        logger.info(f"   Total P&L: ${stats['total_pnl_usdt']:.2f}")
-        logger.info(f"   Avg P&L per trade: ${stats['total_pnl_percent']:.2f}")
-        
-        logger.info("=" * 60)
+        """Display summary of current session from separate P&L statistics file."""
+        # Use the separate P&L statistics file (persists even if state.json is deleted)
+        self.pnl_stats.display_summary(logger)
 
 
 # =============================================================================

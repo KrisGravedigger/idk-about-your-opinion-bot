@@ -247,7 +247,7 @@ ALERT_ON_ERROR = True
 ALERT_ON_INSUFFICIENT_BALANCE = True
 
 # =============================================================================
-# TELEGRAM NOTIFICATIONS (Future Feature)
+# TELEGRAM NOTIFICATIONS
 # =============================================================================
 
 # Telegram bot token (get from @BotFather)
@@ -255,6 +255,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # Your Telegram chat ID (where to send notifications)
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Heartbeat interval (hours) - send periodic status updates
+# Set to 0 to disable heartbeat notifications
+TELEGRAM_HEARTBEAT_INTERVAL_HOURS = 1.0
 
 # =============================================================================
 # PRECISION SETTINGS
