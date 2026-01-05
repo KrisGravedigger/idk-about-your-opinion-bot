@@ -364,6 +364,12 @@ class SellMonitor:
             >>> should_stop  # True
             >>> loss_pct     # -12.0
         """
+        # VALIDATION: Verify buy_price is real price, not fallback
+        if buy_price <= 0.02:  # Suspiciously low (likely fallback $0.01)
+            logger.warning(f"⚠️ buy_price={buy_price:.4f} appears to be fallback value")
+            logger.warning(f"   Stop-loss may not work correctly")
+            logger.warning(f"   Continuing with check but results may be inaccurate")
+        
         # Get fresh orderbook to check current market price
         # Note: token_id is stored in current_position, not directly in state
         position = self.state.get('current_position', {})
@@ -407,7 +413,7 @@ class SellMonitor:
         logger.info(
             f"Stop-loss check: buy={format_price(buy_price)}, "
             f"current_bid={format_price(current_best_bid)}, "
-            f"loss={format_percent(unrealized_loss_pct)}"
+            f"price_change={format_percent(unrealized_loss_pct)}"
         )
         
         # Check if loss exceeds threshold (both are negative, so <=)
