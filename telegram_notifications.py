@@ -315,7 +315,10 @@ class TelegramNotifier:
         market_id: Optional[int] = None,
         market_title: Optional[str] = None,
         price: Optional[float] = None,
-        amount: Optional[float] = None
+        amount: Optional[float] = None,
+        spread: Optional[float] = None,
+        best_bid: Optional[float] = None,
+        best_ask: Optional[float] = None
     ) -> bool:
         """
         Send notification for state change (e.g., BUY_PLACED, SELL_PLACED).
@@ -326,6 +329,9 @@ class TelegramNotifier:
             market_title: Market title (if applicable)
             price: Order price (if applicable)
             amount: Order amount in USDT (if applicable)
+            spread: Market spread (if applicable)
+            best_bid: Best bid price (if applicable)
+            best_ask: Best ask price (if applicable)
 
         Returns:
             True if sent successfully
@@ -334,7 +340,9 @@ class TelegramNotifier:
             'BUY_PLACED': '🟢',
             'SELL_PLACED': '🔴',
             'BUY_FILLED': '✅',
-            'SELL_FILLED': '✅'
+            'SELL_FILLED': '✅',
+            'IDLE': '💤',
+            'SCANNING': '🔍'
         }.get(new_stage, '📍')
 
         stage_name = new_stage.replace('_', ' ').title()
@@ -351,6 +359,13 @@ class TelegramNotifier:
             message += f"💵 Price: ${price:.4f}\n"
         if amount is not None:
             message += f"💰 Amount: ${amount:.2f}\n"
+
+        # Add orderbook info if available (for BUY_PLACED, SELL_PLACED)
+        if spread is not None and best_bid is not None and best_ask is not None:
+            message += f"\n📈 <b>Orderbook:</b>\n"
+            message += f"   • Spread: ${spread:.4f}\n"
+            message += f"   • Best bid: ${best_bid:.4f}\n"
+            message += f"   • Best ask: ${best_ask:.4f}\n"
 
         message += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 

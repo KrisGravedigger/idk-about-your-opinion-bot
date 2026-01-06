@@ -196,10 +196,20 @@ class AutonomousBot:
             self._display_session_summary()
 
             # Send Telegram notification: Bot stopped
-            self.telegram.send_bot_stop(
-                stats=self.pnl_stats.get_summary(),
-                last_logs=self._get_recent_logs()
-            )
+            try:
+                logger.info("📱 Sending shutdown notification to Telegram...")
+                result = self.telegram.send_bot_stop(
+                    stats=self.pnl_stats.get_summary(),
+                    last_logs=self._get_recent_logs()
+                )
+                if result:
+                    logger.info("✅ Shutdown notification sent successfully")
+                else:
+                    logger.warning("⚠️ Shutdown notification failed to send")
+            except Exception as e:
+                logger.error(f"❌ Error sending shutdown notification: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
 
             return 0
 
@@ -207,10 +217,18 @@ class AutonomousBot:
             logger.exception(f"Unexpected error in main loop: {e}")
 
             # Send Telegram notification: Bot stopped with error
-            self.telegram.send_bot_stop(
-                stats=self.pnl_stats.get_summary(),
-                last_logs=self._get_recent_logs()
-            )
+            try:
+                logger.info("📱 Sending error shutdown notification to Telegram...")
+                result = self.telegram.send_bot_stop(
+                    stats=self.pnl_stats.get_summary(),
+                    last_logs=self._get_recent_logs()
+                )
+                if result:
+                    logger.info("✅ Error shutdown notification sent")
+                else:
+                    logger.warning("⚠️ Error shutdown notification failed")
+            except Exception as notify_error:
+                logger.error(f"❌ Error sending shutdown notification: {notify_error}")
 
             return 1
 
@@ -219,10 +237,18 @@ class AutonomousBot:
         self._display_session_summary()
 
         # Send Telegram notification: Bot stopped normally
-        self.telegram.send_bot_stop(
-            stats=self.pnl_stats.get_summary(),
-            last_logs=self._get_recent_logs()
-        )
+        try:
+            logger.info("📱 Sending completion notification to Telegram...")
+            result = self.telegram.send_bot_stop(
+                stats=self.pnl_stats.get_summary(),
+                last_logs=self._get_recent_logs()
+            )
+            if result:
+                logger.info("✅ Completion notification sent")
+            else:
+                logger.warning("⚠️ Completion notification failed")
+        except Exception as e:
+            logger.error(f"❌ Error sending completion notification: {e}")
 
         return 0
     
@@ -640,13 +666,32 @@ class AutonomousBot:
             logger.info(f"✅ State saved with order_id: {order_id}")
             logger.info(f"📍 Next stage: BUY_PLACED → BUY_MONITORING")
 
+            # Get orderbook info for notification
+            orderbook_info = {}
+            try:
+                orderbook = self.client.get_market_orderbook(selected.yes_token_id)
+                if orderbook and 'bids' in orderbook and 'asks' in orderbook:
+                    bids = orderbook['bids']
+                    asks = orderbook['asks']
+                    if bids and asks:
+                        best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0])
+                        best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
+                        orderbook_info = {
+                            'spread': best_ask - best_bid,
+                            'best_bid': best_bid,
+                            'best_ask': best_ask
+                        }
+            except Exception as e:
+                logger.debug(f"Could not fetch orderbook for notification: {e}")
+
             # Send Telegram notification: BUY order placed
             self.telegram.send_state_change(
                 new_stage='BUY_PLACED',
                 market_id=selected.market_id,
                 market_title=selected.title,
                 price=buy_price,
-                amount=position_size
+                amount=position_size,
+                **orderbook_info
             )
 
             return True
@@ -1734,20 +1779,28 @@ class AutonomousBot:
     def _handle_completed(self) -> bool:
         """
         COMPLETED stage: Trade cycle completed.
-        
+
         Transitions to: IDLE (ready for new cycle)
         """
         logger.info("✅ COMPLETED - Trade cycle finished")
-        
+
         # Reset position for new cycle
         self.state_manager.reset_position(self.state)
         self.state['stage'] = 'IDLE'
         self.state_manager.save_state(self.state)
-        
+
         logger.info(f"📊 Total trades: {self.state['statistics']['total_trades']}")
         logger.info(f"💰 Total P&L: ${self.state['statistics']['total_pnl_usdt']:.2f}")
         logger.info("")
-        
+
+        # Send state change notification
+        stats = self.state['statistics']
+        self.telegram.send_state_change(
+            new_stage='IDLE',
+            market_id=None,
+            market_title=f"Trade completed - {stats['total_trades']} total trades, ${stats['total_pnl_usdt']:.2f} P&L"
+        )
+
         return True
     
     # =========================================================================
