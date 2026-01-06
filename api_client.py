@@ -322,7 +322,31 @@ class OpinionClient:
                         asks.append(ask.dict())
                     else:
                         asks.append(ask)
-            
+
+            # CRITICAL FIX: Sort orderbook to ensure correct best prices
+            # bids: highest to lowest (descending)
+            # asks: lowest to highest (ascending)
+            # This ensures bids[0] = best bid, asks[0] = best ask
+            def safe_price(order):
+                """Extract price safely from order dict/object."""
+                if isinstance(order, dict):
+                    return float(order.get('price', 0))
+                elif hasattr(order, 'price'):
+                    return float(order.price)
+                return 0.0
+
+            if bids:
+                bids.sort(key=safe_price, reverse=True)  # Descending
+            if asks:
+                asks.sort(key=safe_price)  # Ascending
+
+            # DEBUG: Log orderbook after sorting for verification
+            if bids and asks:
+                logger.debug(f"📊 Orderbook sorted for token {token_id[:20]}...")
+                logger.debug(f"   Best bid: ${safe_price(bids[0]):.4f} (from {len(bids)} bids)")
+                logger.debug(f"   Best ask: ${safe_price(asks[0]):.4f} (from {len(asks)} asks)")
+                logger.debug(f"   Spread: ${safe_price(asks[0]) - safe_price(bids[0]):.4f}")
+
             return {
                 'bids': bids,
                 'asks': asks

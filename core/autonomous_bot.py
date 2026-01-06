@@ -535,8 +535,31 @@ class AutonomousBot:
             
             best_bid = fresh_orderbook['best_bid']
             best_ask = fresh_orderbook['best_ask']
-            
+
+            # VALIDATION: Sanity check orderbook prices before trading
+            spread = best_ask - best_bid
+            if spread < 0:
+                logger.error(f"❌ INVALID ORDERBOOK: Negative spread!")
+                logger.error(f"   Best bid: ${best_bid:.4f}")
+                logger.error(f"   Best ask: ${best_ask:.4f}")
+                logger.error(f"   This indicates crossed market or API data error")
+                logger.error(f"   CANNOT place order with invalid orderbook - resetting to SCANNING")
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return False
+
+            if best_bid <= 0 or best_ask <= 0:
+                logger.error(f"❌ INVALID ORDERBOOK: Zero or negative prices!")
+                logger.error(f"   Best bid: ${best_bid:.4f}, Best ask: ${best_ask:.4f}")
+                return False
+
+            if best_bid > 1.0 or best_ask > 1.0:
+                logger.warning(f"⚠️ SUSPICIOUS: Prices > $1.00 in prediction market!")
+                logger.warning(f"   Best bid: ${best_bid:.4f}, Best ask: ${best_ask:.4f}")
+                # Continue but log warning
+
             logger.info(f"   Bid: {format_price(best_bid)} | Ask: {format_price(best_ask)}")
+            logger.info(f"   Spread: {format_price(spread)}")
             
             # Calculate position size
             try:
@@ -1385,6 +1408,16 @@ class AutonomousBot:
                 logger.error(f"❌ Invalid orderbook prices after fallback:")
                 logger.error(f"   Bid: {best_bid}, Ask: {best_ask}")
                 logger.error(f"   Cannot place SELL order without valid prices")
+                return False
+
+            # Validate spread is not negative
+            spread = best_ask - best_bid
+            if spread < 0:
+                logger.error(f"❌ INVALID ORDERBOOK: Negative spread!")
+                logger.error(f"   Best bid: ${best_bid:.4f}")
+                logger.error(f"   Best ask: ${best_ask:.4f}")
+                logger.error(f"   This indicates crossed market or API data error")
+                logger.error(f"   Cannot place SELL order - returning to BUY_FILLED for retry")
                 return False
             
             logger.info(f"   Bid: {format_price(best_bid)} | Ask: {format_price(best_ask)}")
