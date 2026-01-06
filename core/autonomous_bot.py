@@ -148,9 +148,12 @@ class AutonomousBot:
             balance=balance
         )
 
-        # Send initial heartbeat to verify current state
-        logger.debug("Sending initial heartbeat...")
-        self._send_heartbeat_now()
+        try:
+            # Send initial heartbeat to verify current state
+            logger.debug("Sending initial heartbeat...")
+            self._send_heartbeat_now()
+        except Exception as e:
+            logger.warning(f"Could not send initial heartbeat: {e}")
 
         try:
             # State already loaded in __init__
@@ -1815,6 +1818,8 @@ class AutonomousBot:
     def _send_heartbeat_now(self):
         """Send heartbeat immediately (called by _check_and_send_heartbeat or on startup)."""
         from datetime import datetime
+
+        now = datetime.now()
 
         # Gather information for heartbeat
         stage = self.state.get('stage', 'IDLE')
