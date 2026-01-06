@@ -1776,25 +1776,35 @@ class AutonomousBot:
         stage = self.state.get('stage', 'IDLE')
         position = self.state.get('current_position', {})
         market_info = None
+        order_info = None
         position_value = 0.0
 
-        # Get market info if in active position
+        # Get market info and order details if in active position
         if position and position.get('market_id'):
             try:
                 market_id = position['market_id']
-                orderbook = self.client.get_orderbook(market_id)
+                token_id = position.get('token_id')
+                market_title = position.get('market_title', f'Market #{market_id}')
+
+                # Get orderbook using token_id (FIXED: was using market_id which doesn't work)
+                orderbook = None
+                if token_id:
+                    orderbook = self.client.get_market_orderbook(token_id)
 
                 if orderbook and 'bids' in orderbook and 'asks' in orderbook:
                     bids = orderbook['bids']
                     asks = orderbook['asks']
 
                     if bids and asks:
-                        best_bid = float(bids[0][0])
-                        best_ask = float(asks[0][0])
+                        # Extract best prices
+                        best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0])
+                        best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
                         spread = best_ask - best_bid
 
+                        # Build market info
                         market_info = {
                             'market_id': market_id,
+                            'market_title': market_title,
                             'spread': spread,
                             'best_bid': best_bid,
                             'best_ask': best_ask
@@ -1805,6 +1815,50 @@ class AutonomousBot:
                             # Estimate position value using mid-price
                             mid_price = (best_bid + best_ask) / 2
                             position_value = float(position['filled_amount']) * mid_price
+
+                        # Get order details for active monitoring stages
+                        if stage in ['BUY_MONITORING', 'SELL_MONITORING', 'BUY_PLACED', 'SELL_PLACED']:
+                            order_id = None
+                            if stage in ['BUY_MONITORING', 'BUY_PLACED']:
+                                order_id = position.get('order_id')
+                            elif stage in ['SELL_MONITORING', 'SELL_PLACED']:
+                                order_id = position.get('sell_order_id')
+
+                            if order_id and order_id != 'unknown':
+                                try:
+                                    order = self.client.get_order(order_id)
+                                    if order:
+                                        # Get order price and amounts
+                                        our_price = float(order.get('price', position.get('price', 0)))
+                                        order_amount = float(order.get('order_amount', 0))
+                                        filled_amount = float(order.get('filled_amount', 0))
+                                        order_side = order.get('side', 'BUY' if 'BUY' in stage else 'SELL')
+
+                                        # Calculate order position in orderbook
+                                        if order_side == 'BUY':
+                                            distance = best_bid - our_price
+                                            distance_pct = (distance / best_bid * 100) if best_bid > 0 else 0
+                                            # Find our position in bids
+                                            position_in_book = self._find_order_position_in_book(our_price, bids, 'bids')
+                                        else:  # SELL
+                                            distance = our_price - best_ask
+                                            distance_pct = (distance / best_ask * 100) if best_ask > 0 else 0
+                                            # Find our position in asks
+                                            position_in_book = self._find_order_position_in_book(our_price, asks, 'asks')
+
+                                        order_info = {
+                                            'order_id': order_id,
+                                            'side': order_side,
+                                            'our_price': our_price,
+                                            'order_amount': order_amount,
+                                            'filled_amount': filled_amount,
+                                            'filled_percent': (filled_amount / order_amount * 100) if order_amount > 0 else 0,
+                                            'distance_from_best': distance,
+                                            'distance_percent': distance_pct,
+                                            'position_in_book': position_in_book
+                                        }
+                                except Exception as e:
+                                    logger.debug(f"Could not fetch order details for heartbeat: {e}")
 
             except Exception as e:
                 logger.debug(f"Could not fetch market info for heartbeat: {e}")
@@ -1820,12 +1874,64 @@ class AutonomousBot:
         self.telegram.send_heartbeat(
             stage=stage,
             market_info=market_info,
+            order_info=order_info,
             balance=balance,
             position_value=position_value
         )
 
         self.last_heartbeat = now
         logger.debug(f"💓 Heartbeat sent at {now.strftime('%H:%M:%S')}")
+
+    def _find_order_position_in_book(self, our_price: float, book_side: list, side: str) -> dict:
+        """
+        Find where our order is positioned in the orderbook.
+
+        Args:
+            our_price: Our order price
+            book_side: List of bids or asks from orderbook
+            side: 'bids' or 'asks'
+
+        Returns:
+            Dictionary with position info and simple visualization
+        """
+        if not book_side:
+            return {'position': 0, 'total_levels': 0, 'ahead_volume': 0}
+
+        position = 0
+        ahead_volume = 0.0
+        levels_ahead = []
+
+        # For bids: higher prices are better (descending order)
+        # For asks: lower prices are better (ascending order)
+        for i, level in enumerate(book_side):
+            level_price = float(level.get('price', 0)) if isinstance(level, dict) else float(level[0])
+            level_size = float(level.get('size', 0)) if isinstance(level, dict) else float(level[1])
+
+            if side == 'bids':
+                # For BUY orders: if level price is higher than ours, it's ahead
+                if level_price > our_price:
+                    position = i + 1
+                    ahead_volume += level_size
+                    if len(levels_ahead) < 5:  # Keep top 5 levels for visualization
+                        levels_ahead.append({'price': level_price, 'size': level_size})
+                else:
+                    break
+            else:  # asks
+                # For SELL orders: if level price is lower than ours, it's ahead
+                if level_price < our_price:
+                    position = i + 1
+                    ahead_volume += level_size
+                    if len(levels_ahead) < 5:
+                        levels_ahead.append({'price': level_price, 'size': level_size})
+                else:
+                    break
+
+        return {
+            'position': position,
+            'total_levels': len(book_side),
+            'ahead_volume': ahead_volume,
+            'levels_ahead': levels_ahead
+        }
 
     def _get_recent_logs(self, num_lines: int = 20) -> List[str]:
         """

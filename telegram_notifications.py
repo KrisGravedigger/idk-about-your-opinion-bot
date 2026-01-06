@@ -197,6 +197,7 @@ class TelegramNotifier:
         self,
         stage: str,
         market_info: Optional[Dict[str, Any]] = None,
+        order_info: Optional[Dict[str, Any]] = None,
         balance: float = 0,
         position_value: float = 0
     ) -> bool:
@@ -206,6 +207,7 @@ class TelegramNotifier:
         Args:
             stage: Current bot stage
             market_info: Current market information (spread, orderbook, etc.)
+            order_info: Current order details (price, amounts, position in book)
             balance: Available USDT balance
             position_value: Current position value in USDT
 
@@ -235,17 +237,73 @@ class TelegramNotifier:
 
         if market_info:
             market_id = market_info.get('market_id', 'N/A')
+            market_title = market_info.get('market_title', 'N/A')
             spread = market_info.get('spread', 0)
             best_bid = market_info.get('best_bid', 0)
             best_ask = market_info.get('best_ask', 0)
 
+            # Truncate title if too long
+            if len(market_title) > 60:
+                market_title = market_title[:57] + "..."
+
             message += f"""
-📊 <b>Current Market:</b>
-   • Market ID: #{market_id}
+📊 <b>Market:</b> #{market_id}
+   {market_title}
    • Spread: ${spread:.4f}
    • Best bid: ${best_bid:.4f}
    • Best ask: ${best_ask:.4f}
 """
+
+        # Add order details if available
+        if order_info:
+            order_side = order_info.get('side', 'BUY')
+            our_price = order_info.get('our_price', 0)
+            order_amount = order_info.get('order_amount', 0)
+            filled_amount = order_info.get('filled_amount', 0)
+            filled_percent = order_info.get('filled_percent', 0)
+            distance_from_best = order_info.get('distance_from_best', 0)
+            distance_percent = order_info.get('distance_percent', 0)
+            position_in_book = order_info.get('position_in_book', {})
+
+            # Emoji for order side
+            side_emoji = '🟢' if order_side == 'BUY' else '🔴'
+
+            message += f"""
+{side_emoji} <b>{order_side} Order:</b>
+   • Price: ${our_price:.4f}
+   • Amount: ${order_amount:.2f}
+   • Filled: ${filled_amount:.2f} ({filled_percent:.1f}%)
+"""
+
+            # Add orderbook position info
+            pos = position_in_book.get('position', 0)
+            total = position_in_book.get('total_levels', 0)
+            ahead_volume = position_in_book.get('ahead_volume', 0)
+
+            if pos > 0:
+                # Show distance from best price
+                direction = "below" if order_side == 'BUY' else "above"
+                message += f"""
+📈 <b>Orderbook Position:</b>
+   • {pos} level(s) {direction} best price
+   • Distance: ${abs(distance_from_best):.4f} ({abs(distance_percent):.2f}%)
+   • Volume ahead: {ahead_volume:.0f} shares
+"""
+
+                # Add simple visualization of levels ahead
+                levels_ahead = position_in_book.get('levels_ahead', [])
+                if levels_ahead:
+                    message += "\n   <b>Levels ahead:</b>\n"
+                    for level in levels_ahead[:3]:  # Show top 3 levels
+                        lvl_price = level['price']
+                        lvl_size = level['size']
+                        # Create simple bar visualization
+                        bar_length = min(int(lvl_size / 100), 20)  # Scale: 100 shares = 1 char, max 20
+                        bar = '█' * bar_length if bar_length > 0 else '▏'
+                        message += f"   ${lvl_price:.4f} {bar} {lvl_size:.0f}\n"
+            else:
+                # Our order is at the best price!
+                message += f"\n✨ <b>At best {order_side.lower()} price!</b>\n"
 
         message += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
