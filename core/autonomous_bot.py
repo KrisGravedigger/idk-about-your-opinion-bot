@@ -1886,12 +1886,22 @@ class AutonomousBot:
             try:
                 market_id = position['market_id']
                 token_id = position.get('token_id')
+                outcome_side = position.get('outcome_side', 'UNKNOWN')
                 market_title = position.get('market_title', f'Market #{market_id}')
+
+                # DEBUG: Log which token we're fetching orderbook for
+                logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
+                logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
+                logger.debug(f"   outcome_side: {outcome_side}")
 
                 # Get orderbook using token_id (FIXED: was using market_id which doesn't work)
                 orderbook = None
                 if token_id:
                     orderbook = self.client.get_market_orderbook(token_id)
+                    if orderbook:
+                        logger.debug(f"   ✅ Orderbook fetched successfully")
+                    else:
+                        logger.warning(f"   ⚠️ Orderbook fetch returned None for token {token_id[:20]}...")
 
                 if orderbook and 'bids' in orderbook and 'asks' in orderbook:
                     bids = orderbook['bids']
@@ -1902,6 +1912,21 @@ class AutonomousBot:
                         best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0])
                         best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
                         spread = best_ask - best_bid
+
+                        # DEBUG: Log orderbook prices for verification
+                        logger.debug(f"   📊 Orderbook prices:")
+                        logger.debug(f"      Best bid: ${best_bid:.4f}")
+                        logger.debug(f"      Best ask: ${best_ask:.4f}")
+                        logger.debug(f"      Spread: ${spread:.4f}")
+
+                        # VALIDATION: Check if orderbook data makes sense
+                        if spread < 0:
+                            logger.warning(f"   ⚠️ SUSPICIOUS: Negative spread detected! bid=${best_bid:.4f} > ask=${best_ask:.4f}")
+                            logger.warning(f"   This indicates crossed market or data error")
+                        if best_bid <= 0 or best_ask <= 0:
+                            logger.warning(f"   ⚠️ SUSPICIOUS: Zero or negative price detected!")
+                        if best_bid > 1.0 or best_ask > 1.0:
+                            logger.warning(f"   ⚠️ SUSPICIOUS: Price > $1.00 in prediction market!")
 
                         # Build market info
                         market_info = {
