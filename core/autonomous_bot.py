@@ -148,6 +148,10 @@ class AutonomousBot:
             balance=balance
         )
 
+        # Send initial heartbeat to verify current state
+        logger.debug("Sending initial heartbeat...")
+        self._send_heartbeat_now()
+
         try:
             # State already loaded in __init__
             # But reload here to catch any changes made in autonomous_bot_main.py
@@ -985,10 +989,27 @@ class AutonomousBot:
             logger.warning(f"⚠️ Could not verify order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
         
-        # Calculate timeout
+        # Calculate timeout based on when order was originally placed
         timeout_hours = self.config['BUY_ORDER_TIMEOUT_HOURS']
-        timeout_at = datetime.now() + timedelta(hours=self.config['BUY_ORDER_TIMEOUT_HOURS'])
-        
+
+        # IMPORTANT: Use placed_at from state if available (handles bot restarts)
+        placed_at_str = position.get('placed_at')
+        if placed_at_str:
+            try:
+                # Parse ISO format timestamp (from get_timestamp())
+                placed_at = datetime.fromisoformat(placed_at_str.replace('Z', '+00:00'))
+                timeout_at = placed_at + timedelta(hours=timeout_hours)
+                logger.debug(f"Using placed_at from state: {placed_at_str}")
+                logger.debug(f"Timeout at: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            except Exception as e:
+                logger.warning(f"Could not parse placed_at '{placed_at_str}': {e}")
+                logger.info("Falling back to current time for timeout calculation")
+                timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+        else:
+            # Fallback: use current time (shouldn't happen in normal flow)
+            logger.debug("No placed_at in state, using current time for timeout")
+            timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+
         # Create monitor and start monitoring
         monitor = BuyMonitor(self.config, self.client, self.state, heartbeat_callback=self._check_and_send_heartbeat)
 
@@ -1574,10 +1595,27 @@ class AutonomousBot:
             logger.warning(f"⚠️ Could not verify SELL order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
         
-        # Calculate timeout
+        # Calculate timeout based on when SELL order was originally placed
         timeout_hours = self.config['SELL_ORDER_TIMEOUT_HOURS']
-        timeout_at = datetime.now() + timedelta(hours=timeout_hours)
-        
+
+        # IMPORTANT: Use sell_placed_at from state if available (handles bot restarts)
+        sell_placed_at_str = position.get('sell_placed_at')
+        if sell_placed_at_str:
+            try:
+                # Parse ISO format timestamp (from get_timestamp())
+                sell_placed_at = datetime.fromisoformat(sell_placed_at_str.replace('Z', '+00:00'))
+                timeout_at = sell_placed_at + timedelta(hours=timeout_hours)
+                logger.debug(f"Using sell_placed_at from state: {sell_placed_at_str}")
+                logger.debug(f"Timeout at: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            except Exception as e:
+                logger.warning(f"Could not parse sell_placed_at '{sell_placed_at_str}': {e}")
+                logger.info("Falling back to current time for timeout calculation")
+                timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+        else:
+            # Fallback: use current time (shouldn't happen in normal flow)
+            logger.debug("No sell_placed_at in state, using current time for timeout")
+            timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+
         # Create monitor and start monitoring
         monitor = SellMonitor(self.config, self.client, self.state, heartbeat_callback=self._check_and_send_heartbeat)
 
@@ -1772,6 +1810,12 @@ class AutonomousBot:
         if not should_send:
             return
 
+        self._send_heartbeat_now()
+
+    def _send_heartbeat_now(self):
+        """Send heartbeat immediately (called by _check_and_send_heartbeat or on startup)."""
+        from datetime import datetime
+
         # Gather information for heartbeat
         stage = self.state.get('stage', 'IDLE')
         position = self.state.get('current_position', {})
@@ -1832,7 +1876,10 @@ class AutonomousBot:
                                         our_price = float(order.get('price', position.get('price', 0)))
                                         order_amount = float(order.get('order_amount', 0))
                                         filled_amount = float(order.get('filled_amount', 0))
-                                        order_side = order.get('side', 'BUY' if 'BUY' in stage else 'SELL')
+
+                                        # Side is numeric: 1=BUY, 2=SELL
+                                        order_side_num = order.get('side', 1 if 'BUY' in stage else 2)
+                                        order_side = 'BUY' if order_side_num == 1 else 'SELL'
 
                                         # Calculate order position in orderbook
                                         if order_side == 'BUY':
