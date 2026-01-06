@@ -44,29 +44,31 @@ class BuyMonitor:
         liquidity_checker: LiquidityChecker instance
     """
     
-    def __init__(self, config: Dict[str, Any], client, state: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], client, state: Dict[str, Any], heartbeat_callback=None):
         """
         Initialize BUY Monitor.
-        
+
         Args:
             config: Configuration dictionary
             client: OpinionClient instance
             state: Current state dictionary (for market/token info)
-        
+            heartbeat_callback: Optional callback function to send heartbeat notifications
+
         Example:
             >>> monitor = BuyMonitor(config, client, state)
         """
         self.config = config
         self.client = client
         self.state = state
-        
+        self.heartbeat_callback = heartbeat_callback
+
         # Initialize liquidity checker
         self.liquidity_checker = LiquidityChecker(config, client)
-        
+
         # Extract config values
         self.check_interval = config['FILL_CHECK_INTERVAL_SECONDS']
         self.timeout_hours = config['BUY_ORDER_TIMEOUT_HOURS']
-        
+
         logger.debug(
             f"BuyMonitor initialized: "
             f"check_interval={self.check_interval}s, "
@@ -223,10 +225,19 @@ class BuyMonitor:
                     last_liquidity_check = check_count
                 
                 # =============================================================
+                # SEND HEARTBEAT IF CALLBACK PROVIDED
+                # =============================================================
+                if self.heartbeat_callback:
+                    try:
+                        self.heartbeat_callback()
+                    except Exception as e:
+                        logger.debug(f"Heartbeat callback failed: {e}")
+
+                # =============================================================
                 # GET ORDER STATUS
                 # =============================================================
                 order = self.client.get_order(order_id)
-                
+
                 if not order:
                     logger.warning(f"[{check_time}] ⚠️  Failed to fetch order status")
                     time.sleep(self.check_interval)
@@ -301,15 +312,8 @@ class BuyMonitor:
             logger.info("")
             logger.info("⛔ Monitoring stopped by user")
             logger.info("")
-            
-            return {
-                'status': 'interrupted',
-                'filled_amount': None,
-                'avg_fill_price': None,
-                'filled_usdt': None,
-                'fill_timestamp': None,
-                'reason': 'Monitoring interrupted by user'
-            }
+            # Re-raise KeyboardInterrupt so main loop can send shutdown notification
+            raise
         
         except Exception as e:
             logger.exception(f"Unexpected error during monitoring: {e}")

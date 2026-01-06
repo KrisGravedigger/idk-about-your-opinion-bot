@@ -990,8 +990,8 @@ class AutonomousBot:
         timeout_at = datetime.now() + timedelta(hours=self.config['BUY_ORDER_TIMEOUT_HOURS'])
         
         # Create monitor and start monitoring
-        monitor = BuyMonitor(self.config, self.client, self.state)
-        
+        monitor = BuyMonitor(self.config, self.client, self.state, heartbeat_callback=self._check_and_send_heartbeat)
+
         result = monitor.monitor_until_filled(order_id, timeout_at)
         
         status = result['status']
@@ -1579,8 +1579,8 @@ class AutonomousBot:
         timeout_at = datetime.now() + timedelta(hours=timeout_hours)
         
         # Create monitor and start monitoring
-        monitor = SellMonitor(self.config, self.client, self.state)
-        
+        monitor = SellMonitor(self.config, self.client, self.state, heartbeat_callback=self._check_and_send_heartbeat)
+
         result = monitor.monitor_until_filled(sell_order_id, timeout_at)
         
         status = result['status']
