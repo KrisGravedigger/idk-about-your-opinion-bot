@@ -149,6 +149,13 @@ class AutonomousBot:
         )
 
         try:
+            # Send initial heartbeat to verify current state
+            logger.debug("Sending initial heartbeat...")
+            self._send_heartbeat_now()
+        except Exception as e:
+            logger.warning(f"Could not send initial heartbeat: {e}")
+
+        try:
             # State already loaded in __init__
             # But reload here to catch any changes made in autonomous_bot_main.py
             if self.state is None:
@@ -189,10 +196,20 @@ class AutonomousBot:
             self._display_session_summary()
 
             # Send Telegram notification: Bot stopped
-            self.telegram.send_bot_stop(
-                stats=self.pnl_stats.get_summary(),
-                last_logs=self._get_recent_logs()
-            )
+            try:
+                logger.info("📱 Sending shutdown notification to Telegram...")
+                result = self.telegram.send_bot_stop(
+                    stats=self.pnl_stats.get_summary(),
+                    last_logs=self._get_recent_logs()
+                )
+                if result:
+                    logger.info("✅ Shutdown notification sent successfully")
+                else:
+                    logger.warning("⚠️ Shutdown notification failed to send")
+            except Exception as e:
+                logger.error(f"❌ Error sending shutdown notification: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
 
             return 0
 
@@ -200,10 +217,18 @@ class AutonomousBot:
             logger.exception(f"Unexpected error in main loop: {e}")
 
             # Send Telegram notification: Bot stopped with error
-            self.telegram.send_bot_stop(
-                stats=self.pnl_stats.get_summary(),
-                last_logs=self._get_recent_logs()
-            )
+            try:
+                logger.info("📱 Sending error shutdown notification to Telegram...")
+                result = self.telegram.send_bot_stop(
+                    stats=self.pnl_stats.get_summary(),
+                    last_logs=self._get_recent_logs()
+                )
+                if result:
+                    logger.info("✅ Error shutdown notification sent")
+                else:
+                    logger.warning("⚠️ Error shutdown notification failed")
+            except Exception as notify_error:
+                logger.error(f"❌ Error sending shutdown notification: {notify_error}")
 
             return 1
 
@@ -212,10 +237,18 @@ class AutonomousBot:
         self._display_session_summary()
 
         # Send Telegram notification: Bot stopped normally
-        self.telegram.send_bot_stop(
-            stats=self.pnl_stats.get_summary(),
-            last_logs=self._get_recent_logs()
-        )
+        try:
+            logger.info("📱 Sending completion notification to Telegram...")
+            result = self.telegram.send_bot_stop(
+                stats=self.pnl_stats.get_summary(),
+                last_logs=self._get_recent_logs()
+            )
+            if result:
+                logger.info("✅ Completion notification sent")
+            else:
+                logger.warning("⚠️ Completion notification failed")
+        except Exception as e:
+            logger.error(f"❌ Error sending completion notification: {e}")
 
         return 0
     
@@ -633,13 +666,32 @@ class AutonomousBot:
             logger.info(f"✅ State saved with order_id: {order_id}")
             logger.info(f"📍 Next stage: BUY_PLACED → BUY_MONITORING")
 
+            # Get orderbook info for notification
+            orderbook_info = {}
+            try:
+                orderbook = self.client.get_market_orderbook(selected.yes_token_id)
+                if orderbook and 'bids' in orderbook and 'asks' in orderbook:
+                    bids = orderbook['bids']
+                    asks = orderbook['asks']
+                    if bids and asks:
+                        best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0])
+                        best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
+                        orderbook_info = {
+                            'spread': best_ask - best_bid,
+                            'best_bid': best_bid,
+                            'best_ask': best_ask
+                        }
+            except Exception as e:
+                logger.debug(f"Could not fetch orderbook for notification: {e}")
+
             # Send Telegram notification: BUY order placed
             self.telegram.send_state_change(
                 new_stage='BUY_PLACED',
                 market_id=selected.market_id,
                 market_title=selected.title,
                 price=buy_price,
-                amount=position_size
+                amount=position_size,
+                **orderbook_info
             )
 
             return True
@@ -985,13 +1037,30 @@ class AutonomousBot:
             logger.warning(f"⚠️ Could not verify order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
         
-        # Calculate timeout
+        # Calculate timeout based on when order was originally placed
         timeout_hours = self.config['BUY_ORDER_TIMEOUT_HOURS']
-        timeout_at = datetime.now() + timedelta(hours=self.config['BUY_ORDER_TIMEOUT_HOURS'])
-        
+
+        # IMPORTANT: Use placed_at from state if available (handles bot restarts)
+        placed_at_str = position.get('placed_at')
+        if placed_at_str:
+            try:
+                # Parse ISO format timestamp (from get_timestamp())
+                placed_at = datetime.fromisoformat(placed_at_str.replace('Z', '+00:00'))
+                timeout_at = placed_at + timedelta(hours=timeout_hours)
+                logger.debug(f"Using placed_at from state: {placed_at_str}")
+                logger.debug(f"Timeout at: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            except Exception as e:
+                logger.warning(f"Could not parse placed_at '{placed_at_str}': {e}")
+                logger.info("Falling back to current time for timeout calculation")
+                timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+        else:
+            # Fallback: use current time (shouldn't happen in normal flow)
+            logger.debug("No placed_at in state, using current time for timeout")
+            timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+
         # Create monitor and start monitoring
-        monitor = BuyMonitor(self.config, self.client, self.state)
-        
+        monitor = BuyMonitor(self.config, self.client, self.state, heartbeat_callback=self._check_and_send_heartbeat)
+
         result = monitor.monitor_until_filled(order_id, timeout_at)
         
         status = result['status']
@@ -1574,13 +1643,30 @@ class AutonomousBot:
             logger.warning(f"⚠️ Could not verify SELL order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
         
-        # Calculate timeout
+        # Calculate timeout based on when SELL order was originally placed
         timeout_hours = self.config['SELL_ORDER_TIMEOUT_HOURS']
-        timeout_at = datetime.now() + timedelta(hours=timeout_hours)
-        
+
+        # IMPORTANT: Use sell_placed_at from state if available (handles bot restarts)
+        sell_placed_at_str = position.get('sell_placed_at')
+        if sell_placed_at_str:
+            try:
+                # Parse ISO format timestamp (from get_timestamp())
+                sell_placed_at = datetime.fromisoformat(sell_placed_at_str.replace('Z', '+00:00'))
+                timeout_at = sell_placed_at + timedelta(hours=timeout_hours)
+                logger.debug(f"Using sell_placed_at from state: {sell_placed_at_str}")
+                logger.debug(f"Timeout at: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            except Exception as e:
+                logger.warning(f"Could not parse sell_placed_at '{sell_placed_at_str}': {e}")
+                logger.info("Falling back to current time for timeout calculation")
+                timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+        else:
+            # Fallback: use current time (shouldn't happen in normal flow)
+            logger.debug("No sell_placed_at in state, using current time for timeout")
+            timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+
         # Create monitor and start monitoring
-        monitor = SellMonitor(self.config, self.client, self.state)
-        
+        monitor = SellMonitor(self.config, self.client, self.state, heartbeat_callback=self._check_and_send_heartbeat)
+
         result = monitor.monitor_until_filled(sell_order_id, timeout_at)
         
         status = result['status']
@@ -1693,20 +1779,28 @@ class AutonomousBot:
     def _handle_completed(self) -> bool:
         """
         COMPLETED stage: Trade cycle completed.
-        
+
         Transitions to: IDLE (ready for new cycle)
         """
         logger.info("✅ COMPLETED - Trade cycle finished")
-        
+
         # Reset position for new cycle
         self.state_manager.reset_position(self.state)
         self.state['stage'] = 'IDLE'
         self.state_manager.save_state(self.state)
-        
+
         logger.info(f"📊 Total trades: {self.state['statistics']['total_trades']}")
         logger.info(f"💰 Total P&L: ${self.state['statistics']['total_pnl_usdt']:.2f}")
         logger.info("")
-        
+
+        # Send state change notification
+        stats = self.state['statistics']
+        self.telegram.send_state_change(
+            new_stage='IDLE',
+            market_id=None,
+            market_title=f"Trade completed - {stats['total_trades']} total trades, ${stats['total_pnl_usdt']:.2f} P&L"
+        )
+
         return True
     
     # =========================================================================
@@ -1772,29 +1866,47 @@ class AutonomousBot:
         if not should_send:
             return
 
+        self._send_heartbeat_now()
+
+    def _send_heartbeat_now(self):
+        """Send heartbeat immediately (called by _check_and_send_heartbeat or on startup)."""
+        from datetime import datetime
+
+        now = datetime.now()
+
         # Gather information for heartbeat
         stage = self.state.get('stage', 'IDLE')
         position = self.state.get('current_position', {})
         market_info = None
+        order_info = None
         position_value = 0.0
 
-        # Get market info if in active position
+        # Get market info and order details if in active position
         if position and position.get('market_id'):
             try:
                 market_id = position['market_id']
-                orderbook = self.client.get_orderbook(market_id)
+                token_id = position.get('token_id')
+                market_title = position.get('market_title', f'Market #{market_id}')
+
+                # Get orderbook using token_id (FIXED: was using market_id which doesn't work)
+                orderbook = None
+                if token_id:
+                    orderbook = self.client.get_market_orderbook(token_id)
 
                 if orderbook and 'bids' in orderbook and 'asks' in orderbook:
                     bids = orderbook['bids']
                     asks = orderbook['asks']
 
                     if bids and asks:
-                        best_bid = float(bids[0][0])
-                        best_ask = float(asks[0][0])
+                        # Extract best prices
+                        best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0])
+                        best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
                         spread = best_ask - best_bid
 
+                        # Build market info
                         market_info = {
                             'market_id': market_id,
+                            'market_title': market_title,
                             'spread': spread,
                             'best_bid': best_bid,
                             'best_ask': best_ask
@@ -1805,6 +1917,53 @@ class AutonomousBot:
                             # Estimate position value using mid-price
                             mid_price = (best_bid + best_ask) / 2
                             position_value = float(position['filled_amount']) * mid_price
+
+                        # Get order details for active monitoring stages
+                        if stage in ['BUY_MONITORING', 'SELL_MONITORING', 'BUY_PLACED', 'SELL_PLACED']:
+                            order_id = None
+                            if stage in ['BUY_MONITORING', 'BUY_PLACED']:
+                                order_id = position.get('order_id')
+                            elif stage in ['SELL_MONITORING', 'SELL_PLACED']:
+                                order_id = position.get('sell_order_id')
+
+                            if order_id and order_id != 'unknown':
+                                try:
+                                    order = self.client.get_order(order_id)
+                                    if order:
+                                        # Get order price and amounts
+                                        our_price = float(order.get('price', position.get('price', 0)))
+                                        order_amount = float(order.get('order_amount', 0))
+                                        filled_amount = float(order.get('filled_amount', 0))
+
+                                        # Side is numeric: 1=BUY, 2=SELL
+                                        order_side_num = order.get('side', 1 if 'BUY' in stage else 2)
+                                        order_side = 'BUY' if order_side_num == 1 else 'SELL'
+
+                                        # Calculate order position in orderbook
+                                        if order_side == 'BUY':
+                                            distance = best_bid - our_price
+                                            distance_pct = (distance / best_bid * 100) if best_bid > 0 else 0
+                                            # Find our position in bids
+                                            position_in_book = self._find_order_position_in_book(our_price, bids, 'bids')
+                                        else:  # SELL
+                                            distance = our_price - best_ask
+                                            distance_pct = (distance / best_ask * 100) if best_ask > 0 else 0
+                                            # Find our position in asks
+                                            position_in_book = self._find_order_position_in_book(our_price, asks, 'asks')
+
+                                        order_info = {
+                                            'order_id': order_id,
+                                            'side': order_side,
+                                            'our_price': our_price,
+                                            'order_amount': order_amount,
+                                            'filled_amount': filled_amount,
+                                            'filled_percent': (filled_amount / order_amount * 100) if order_amount > 0 else 0,
+                                            'distance_from_best': distance,
+                                            'distance_percent': distance_pct,
+                                            'position_in_book': position_in_book
+                                        }
+                                except Exception as e:
+                                    logger.debug(f"Could not fetch order details for heartbeat: {e}")
 
             except Exception as e:
                 logger.debug(f"Could not fetch market info for heartbeat: {e}")
@@ -1820,12 +1979,64 @@ class AutonomousBot:
         self.telegram.send_heartbeat(
             stage=stage,
             market_info=market_info,
+            order_info=order_info,
             balance=balance,
             position_value=position_value
         )
 
         self.last_heartbeat = now
         logger.debug(f"💓 Heartbeat sent at {now.strftime('%H:%M:%S')}")
+
+    def _find_order_position_in_book(self, our_price: float, book_side: list, side: str) -> dict:
+        """
+        Find where our order is positioned in the orderbook.
+
+        Args:
+            our_price: Our order price
+            book_side: List of bids or asks from orderbook
+            side: 'bids' or 'asks'
+
+        Returns:
+            Dictionary with position info and simple visualization
+        """
+        if not book_side:
+            return {'position': 0, 'total_levels': 0, 'ahead_volume': 0}
+
+        position = 0
+        ahead_volume = 0.0
+        levels_ahead = []
+
+        # For bids: higher prices are better (descending order)
+        # For asks: lower prices are better (ascending order)
+        for i, level in enumerate(book_side):
+            level_price = float(level.get('price', 0)) if isinstance(level, dict) else float(level[0])
+            level_size = float(level.get('size', 0)) if isinstance(level, dict) else float(level[1])
+
+            if side == 'bids':
+                # For BUY orders: if level price is higher than ours, it's ahead
+                if level_price > our_price:
+                    position = i + 1
+                    ahead_volume += level_size
+                    if len(levels_ahead) < 5:  # Keep top 5 levels for visualization
+                        levels_ahead.append({'price': level_price, 'size': level_size})
+                else:
+                    break
+            else:  # asks
+                # For SELL orders: if level price is lower than ours, it's ahead
+                if level_price < our_price:
+                    position = i + 1
+                    ahead_volume += level_size
+                    if len(levels_ahead) < 5:
+                        levels_ahead.append({'price': level_price, 'size': level_size})
+                else:
+                    break
+
+        return {
+            'position': position,
+            'total_levels': len(book_side),
+            'ahead_volume': ahead_volume,
+            'levels_ahead': levels_ahead
+        }
 
     def _get_recent_logs(self, num_lines: int = 20) -> List[str]:
         """
