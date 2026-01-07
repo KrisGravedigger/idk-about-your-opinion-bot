@@ -257,6 +257,13 @@ class BuyHandler:
         if status == 'filled':
             logger.info("✅ BUY order filled!")
 
+            # Record transaction in history for audit trail
+            order_id = position.get('order_id', 'unknown')
+            market_id = position.get('market_id', 0)
+            market_title = position.get('market_title', 'Unknown market')
+            token_id = position.get('token_id', '')
+            outcome = position.get('outcome_side', 'YES')
+
             # Update state with fill data
             filled_from_monitor = result.get('filled_amount', 0)
 
@@ -310,6 +317,18 @@ class BuyHandler:
                         logger.error(f"❌ Cannot determine avg_fill_price!")
                         logger.error(f"   Stop-loss and P&L will be INACCURATE")
                         logger.error(f"   Using minimal fallback $0.01")
+
+            # Record BUY transaction in history
+            self.bot.transaction_history.record_buy(
+                market_id=market_id,
+                market_title=market_title,
+                token_id=token_id,
+                shares=position.get('filled_amount', 0),
+                price=position.get('avg_fill_price', 0),
+                amount_usdt=position.get('filled_usdt', 0),
+                order_id=order_id,
+                outcome=outcome
+            )
 
             self.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.state)

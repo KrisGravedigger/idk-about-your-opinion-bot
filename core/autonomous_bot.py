@@ -43,6 +43,7 @@ from monitoring.sell_monitor import SellMonitor
 from monitoring.liquidity_checker import LiquidityChecker
 from position_tracker import PositionTracker
 from pnl_statistics import PnLStatistics
+from transaction_history import TransactionHistory
 from telegram_notifications import TelegramNotifier
 from core.position_validator import PositionValidator
 from core.position_recovery import PositionRecovery
@@ -87,6 +88,7 @@ class AutonomousBot:
         self.capital_manager = CapitalManager(config, client)
         self.state_manager = StateManager()
         self.pnl_stats = PnLStatistics()  # Separate P&L statistics manager
+        self.transaction_history = TransactionHistory()  # Transaction audit trail
         self.telegram = TelegramNotifier()  # Telegram notifications
         self.scanner = MarketScanner(client)
         self.pricing = PricingStrategy(config)

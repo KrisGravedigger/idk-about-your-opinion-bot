@@ -584,13 +584,14 @@ class SellMonitor:
     def _extract_fill_data(self, order: Dict[str, Any]) -> Tuple[float, float, float]:
         """
         Extract fill data from order response.
-        
+
         Tries primary fields first (filled_shares, price, filled_amount).
         Falls back to extracting from trades[] array if primary data missing.
-        
+        Finally tries order_shares/order_amount fields (for API bug workaround).
+
         Args:
             order: Order dictionary from API
-            
+
         Returns:
             Tuple of (filled_amount_tokens, avg_fill_price, filled_usdt)
         """
@@ -598,57 +599,93 @@ class SellMonitor:
         filled_shares = safe_float(order.get('filled_shares', 0))
         fill_price = safe_float(order.get('price', 0))
         filled_usdt = safe_float(order.get('filled_amount', 0))
-        
+
         # Validation: if data is missing, extract from trades
         if filled_shares == 0 or fill_price == 0:
             logger.warning("⚠️  Missing fill data in order, extracting from trades...")
-            
+
             trades = order.get('trades', [])
             if trades:
                 total_shares = 0.0
                 total_proceeds = 0.0
-                
+
                 for trade in trades:
                     # Extract shares and amount
                     # IMPORTANT: trades[] returns values in WEI (18 decimals)
                     # Must divide by 1e18 to get human-readable values
                     shares_wei = safe_float(trade.get('shares', 0))
                     proceeds_wei = safe_float(trade.get('amount', 0))
-                    
+
                     shares = shares_wei / 1e18
                     proceeds = proceeds_wei / 1e18
-                    
+
                     total_shares += shares
                     total_proceeds += proceeds
-                
+
                 filled_shares = total_shares
                 fill_price = (total_proceeds / total_shares) if total_shares > 0 else 0
                 filled_usdt = total_proceeds
-                
+
                 logger.info(f"   ✅ Extracted from {len(trades)} trade(s)")
             else:
                 logger.error("   ❌ No trades data available")
-        
-        # FALLBACK: Calculate from order amount and price if still missing
+
+        # FALLBACK 1: Try order_shares and order_amount (API bug workaround)
+        # Sometimes API returns filled_shares=0 but order_shares has the real value
         if filled_shares == 0:
-            logger.warning("⚠️  FALLBACK: Calculating fill data from order fields")
-            
+            logger.warning("⚠️  FALLBACK 1: Trying order_shares/order_amount fields...")
+
+            order_shares = safe_float(order.get('order_shares', 0))
+            order_amount = safe_float(order.get('order_amount', 0))
+            price = safe_float(order.get('price', 0))
+
+            # Validate: for a Finished order, these should be non-zero
+            if order_shares > 0 and price > 0:
+                filled_shares = order_shares
+                fill_price = price
+                # Calculate USDT from shares * price if order_amount missing
+                filled_usdt = order_amount if order_amount > 0 else (order_shares * price)
+
+                logger.info(f"   ✅ Extracted from order_shares/order_amount")
+                logger.info(f"   Result: shares={filled_shares:.4f}, price={fill_price:.4f}, usdt={filled_usdt:.2f}")
+            else:
+                logger.warning(f"   ⚠️  order_shares={order_shares}, price={price} - insufficient data")
+
+        # FALLBACK 2: Calculate from order amount and price if still missing
+        if filled_shares == 0:
+            logger.warning("⚠️  FALLBACK 2: Calculating fill data from order fields")
+
             # Try to get from order amount (tokens to sell) and price
             amount_tokens = safe_float(order.get('amount', 0))
             price = safe_float(order.get('price', 0))
-            
+
             if amount_tokens > 0 and price > 0:
                 filled_shares = amount_tokens
                 fill_price = price
                 filled_usdt = amount_tokens * price
-                
+
                 logger.info(f"   ✅ Calculated from order: tokens={amount_tokens}, price={price}")
                 logger.info(f"   Result: shares={filled_shares:.4f}, price={fill_price:.4f}, usdt={filled_usdt:.2f}")
             else:
-                logger.error(f"   ❌ FALLBACK FAILED - insufficient order data")
+                logger.error(f"   ❌ ALL FALLBACKS FAILED - insufficient order data")
                 logger.error(f"   amount={amount_tokens}, price={price}")
                 logger.error(f"   Full order: {order}")
-        
+
+        # VALIDATION: For a Finished order, shares should NEVER be zero
+        status_enum = order.get('status_enum', 'unknown')
+        if status_enum == 'Finished' and filled_shares == 0:
+            logger.error("")
+            logger.error("=" * 70)
+            logger.error("❌ CRITICAL: API returned Finished order with 0 shares!")
+            logger.error("=" * 70)
+            logger.error(f"   This is an API bug. Order claims to be filled but has no fill data.")
+            logger.error(f"   Order ID: {order.get('order_id', 'N/A')}")
+            logger.error(f"   Market ID: {order.get('market_id', 'N/A')}")
+            logger.error(f"   Status: {status_enum}")
+            logger.error(f"   Please check the web UI to verify actual transaction.")
+            logger.error("=" * 70)
+            logger.error("")
+
         return (filled_shares, fill_price, filled_usdt)
 
 
