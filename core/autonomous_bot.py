@@ -1625,7 +1625,66 @@ class AutonomousBot:
             sell_price = self.pricing.calculate_sell_price(best_bid, best_ask)
             
             logger.info(f"   SELL price: {format_price(sell_price)}")
-            
+
+            # ================================================================
+            # DUST ACCUMULATION: Check for existing dust on this market
+            # ================================================================
+            # Before placing SELL, check if we already have small position (dust)
+            # on this market from previous partial fills. Add it to current SELL.
+            logger.info("🔍 Checking for existing dust position on this market...")
+
+            try:
+                outcome_side = position.get('outcome_side', 'YES')
+                existing_shares = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side=outcome_side
+                )
+                existing_amount = float(existing_shares)
+
+                logger.info(f"   Current position: {filled_amount:.4f} shares")
+                logger.info(f"   Existing position (from API): {existing_amount:.4f} shares")
+
+                # Check if we have MORE shares than expected (dust from previous trades)
+                if existing_amount > filled_amount:
+                    dust_amount = existing_amount - filled_amount
+                    logger.info(f"   ✅ DUST DETECTED: {dust_amount:.4f} shares")
+                    logger.info(f"   Adding dust to SELL order...")
+
+                    # Update filled_amount to include dust
+                    old_amount = filled_amount
+                    filled_amount = existing_amount
+                    position['filled_amount'] = filled_amount
+                    self.state_manager.save_state(self.state)
+
+                    logger.info(f"   📝 Updated SELL amount: {old_amount:.4f} → {filled_amount:.4f} shares")
+                    logger.info(f"   Will sell ALL shares including dust")
+                elif existing_amount < filled_amount:
+                    # API shows LESS than expected - possible manual sale
+                    difference = filled_amount - existing_amount
+                    logger.warning(f"   ⚠️ API shows LESS shares than expected!")
+                    logger.warning(f"   Expected: {filled_amount:.4f}, API: {existing_amount:.4f}")
+                    logger.warning(f"   Difference: {difference:.4f} shares")
+                    logger.warning(f"   Using API value (more accurate)")
+
+                    filled_amount = existing_amount
+                    position['filled_amount'] = filled_amount
+                    self.state_manager.save_state(self.state)
+
+                    # Re-check if still above dust threshold
+                    if filled_amount < 5.0:
+                        logger.warning("   ⚠️ After adjustment, position is now dust!")
+                        logger.info("   Abandoning and resetting to SCANNING")
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+                else:
+                    logger.info(f"   ✅ No dust - amounts match")
+
+            except Exception as e:
+                logger.warning(f"   ⚠️ Could not check for dust: {e}")
+                logger.info(f"   Proceeding with state.json value: {filled_amount:.4f}")
+
             # Place SELL order
             logger.info("📝 Placing SELL order...")
             
