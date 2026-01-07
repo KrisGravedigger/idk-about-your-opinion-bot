@@ -352,24 +352,33 @@ class AutonomousBot:
                                 limit=20
                             )
 
-                            # Find BUY orders for this market with filled amount
-                            for order in orders:
-                                if order.get('side') == 1:  # BUY order
-                                    filled_shares = safe_float(order.get('filled_shares', 0))
-                                    filled_usdt = safe_float(order.get('filled_amount', 0))
-
-                                    if filled_shares > 0 and filled_usdt > 0:
-                                        calculated_avg = filled_usdt / filled_shares
-                                        logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
-                                        logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
-                                        avg_price = calculated_avg
-                                        break
-                            else:
-                                # No valid BUY order found
-                                logger.warning(f"⚠️ No BUY order found in history")
+                            # Check if API returned valid data
+                            if orders is None or not isinstance(orders, list):
+                                logger.warning(f"⚠️ API returned invalid orders data (None or not list)")
                                 logger.warning(f"   Using minimal fallback $0.01")
-                                logger.warning(f"   Stop-loss and P&L will be INACCURATE")
                                 avg_price = 0.01
+                            else:
+                                # Find BUY orders for this market with filled amount
+                                found_order = False
+                                for order in orders:
+                                    if order.get('side') == 1:  # BUY order
+                                        filled_shares = safe_float(order.get('filled_shares', 0))
+                                        filled_usdt = safe_float(order.get('filled_amount', 0))
+
+                                        if filled_shares > 0 and filled_usdt > 0:
+                                            calculated_avg = filled_usdt / filled_shares
+                                            logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
+                                            logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
+                                            avg_price = calculated_avg
+                                            found_order = True
+                                            break
+
+                                if not found_order:
+                                    # No valid BUY order found
+                                    logger.warning(f"⚠️ No BUY order found in history")
+                                    logger.warning(f"   Using minimal fallback $0.01")
+                                    logger.warning(f"   Stop-loss and P&L will be INACCURATE")
+                                    avg_price = 0.01
 
                         except Exception as e:
                             logger.warning(f"⚠️ Could not retrieve order history: {e}")
@@ -1457,7 +1466,41 @@ class AutonomousBot:
             
             best_bid = fresh_orderbook['best_bid']
             best_ask = fresh_orderbook['best_ask']
-            
+
+            # ================================================================
+            # ENHANCED DUST CHECK: Verify order VALUE meets minimum
+            # ================================================================
+            # API requires minimum order value of $1.30, NOT just 1.0 tokens!
+            # A position with 3.0 tokens @ $0.40 = $1.20 < $1.30 → DUST!
+            MIN_ORDER_VALUE_USDT = 1.30  # API minimum
+
+            # After floor rounding, amount might be less
+            import math
+            sellable_amount = math.floor(filled_amount * 10) / 10
+            estimated_order_value = sellable_amount * best_ask
+
+            if estimated_order_value < MIN_ORDER_VALUE_USDT:
+                logger.warning("=" * 70)
+                logger.warning(f"⚠️  DUST POSITION DETECTED (order value too low)!")
+                logger.warning(f"   Position: {filled_amount:.4f} shares")
+                logger.warning(f"   After floor: {sellable_amount:.1f} shares")
+                logger.warning(f"   Current ask: ${best_ask:.4f}")
+                logger.warning(f"   Order value: ${estimated_order_value:.2f}")
+                logger.warning(f"   API minimum: ${MIN_ORDER_VALUE_USDT:.2f}")
+                logger.warning(f"   Cannot sell - order value too low!")
+                logger.warning("=" * 70)
+                logger.info("")
+                logger.info("💡 Action: Abandoning dust position and resetting to SCANNING")
+                logger.info("")
+
+                # Reset and find new market
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return True
+
+            logger.info(f"✅ Position value OK: ${estimated_order_value:.2f} (>= ${MIN_ORDER_VALUE_USDT:.2f} minimum)")
+
             # ================================================================
             # HANDLE EDGE CASE: Empty orderbook (99:1 lopsided market)
             # ================================================================
