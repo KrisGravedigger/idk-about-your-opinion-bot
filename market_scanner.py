@@ -185,17 +185,193 @@ class MarketScanner:
     def load_bonus_markets(self, filepath: str = BONUS_MARKETS_FILE) -> set[int]:
         """
         Load bonus market IDs from configuration file.
-        
+
         Args:
             filepath: Path to bonus markets file
-            
+
         Returns:
             Set of bonus market IDs
         """
         self.bonus_markets = load_bonus_markets(filepath)
         logger.info(f"Loaded {len(self.bonus_markets)} bonus markets from {filepath}")
         return self.bonus_markets
-    
+
+    def _validate_orderbook_depth(self, bids: list, asks: list, side_name: str) -> bool:
+        """
+        Validate orderbook has minimum required depth.
+
+        Args:
+            bids: List of bid orders
+            asks: List of ask orders
+            side_name: Name for logging (e.g. "YES", "NO")
+
+        Returns:
+            True if orderbook meets minimum requirements
+        """
+        if len(bids) < MIN_ORDERBOOK_ORDERS or len(asks) < MIN_ORDERBOOK_ORDERS:
+            logger.debug(f"❌ REJECTED: Insufficient {side_name} orderbook")
+            logger.debug(f"   {side_name} bids: {len(bids)}, asks: {len(asks)}")
+            logger.debug(f"   Need: {MIN_ORDERBOOK_ORDERS} minimum")
+            logger.debug("")
+            return False
+        return True
+
+    def _extract_best_prices(self, bids: list, asks: list) -> tuple[float, float]:
+        """
+        Extract best bid and ask prices from orderbook.
+
+        Args:
+            bids: List of bid orders
+            asks: List of ask orders
+
+        Returns:
+            Tuple of (best_bid, best_ask)
+        """
+        bid_prices = [safe_float(bid.get('price', 0)) for bid in bids]
+        ask_prices = [safe_float(ask.get('price', 0)) for ask in asks]
+
+        best_bid = max(bid_prices) if bid_prices else 0
+        best_ask = min(ask_prices) if ask_prices else 0
+
+        return best_bid, best_ask
+
+    def _check_time_constraints(self, market: dict, market_id: int) -> bool:
+        """
+        Check if market meets time constraints (hours until close).
+
+        Args:
+            market: Market data dictionary
+            market_id: Market ID for logging
+
+        Returns:
+            True if market meets time constraints
+        """
+        if MIN_HOURS_UNTIL_CLOSE is None and MAX_HOURS_UNTIL_CLOSE is None:
+            return True  # Time filters disabled
+
+        end_at = market.get('cutoff_at')
+
+        logger.debug(f"⏰ Time filter check:")
+        logger.debug(f"   cutoff_at field: {end_at}")
+
+        if not end_at:
+            logger.debug(f"⚠️  Market {market_id}: No cutoff_at field (skipping time filter)")
+            return True
+
+        try:
+            from datetime import datetime, timezone
+
+            end_time = datetime.fromtimestamp(end_at, tz=timezone.utc)
+            logger.debug(f"   Parsed close time: {end_time}")
+
+            now = datetime.now(timezone.utc)
+            hours_until_close = (end_time - now).total_seconds() / 3600
+
+            # Check minimum hours
+            if MIN_HOURS_UNTIL_CLOSE is not None and hours_until_close < MIN_HOURS_UNTIL_CLOSE:
+                logger.debug(
+                    f"Market {market_id} closes too soon "
+                    f"({hours_until_close:.1f}h < {MIN_HOURS_UNTIL_CLOSE}h), skipping"
+                )
+                return False
+
+            # Check maximum hours
+            if MAX_HOURS_UNTIL_CLOSE is not None and hours_until_close > MAX_HOURS_UNTIL_CLOSE:
+                logger.debug(
+                    f"Market {market_id} closes too late "
+                    f"({hours_until_close:.1f}h > {MAX_HOURS_UNTIL_CLOSE}h), skipping"
+                )
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.debug(f"❌ REJECTED: Market {market_id}: Could not parse cutoff_at timestamp: {e}")
+            logger.debug("")
+            return False
+
+    def _filter_outcomes_by_probability(self, yes_prob: float, no_prob: float,
+                                        yes_best_bid: float, yes_best_ask: float,
+                                        no_best_bid: float, no_best_ask: float,
+                                        yes_token_id: str, no_token_id: str,
+                                        yes_bids: list, yes_asks: list,
+                                        no_bids: list, no_asks: list) -> list:
+        """
+        Filter outcomes based on probability range and balance constraints.
+
+        Returns:
+            List of eligible outcome dictionaries
+        """
+        from config import OUTCOME_MIN_PROBABILITY, OUTCOME_MAX_PROBABILITY
+
+        logger.debug(f"🎯 Outcome probability filtering:")
+        logger.debug(f"   Config range: {OUTCOME_MIN_PROBABILITY*100:.0f}%-{OUTCOME_MAX_PROBABILITY*100:.0f}%")
+        logger.debug(f"   YES implied probability: {yes_prob*100:.1f}%")
+        logger.debug(f"   NO implied probability: {no_prob*100:.1f}%")
+
+        outcomes_to_check = []
+
+        # Check YES eligibility
+        yes_eligible = OUTCOME_MIN_PROBABILITY <= yes_prob <= OUTCOME_MAX_PROBABILITY
+        if yes_eligible:
+            # Additional balance check if enabled
+            if ORDERBOOK_BALANCE_RANGE is not None:
+                yes_bid_percentage = calculate_orderbook_balance(yes_bids, yes_asks)
+                if yes_bid_percentage is not None:
+                    min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
+                    if min_bid_pct <= yes_bid_percentage <= max_bid_pct:
+                        logger.debug(f"   ✅ YES eligible ({yes_prob*100:.1f}% prob, {yes_bid_percentage:.1f}% balance)")
+                    else:
+                        logger.debug(f"   ❌ YES skipped (balance {yes_bid_percentage:.1f}% outside {min_bid_pct}-{max_bid_pct}%)")
+                        yes_eligible = False
+
+            if yes_eligible:
+                logger.debug(f"   ✅ YES eligible ({yes_prob*100:.1f}% within range)")
+                outcomes_to_check.append({
+                    'side': 'YES',
+                    'token_id': yes_token_id,
+                    'bids': yes_bids,
+                    'asks': yes_asks,
+                    'best_bid': yes_best_bid,
+                    'best_ask': yes_best_ask,
+                    'probability': yes_prob
+                })
+        else:
+            logger.debug(f"   ❌ YES skipped ({yes_prob*100:.1f}% outside range)")
+
+        # Check NO eligibility
+        no_eligible = OUTCOME_MIN_PROBABILITY <= no_prob <= OUTCOME_MAX_PROBABILITY
+        if no_eligible:
+            # Additional balance check if enabled
+            if ORDERBOOK_BALANCE_RANGE is not None:
+                no_bid_percentage = calculate_orderbook_balance(no_bids, no_asks)
+                if no_bid_percentage is not None:
+                    min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
+                    if min_bid_pct <= no_bid_percentage <= max_bid_pct:
+                        logger.debug(f"   ✅ NO eligible ({no_prob*100:.1f}% prob, {no_bid_percentage:.1f}% balance)")
+                    else:
+                        logger.debug(f"   ❌ NO skipped (balance {no_bid_percentage:.1f}% outside {min_bid_pct}-{max_bid_pct}%)")
+                        no_eligible = False
+
+            if no_eligible:
+                logger.debug(f"   ✅ NO eligible ({no_prob*100:.1f}% within range)")
+                outcomes_to_check.append({
+                    'side': 'NO',
+                    'token_id': no_token_id,
+                    'bids': no_bids,
+                    'asks': no_asks,
+                    'best_bid': no_best_bid,
+                    'best_ask': no_best_ask,
+                    'probability': no_prob
+                })
+        else:
+            logger.debug(f"   ❌ NO skipped ({no_prob*100:.1f}% outside range)")
+
+        logger.debug(f"   📊 {len(outcomes_to_check)} outcome(s) eligible for scoring")
+        logger.debug("")
+
+        return outcomes_to_check
+
     def analyze_market(self, market: dict, scoring_profile: dict) -> Optional[MarketScore]:
         """
         Analyze a single market and calculate its score.
@@ -253,41 +429,22 @@ class MarketScanner:
         yes_asks = yes_orderbook.get('asks', [])
         no_bids = no_orderbook.get('bids', [])
         no_asks = no_orderbook.get('asks', [])
-                       
-        # Check minimum orders for YES
-        if len(yes_bids) < MIN_ORDERBOOK_ORDERS or len(yes_asks) < MIN_ORDERBOOK_ORDERS:
-            logger.debug(f"❌ REJECTED: Insufficient YES orderbook")
-            logger.debug(f"   YES bids: {len(yes_bids)}, asks: {len(yes_asks)}")
-            logger.debug(f"   Need: {MIN_ORDERBOOK_ORDERS} minimum")
-            logger.debug("")
+
+        # Validate orderbook depth
+        if not self._validate_orderbook_depth(yes_bids, yes_asks, "YES"):
+            return None
+        if not self._validate_orderbook_depth(no_bids, no_asks, "NO"):
             return None
 
-        # Check minimum orders for NO
-        if len(no_bids) < MIN_ORDERBOOK_ORDERS or len(no_asks) < MIN_ORDERBOOK_ORDERS:
-            logger.debug(f"❌ REJECTED: Insufficient NO orderbook")
-            logger.debug(f"   NO bids: {len(no_bids)}, asks: {len(no_asks)}")
-            logger.debug("")
-            return None
-
-        # Extract best prices for YES
-        yes_bid_prices = [safe_float(bid.get('price', 0)) for bid in yes_bids]
-        yes_ask_prices = [safe_float(ask.get('price', 0)) for ask in yes_asks]
-
-        yes_best_bid = max(yes_bid_prices) if yes_bid_prices else 0
-        yes_best_ask = min(yes_ask_prices) if yes_ask_prices else 0
-
-        # Extract best prices for NO
-        no_bid_prices = [safe_float(bid.get('price', 0)) for bid in no_bids]
-        no_ask_prices = [safe_float(ask.get('price', 0)) for ask in no_asks]
-
-        no_best_bid = max(no_bid_prices) if no_bid_prices else 0
-        no_best_ask = min(no_ask_prices) if no_ask_prices else 0
+        # Extract best prices
+        yes_best_bid, yes_best_ask = self._extract_best_prices(yes_bids, yes_asks)
+        no_best_bid, no_best_ask = self._extract_best_prices(no_bids, no_asks)
 
         # ========================================================================
         # OUTCOME PROBABILITY FILTERING
         # ========================================================================
-        logger.debug(f"🎯 Outcome probability filtering:")
-        logger.debug(f"   Config range: {OUTCOME_MIN_PROBABILITY*100:.0f}%-{OUTCOME_MAX_PROBABILITY*100:.0f}%")
+        from config import OUTCOME_PROBABILITY_METHOD
+
         logger.debug(f"   Method: {OUTCOME_PROBABILITY_METHOD}")
 
         # Calculate implied probabilities
@@ -301,69 +458,15 @@ class MarketScanner:
             logger.error(f"Unknown OUTCOME_PROBABILITY_METHOD: {OUTCOME_PROBABILITY_METHOD}")
             return None
 
-        logger.debug(f"   YES implied probability: {yes_prob*100:.1f}%")
-        logger.debug(f"   NO implied probability: {no_prob*100:.1f}%")
-
-        # Determine which outcomes to consider
-        outcomes_to_check = []
-
-        # Check YES eligibility
-        yes_eligible = False
-        if OUTCOME_MIN_PROBABILITY <= yes_prob <= OUTCOME_MAX_PROBABILITY:
-            # Additional balance check if enabled
-            if ORDERBOOK_BALANCE_RANGE is not None and yes_bid_percentage is not None:
-                min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
-                if min_bid_pct <= yes_bid_percentage <= max_bid_pct:
-                    yes_eligible = True
-                    logger.debug(f"   ✅ YES eligible ({yes_prob*100:.1f}% prob, {yes_bid_percentage:.1f}% balance)")
-                else:
-                    logger.debug(f"   ❌ YES skipped (balance {yes_bid_percentage:.1f}% outside {min_bid_pct}-{max_bid_pct}%)")
-            else:
-                # Balance filter disabled or couldn't calculate
-                yes_eligible = True
-                logger.debug(f"   ✅ YES eligible ({yes_prob*100:.1f}% within range)")
-        else:
-            logger.debug(f"   ❌ YES skipped ({yes_prob*100:.1f}% outside range)")
-
-        if yes_eligible:
-            outcomes_to_check.append({
-                'side': 'YES',
-                'token_id': yes_token_id,
-                'bids': yes_bids,
-                'asks': yes_asks,
-                'best_bid': yes_best_bid,
-                'best_ask': yes_best_ask,
-                'probability': yes_prob
-            })
-
-        # Check NO eligibility
-        no_eligible = False
-        if OUTCOME_MIN_PROBABILITY <= no_prob <= OUTCOME_MAX_PROBABILITY:
-            # Additional balance check if enabled
-            if ORDERBOOK_BALANCE_RANGE is not None and no_bid_percentage is not None:
-                min_bid_pct, max_bid_pct = ORDERBOOK_BALANCE_RANGE
-                if min_bid_pct <= no_bid_percentage <= max_bid_pct:
-                    no_eligible = True
-                    logger.debug(f"   ✅ NO eligible ({no_prob*100:.1f}% prob, {no_bid_percentage:.1f}% balance)")
-                else:
-                    logger.debug(f"   ❌ NO skipped (balance {no_bid_percentage:.1f}% outside {min_bid_pct}-{max_bid_pct}%)")
-            else:
-                # Balance filter disabled or couldn't calculate
-                no_eligible = True
-                logger.debug(f"   ✅ NO eligible ({no_prob*100:.1f}% within range)")
-        else:
-            logger.debug(f"   ❌ NO skipped ({no_prob*100:.1f}% outside range)")
-
-        if no_eligible:
-            outcomes_to_check.append({
-                'side': 'NO',
-                'token_id': no_token_id,
-                'bids': no_bids,
-                'asks': no_asks,
-                'best_bid': no_best_bid,
-                'best_ask': no_best_ask,
-                'probability': no_prob
-            })
+        # Filter outcomes by probability and balance constraints
+        outcomes_to_check = self._filter_outcomes_by_probability(
+            yes_prob, no_prob,
+            yes_best_bid, yes_best_ask,
+            no_best_bid, no_best_ask,
+            yes_token_id, no_token_id,
+            yes_bids, yes_asks,
+            no_bids, no_asks
+        )
 
         if not outcomes_to_check:
             logger.info(f"❌ REJECTED: Both outcomes outside probability range")
@@ -371,57 +474,11 @@ class MarketScanner:
             logger.info("")
             return None
 
-        logger.debug(f"   📊 {len(outcomes_to_check)} outcome(s) eligible for scoring")
-        logger.debug("")
-
         # ========================================================================
-        # NEW FILTERS: Time-based and orderbook balance
+        # TIME CONSTRAINTS: Check market end time (if enabled)
         # ========================================================================
-        
-        # Filter 1: Check market end time (if enabled)
-        if MIN_HOURS_UNTIL_CLOSE is not None or MAX_HOURS_UNTIL_CLOSE is not None:
-            # Extract end time from market data
-            # Opinion.trade API uses 'cutoff_at' (Unix timestamp in seconds)
-            end_at = market.get('cutoff_at')  # Unix timestamp in seconds
-
-            logger.debug(f"⏰ Time filter check:")
-            logger.debug(f"   cutoff_at field: {end_at}")
-            
-            if end_at:
-                try:
-                    from datetime import datetime, timezone
-
-                    # Parse cutoff_at as Unix timestamp (in seconds)
-                    end_time = datetime.fromtimestamp(end_at, tz=timezone.utc)
-                    logger.debug(f"   Parsed close time: {end_time}")
-                    
-                    now = datetime.now(timezone.utc)
-                    hours_until_close = (end_time - now).total_seconds() / 3600
-                    
-                    # Check minimum hours
-                    if MIN_HOURS_UNTIL_CLOSE is not None and hours_until_close < MIN_HOURS_UNTIL_CLOSE:
-                        logger.debug(
-                            f"Market {market_id} closes too soon "
-                            f"({hours_until_close:.1f}h < {MIN_HOURS_UNTIL_CLOSE}h), skipping"
-                        )
-                        return None
-                    
-                    # Check maximum hours
-                    if MAX_HOURS_UNTIL_CLOSE is not None and hours_until_close > MAX_HOURS_UNTIL_CLOSE:
-                        logger.debug(
-                            f"Market {market_id} closes too late "
-                            f"({hours_until_close:.1f}h > {MAX_HOURS_UNTIL_CLOSE}h), skipping"
-                        )
-                        return None
-                
-                except Exception as e:
-                    logger.debug(f"❌ REJECTED: Market {market_id}: Could not parse cutoff_at timestamp: {e}")
-                    logger.debug("")
-                    # If we can't parse cutoff_at and filters are enabled, skip for safety
-                    return None
-            else:
-                # No cutoff_at field in market data
-                logger.debug(f"⚠️  Market {market_id}: No cutoff_at field (skipping time filter)")
+        if not self._check_time_constraints(market, market_id):
+            return None
         
         # ========================================================================
         # Filter 2: Check orderbook balance (if enabled)
