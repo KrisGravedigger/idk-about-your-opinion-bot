@@ -47,6 +47,7 @@ from transaction_history import TransactionHistory
 from telegram_notifications import TelegramNotifier
 from core.position_validator import PositionValidator
 from core.position_recovery import PositionRecovery
+from core.reconciliation_engine import ReconciliationEngine
 from handlers.buy_handler import BuyHandler
 from handlers.sell_handler import SellHandler
 from handlers.market_selector import MarketSelector
@@ -100,6 +101,14 @@ class AutonomousBot:
         # CHANGED: Load state immediately in constructor
         # This allows autonomous_bot_main.py to modify state before run()
         self.state = self.state_manager.load_state()
+
+        # Initialize reconciliation engine (requires state_manager and transaction_history)
+        self.reconciliation = ReconciliationEngine(
+            config=config,
+            client=client,
+            state_manager=self.state_manager,
+            transaction_history=self.transaction_history
+        )
 
         # Initialize handlers (requires state to be loaded first)
         self.market_selector = MarketSelector(self)
@@ -283,211 +292,42 @@ class AutonomousBot:
         # ================================================================
         # CRITICAL: Before executing ANY stage, verify state consistency
         # ================================================================
-        # This is the FIRST LINE OF DEFENSE against orphaned orders
-        
-        if stage in ['IDLE', 'SCANNING']:
-            # These stages should NOT have active positions
-            # But check anyway in case of state corruption
-            try:
-                logger.debug("🔍 Pre-stage check: Verifying no orphaned positions...")
-                positions = self.client.get_significant_positions(min_shares=5.0)
+        # This is the FIRST LINE OF DEFENSE against state/API discrepancies
+        # Uses ReconciliationEngine for graceful recovery
 
-                if positions:
-                    # We have significant positions but state says IDLE/SCANNING
-                    # This is a CRITICAL inconsistency
-                    logger.warning("=" * 60)
-                    logger.warning("⚠️  CRITICAL: State inconsistency detected!")
-                    logger.warning(f"   State says: {stage}")
-                    logger.warning(f"   API shows: {len(positions)} significant position(s)")
-                    logger.warning("=" * 60)
+        try:
+            logger.debug("🔍 Pre-stage check: Detecting state discrepancies...")
 
-                # Take first significant position (dust already filtered by get_significant_positions)
-                pos = positions[0]
-                market_id = pos.get('market_id')
-                shares = float(pos.get('shares_owned', 0))
+            # Detect any discrepancies between state and API reality
+            discrepancy = self.reconciliation.detect_discrepancy(self.state)
 
-                logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
-                logger.warning(f"   Shares: {shares:.4f}")
+            if discrepancy:
+                # Found a discrepancy - attempt reconciliation
+                logger.info(f"⚠️  Discrepancy detected: {discrepancy.type.value}")
 
-                # CRITICAL: Check if position value meets minimum order requirement
-                # Before recovering, verify we can actually sell this position
-                # API requires order value >= $1.30, not just shares >= 1.0!
-                logger.info(f"   Checking if position value meets minimum...")
+                result = self.reconciliation.reconcile(
+                    state=self.state,
+                    discrepancy=discrepancy,
+                    telegram_notifier=self.telegram
+                )
 
-                should_recover_position = False  # Default: NO recovery unless verified
+                if result.success:
+                    # Reconciliation succeeded - reload state and adjust stage
+                    self.state = self.state_manager.load_state()
+                    stage = self.state.get('stage', stage)
+                    logger.info(f"✅ Reconciliation successful - continuing with stage: {stage}")
+                else:
+                    # Reconciliation failed - log and continue (may fail later)
+                    logger.warning(f"⚠️  Reconciliation failed: {result.reason}")
+                    logger.warning(f"   Continuing with current stage, but issues may persist")
 
-                try:
-                    # Get outcome_side to fetch correct token_id
-                    outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+        except Exception as e:
+            logger.debug(f"Pre-stage discrepancy check failed (non-critical): {e}")
 
-                    # Fetch market to get token_id for orderbook
-                    market_details = self.client.get_market(market_id)
-                    if not market_details:
-                        logger.warning(f"   ⚠️ Could not fetch market details for #{market_id}")
-                        logger.warning(f"   Cannot verify order value - skipping recovery")
-                    else:
-                        # Handle both dict and Pydantic model returns
-                        if isinstance(market_details, dict):
-                            if outcome_side_enum.lower() == 'yes':
-                                token_id_for_check = market_details.get('yes_token_id', '')
-                            else:
-                                token_id_for_check = market_details.get('no_token_id', '')
-                        else:
-                            if outcome_side_enum.lower() == 'yes':
-                                token_id_for_check = getattr(market_details, 'yes_token_id', '')
-                            else:
-                                token_id_for_check = getattr(market_details, 'no_token_id', '')
+        # ================================================================
+        # Execute stage handler
+        # ================================================================
 
-                        logger.info(f"   Token ID for check: {token_id_for_check[:20] if token_id_for_check else 'EMPTY'}...")
-
-                        # Get orderbook to check current price
-                        if not token_id_for_check:
-                            logger.warning(f"   ⚠️ Token ID is empty!")
-                            logger.warning(f"   Cannot verify order value - skipping recovery")
-                        else:
-                            orderbook = self.client.get_market_orderbook(token_id_for_check)
-                            if not (orderbook and 'asks' in orderbook):
-                                logger.warning(f"   ⚠️ Could not fetch orderbook")
-                                logger.warning(f"   Cannot verify order value - skipping recovery")
-                            else:
-                                asks = orderbook.get('asks', [])
-                                if not asks:
-                                    logger.warning(f"   ⚠️ Orderbook has no asks")
-                                    logger.warning(f"   Cannot verify order value - skipping recovery")
-                                else:
-                                    # Get best ask price (already sorted by api_client)
-                                    best_ask = safe_float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else safe_float(asks[0][0])
-
-                                    # Check if position value meets minimum (not dust)
-                                    value_check = self.validator.check_dust_position_by_value(shares, best_ask)
-
-                                    if not value_check.is_valid:
-                                        logger.warning(f"⚠️  DUST POSITION - cannot recover!")
-                                        logger.info(f"   Skipping auto-recovery: {value_check.reason}")
-                                        logger.info("")
-                                        # Don't recover - let normal SCANNING continue
-                                        should_recover_position = False
-                                    else:
-                                        logger.info(f"   ✅ Order value OK - proceeding with recovery")
-                                        should_recover_position = True
-                except Exception as e:
-                    logger.warning(f"   ⚠️ Exception while checking order value: {e}")
-                    logger.warning(f"   Cannot verify order value - skipping recovery")
-                    # should_recover_position stays False
-
-                if should_recover_position:
-                    logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
-
-                    # Get outcome_side to determine which token_id to use
-                    outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
-                    logger.info(f"   Position side: {outcome_side_enum}")
-
-                    # Fetch market details to get token_id
-                    logger.info(f"   Fetching market details to recover token_id...")
-                    try:
-                        market_details = self.client.get_market(market_id)
-
-                        if market_details:
-                            # Extract correct token_id based on outcome_side_enum
-                            # NOTE: market_details is Pydantic model, use attribute access
-                            if outcome_side_enum.lower() == 'yes':
-                                token_id = getattr(market_details, 'yes_token_id', '')
-                            else:
-                                token_id = getattr(market_details, 'no_token_id', '')
-
-                            logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
-                        else:
-                            logger.error(f"   ❌ Could not fetch market details for #{market_id}")
-                            token_id = ''
-
-                    except Exception as e:
-                        logger.error(f"   ❌ Error fetching market details: {e}")
-                        token_id = ''
-
-                    # Force state to BUY_FILLED so bot will place SELL
-                    # Try to get real avg_price from position, fallback to calculation
-                    avg_price = pos.get('avg_price', 0)
-
-                    if avg_price <= 0:
-                        # Try to calculate from position value (if API provides it)
-                        # Common field names: 'total_value', 'value', 'cost_basis', 'invested'
-                        total_value = (
-                            pos.get('total_value', 0) or
-                            pos.get('value', 0) or
-                            pos.get('cost_basis', 0) or
-                            pos.get('invested', 0)
-                        )
-
-                        if total_value > 0 and shares > 0:
-                            avg_price = total_value / shares
-                            logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
-                            logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
-                        else:
-                            logger.warning(f"⚠️ Cannot calculate avg_price from position value field")
-                            logger.info(f"   Attempting to retrieve from order history...")
-
-                            # Try to get avg_price from recent order history
-                            try:
-                                orders = self.client.get_my_orders(
-                                    market_id=market_id,
-                                    status='FILLED',
-                                    limit=20
-                                )
-
-                                # Check if API returned valid data
-                                if orders is None or not isinstance(orders, list):
-                                    logger.warning(f"⚠️ API returned invalid orders data (None or not list)")
-                                    logger.warning(f"   Using minimal fallback $0.01")
-                                    avg_price = 0.01
-                                else:
-                                    # Find BUY orders for this market with filled amount
-                                    found_order = False
-                                    for order in orders:
-                                        if order.get('side') == 1:  # BUY order
-                                            filled_shares = safe_float(order.get('filled_shares', 0))
-                                            filled_usdt = safe_float(order.get('filled_amount', 0))
-
-                                            if filled_shares > 0 and filled_usdt > 0:
-                                                calculated_avg = filled_usdt / filled_shares
-                                                logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
-                                                logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
-                                                avg_price = calculated_avg
-                                                found_order = True
-                                                break
-
-                                    if not found_order:
-                                        # No valid BUY order found
-                                        logger.warning(f"⚠️ No BUY order found in history")
-                                        logger.warning(f"   Using minimal fallback $0.01")
-                                        logger.warning(f"   Stop-loss and P&L will be INACCURATE")
-                                        avg_price = 0.01
-
-                            except Exception as e:
-                                logger.warning(f"⚠️ Could not retrieve order history: {e}")
-                                logger.warning(f"   Using minimal fallback $0.01")
-                                avg_price = 0.01
-
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state['current_position'] = {
-                        'market_id': market_id,
-                        'token_id': token_id,  # ← FIXED: use recovered token_id, not pos.get()
-                        'outcome_side': outcome_side_enum,
-                        'market_title': pos.get('title', f"Recovered market #{market_id}"),
-                        'filled_amount': shares,
-                        'avg_fill_price': avg_price,
-                        'filled_usdt': shares * avg_price,
-                        'fill_timestamp': get_timestamp()
-                    }
-                    self.state_manager.save_state(self.state)
-
-                    # Change stage to BUY_FILLED for this execution
-                    stage = 'BUY_FILLED'
-                    logger.info("✅ State recovered - will execute BUY_FILLED handler")
-                    # NOTE: We're in _execute_stage(), not run() loop
-                    # Can't use break here - just continue to execute BUY_FILLED handler below
-            except Exception as e:
-                logger.debug(f"Pre-stage check failed (non-critical): {e}")
-        
         handlers = {
             'IDLE': self._handle_idle,
             'SCANNING': self._handle_scanning,
