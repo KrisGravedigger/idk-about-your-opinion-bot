@@ -353,8 +353,8 @@ def main():
         logger.info("🔍 Checking API for orphaned positions...")
 
         try:
-            # Get only significant positions (filters out dust < 1.0 shares automatically)
-            positions = client.get_significant_positions(min_shares=1.0)
+            # Get only significant positions (filters out dust < 5.0 shares automatically)
+            positions = client.get_significant_positions(min_shares=5.0)
 
             if positions:
                 logger.warning("=" * 70)
@@ -374,104 +374,165 @@ def main():
                 logger.info(f"   Shares: {shares:.4f}")
                 logger.info("")
 
-                # Get market details to find token_id
+                # CRITICAL: Before recovering, check if position value meets minimum
+                # API requires order value >= $1.30, not just shares >= 1.0!
+                should_recover = False
+
+                # Get market details to find token_id AND check order value
                 logger.info("   Fetching market details for token_id...")
                 try:
                     market_data = client.get_market(market_id)
-                    if market_data:
-                        # market_data is Pydantic object, use attribute access
-                        token_id = getattr(market_data, 'yes_token_id', '')
-                        if not token_id:
-                            # Try dict access as fallback
-                            try:
-                                token_id = market_data['yes_token_id'] if isinstance(market_data, dict) else ''
-                            except:
-                                token_id = ''
-                        logger.info(f"   ✅ Found token_id: {token_id[:40]}...")
-                    else:
+                    if not market_data:
                         logger.warning(f"   ⚠️ Could not fetch market data")
+                        logger.warning(f"   Cannot verify order value - skipping recovery")
                         token_id = ''
+                    else:
+                        # Get outcome_side
+                        outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+
+                        # Handle both dict and Pydantic model returns
+                        if isinstance(market_data, dict):
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id = market_data.get('yes_token_id', '')
+                            else:
+                                token_id = market_data.get('no_token_id', '')
+                        else:
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id = getattr(market_data, 'yes_token_id', '')
+                            else:
+                                token_id = getattr(market_data, 'no_token_id', '')
+
+                        if not token_id:
+                            logger.warning(f"   ⚠️ Token ID is empty")
+                            logger.warning(f"   Cannot verify order value - skipping recovery")
+                        else:
+                            logger.info(f"   ✅ Found token_id: {token_id[:40]}...")
+
+                            # Get orderbook to check current price
+                            logger.info(f"   Checking order value...")
+                            try:
+                                orderbook = client.get_market_orderbook(token_id)
+                                if orderbook and 'asks' in orderbook:
+                                    asks = orderbook.get('asks', [])
+                                    if asks:
+                                        # Get best ask price (already sorted by api_client)
+                                        best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
+
+                                        # Calculate order value after floor rounding
+                                        import math
+                                        sellable_amount = math.floor(shares * 10) / 10
+                                        order_value = sellable_amount * best_ask
+
+                                        MIN_ORDER_VALUE = 1.30
+
+                                        logger.info(f"   Position: {shares:.4f} shares")
+                                        logger.info(f"   After floor: {sellable_amount:.1f} shares")
+                                        logger.info(f"   Current ask: ${best_ask:.4f}")
+                                        logger.info(f"   Order value: ${order_value:.2f}")
+                                        logger.info(f"   Minimum: ${MIN_ORDER_VALUE:.2f}")
+
+                                        if order_value < MIN_ORDER_VALUE:
+                                            logger.warning("=" * 70)
+                                            logger.warning(f"⚠️  DUST POSITION - cannot recover!")
+                                            logger.warning(f"   Order value ${order_value:.2f} < ${MIN_ORDER_VALUE:.2f} minimum")
+                                            logger.warning(f"   Position cannot be sold due to API minimum")
+                                            logger.warning(f"   Skipping startup recovery - bot will stay in SCANNING")
+                                            logger.warning("=" * 70)
+                                            logger.info("")
+                                            should_recover = False
+                                        else:
+                                            logger.info(f"   ✅ Order value OK - proceeding with recovery")
+                                            should_recover = True
+                                    else:
+                                        logger.warning(f"   ⚠️ Orderbook has no asks - skipping recovery")
+                                else:
+                                    logger.warning(f"   ⚠️ Could not fetch orderbook - skipping recovery")
+                            except Exception as e:
+                                logger.warning(f"   ⚠️ Error checking orderbook: {e}")
+                                logger.warning(f"   Cannot verify order value - skipping recovery")
                 except Exception as e:
                     logger.warning(f"   ⚠️ Error fetching market: {e}")
+                    logger.warning(f"   Cannot verify order value - skipping recovery")
                     token_id = ''
 
-                # Check if SELL order already exists
-                logger.info("   🔍 Checking if SELL order already exists...")
-                existing_sell_order = None
-                try:
-                    orders = client.get_my_orders(
-                        market_id=market_id,
-                        status='FILLED',
-                        limit=20
-                    )
+                # Only proceed with recovery if order value check passed
+                if should_recover:
+                    logger.info("   🔍 Checking if SELL order already exists...")
+                    existing_sell_order = None
+                    try:
+                        orders = client.get_my_orders(
+                            market_id=market_id,
+                            status='FILLED',
+                            limit=20
+                        )
 
-                    for order in orders:
-                        order_side = order.get('side', -1)
-                        filled_amount = float(order.get('filled_amount', 0) or 0)
-                        order_amount = float(order.get('order_amount', 0) or 0)
+                        for order in orders:
+                            order_side = order.get('side', -1)
+                            filled_amount = float(order.get('filled_amount', 0) or 0)
+                            order_amount = float(order.get('order_amount', 0) or 0)
 
-                        # Side: 1=BUY, 2=SELL
-                        if order_side == 2 and filled_amount < order_amount:
-                            existing_sell_order = order
-                            logger.info(f"   ✅ Found existing SELL order: {order.get('order_id')[:40]}...")
-                            logger.info(f"      Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
-                            break
-                except Exception as e:
-                    logger.warning(f"   ⚠️ Could not check for existing orders: {e}")
+                            # Side: 1=BUY, 2=SELL
+                            if order_side == 2 and filled_amount < order_amount:
+                                existing_sell_order = order
+                                logger.info(f"   ✅ Found existing SELL order: {order.get('order_id')[:40]}...")
+                                logger.info(f"      Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
+                                break
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Could not check for existing orders: {e}")
 
-                logger.info("")
-                logger.info("💡 Bot will SKIP balance check and monitor position")
-                logger.info("")
+                    logger.info("")
+                    logger.info("💡 Bot will SKIP balance check and monitor position")
+                    logger.info("")
 
-                # CRITICAL: Load bot.state before modifying
-                if bot.state is None:
-                    bot.state = bot.state_manager.load_state()
+                    # CRITICAL: Load bot.state before modifying
+                    if bot.state is None:
+                        bot.state = bot.state_manager.load_state()
 
-                # If SELL order exists, go to SELL_MONITORING
-                # Otherwise, go to BUY_FILLED to place new SELL
-                if existing_sell_order:
-                    logger.info(f"   Action: Will MONITOR existing SELL order")
-                    bot.state['stage'] = 'SELL_PLACED'
-                    bot.state['current_position'] = {
-                        'market_id': market_id,
-                        'token_id': token_id,
-                        'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
-                        'filled_amount': shares,
-                        'avg_fill_price': 0.31,
-                        'filled_usdt': shares * 0.31,
-                        'fill_timestamp': get_timestamp(),
-                        'sell_order_id': existing_sell_order.get('order_id'),
-                        'sell_price': float(existing_sell_order.get('price', 0)),
-                        'sell_placed_at': get_timestamp()
-                    }
-                else:
-                    logger.info(f"   Action: Will place NEW SELL order")
-                    bot.state['stage'] = 'BUY_FILLED'
-                    bot.state['current_position'] = {
-                        'market_id': market_id,
-                        'token_id': token_id,
-                        'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
-                        'filled_amount': shares,
-                        'avg_fill_price': pos.get('avg_price', 0.01),
-                        'filled_usdt': shares * pos.get('avg_price', 0.01),
-                        'fill_timestamp': get_timestamp()
-                    }
-                bot.state_manager.save_state(bot.state)
+                    # If SELL order exists, go to SELL_MONITORING
+                    # Otherwise, go to BUY_FILLED to place new SELL
+                    if existing_sell_order:
+                        logger.info(f"   Action: Will MONITOR existing SELL order")
+                        bot.state['stage'] = 'SELL_PLACED'
+                        bot.state['current_position'] = {
+                            'market_id': market_id,
+                            'token_id': token_id,
+                            'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
+                            'filled_amount': shares,
+                            'avg_fill_price': 0.31,
+                            'filled_usdt': shares * 0.31,
+                            'fill_timestamp': get_timestamp(),
+                            'sell_order_id': existing_sell_order.get('order_id'),
+                            'sell_price': float(existing_sell_order.get('price', 0)),
+                            'sell_placed_at': get_timestamp()
+                        }
+                    else:
+                        logger.info(f"   Action: Will place NEW SELL order")
+                        bot.state['stage'] = 'BUY_FILLED'
+                        bot.state['current_position'] = {
+                            'market_id': market_id,
+                            'token_id': token_id,
+                            'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
+                            'filled_amount': shares,
+                            'avg_fill_price': pos.get('avg_price', 0.01),
+                            'filled_usdt': shares * pos.get('avg_price', 0.01),
+                            'fill_timestamp': get_timestamp()
+                        }
+                    bot.state_manager.save_state(bot.state)
 
-                logger.info("✅ State recovered and saved")
-                logger.info(f"📍 Bot will start in BUY_FILLED → SELL_PLACED")
-                logger.info("")
+                    logger.info("✅ State recovered and saved")
+                    logger.info(f"📍 Bot will start in BUY_FILLED → SELL_PLACED")
+                    logger.info("")
 
-                has_open_position = True
+                    has_open_position = True
 
             else:
-                # No significant positions found (dust < 1.0 shares or no positions at all)
+                # No significant positions found (dust < 5.0 shares or no positions at all)
                 # Check if this is pending order with frozen balance (not just old dust)
                 # Get ALL positions (including dust) to check frozen balance
                 all_positions = client.get_positions()
 
                 if all_positions:
-                    logger.info("⚠️  No significant positions (all have < 1.0 shares)")
+                    logger.info("⚠️  No significant positions (all have < 5.0 shares)")
                     logger.info("   Checking if any are PENDING orders (not just dust)...")
 
                     try:

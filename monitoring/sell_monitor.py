@@ -537,13 +537,44 @@ class SellMonitor:
                 return False
             
             logger.info(f"   ✓ Aggressive limit order placed: {new_order_id}")
-            
+
             # Update state with new order
             self.state['sell_order_id'] = new_order_id
             self.state['sell_price'] = aggressive_price
             self.state['stop_loss_triggered'] = True
             self.state['stop_loss_timestamp'] = get_timestamp()
-            
+
+            # CRITICAL: Wait for aggressive order to fill (max 30s)
+            # Otherwise bot moves to SCANNING while order fills in background
+            logger.info("   ⏳ Waiting for aggressive order to fill (max 30s)...")
+
+            for attempt in range(6):  # 6 attempts * 5s = 30s
+                time.sleep(5)
+
+                # Check position to see if tokens were sold
+                try:
+                    outcome_side = position.get('outcome_side', 'YES')
+                    remaining_shares = self.client.get_position_shares(
+                        market_id=market_id,
+                        outcome_side=outcome_side
+                    )
+                    remaining = float(remaining_shares)
+
+                    logger.info(f"   Check #{attempt + 1}: {remaining:.4f} tokens remaining")
+
+                    # If position is dust (<1.0), order filled
+                    if remaining < 1.0:
+                        logger.info("   ✅ Aggressive order filled!")
+                        logger.info(f"   Remaining dust: {remaining:.4f} tokens")
+                        return True
+
+                except Exception as e:
+                    logger.warning(f"   Could not check position: {e}")
+
+            # After 30s, assume it filled (or will fill soon)
+            logger.warning("   ⚠️ Timed out waiting for fill (30s)")
+            logger.warning("   Assuming order filled or will fill soon")
+
             return True
             
         except Exception as e:

@@ -322,7 +322,31 @@ class OpinionClient:
                         asks.append(ask.dict())
                     else:
                         asks.append(ask)
-            
+
+            # CRITICAL FIX: Sort orderbook to ensure correct best prices
+            # bids: highest to lowest (descending)
+            # asks: lowest to highest (ascending)
+            # This ensures bids[0] = best bid, asks[0] = best ask
+            def safe_price(order):
+                """Extract price safely from order dict/object."""
+                if isinstance(order, dict):
+                    return float(order.get('price', 0))
+                elif hasattr(order, 'price'):
+                    return float(order.price)
+                return 0.0
+
+            if bids:
+                bids.sort(key=safe_price, reverse=True)  # Descending
+            if asks:
+                asks.sort(key=safe_price)  # Ascending
+
+            # DEBUG: Log orderbook after sorting for verification
+            if bids and asks:
+                logger.debug(f"📊 Orderbook sorted for token {token_id[:20]}...")
+                logger.debug(f"   Best bid: ${safe_price(bids[0]):.4f} (from {len(bids)} bids)")
+                logger.debug(f"   Best ask: ${safe_price(asks[0]):.4f} (from {len(asks)} asks)")
+                logger.debug(f"   Spread: ${safe_price(asks[0]) - safe_price(bids[0]):.4f}")
+
             return {
                 'bids': bids,
                 'asks': asks
@@ -497,14 +521,35 @@ class OpinionClient:
                 return None
             
             logger.info(f"Placing SELL order: {amount_tokens:.4f} tokens @ ${price:.4f}")
-            
+
+            # CRITICAL FIX: Floor to 1 decimal place to avoid API rounding errors
+            # API rounds to 1 decimal during validation, causing errors like:
+            # - We send: 163.78 (163.79 - 0.01)
+            # - API validates: 163.8 (rounds 163.78 up!)
+            # - Error: "Insufficient token balance: 163.8 required, but only 163.79 available"
+            #
+            # Solution: Floor to 1 decimal place BEFORE sending to API
+            # - 163.79 → 163.7 (API validates 163.7 < 163.79 ✓)
+            # - 100.15 → 100.1 (API validates 100.1 < 100.15 ✓)
+            import math
+            adjusted_amount = math.floor(amount_tokens * 10) / 10
+
+            # Ensure we don't go to zero
+            if adjusted_amount <= 0:
+                logger.error(f"❌ Amount too small after rounding: floor({amount_tokens:.4f} * 10) / 10 = {adjusted_amount:.4f}")
+                logger.error(f"   Cannot place SELL order with amount <= 0")
+                return None
+
+            loss_from_rounding = amount_tokens - adjusted_amount
+            logger.debug(f"   Floored amount for API safety: {adjusted_amount:.1f} (original: {amount_tokens:.4f}, loss: {loss_from_rounding:.4f})")
+
             order_input = PlaceOrderDataInput(
                 marketId=market_id,
                 tokenId=token_id,
                 side=OrderSide.SELL,
                 orderType=LIMIT_ORDER,
                 price=str(price),
-                makerAmountInBaseToken=amount_tokens
+                makerAmountInBaseToken=adjusted_amount
             )
             
             response = self._client.place_order(order_input, check_approval=check_approval)
@@ -983,25 +1028,25 @@ class OpinionClient:
     def get_significant_positions(
         self,
         market_id: Optional[int] = None,
-        min_shares: float = 1.0
+        min_shares: float = 5.0
     ) -> list[dict]:
         """
         Get positions with at least min_shares tokens.
 
-        Filters out dust positions that cannot be sold due to
-        API minimum order size restrictions (makerAmountInBaseToken >= 1).
+        Filters out dust positions that are too small to be worth selling.
+        Dust positions will be accumulated and sold with future positions on same market.
 
         Args:
             market_id: Optional market ID to filter by
-            min_shares: Minimum shares to consider significant (default: 1.0)
+            min_shares: Minimum shares to consider significant (default: 5.0)
 
         Returns:
             List of position dictionaries with shares_owned >= min_shares
 
         Example:
             >>> client = OpinionClient()
-            >>> positions = client.get_significant_positions(min_shares=1.0)
-            >>> # Returns only positions with >= 1.0 shares (can be sold)
+            >>> positions = client.get_significant_positions(min_shares=5.0)
+            >>> # Returns only positions with >= 5.0 shares (worth selling)
         """
         all_positions = self.get_positions(market_id=market_id)
 

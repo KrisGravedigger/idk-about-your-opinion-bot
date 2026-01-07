@@ -157,9 +157,50 @@ class BuyMonitor:
                     logger.warning("⏰ BUY ORDER TIMEOUT")
                     logger.warning("=" * 50)
                     logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
+                    logger.warning("")
+
+                    # CRITICAL: Check if order has partial fill before canceling
+                    # Get latest order status to check filled_amount
+                    try:
+                        order_check = self.client.get_order(order_id)
+                        if order_check:
+                            filled_shares = safe_float(order_check.get('filled_shares', 0))
+                            filled_amount_usdt = safe_float(order_check.get('filled_amount', 0))
+                            status_enum = order_check.get('status_enum', 'unknown')
+
+                            logger.info(f"   Order status: {status_enum}")
+                            logger.info(f"   Filled shares: {filled_shares:.4f}")
+                            logger.info(f"   Filled amount: ${filled_amount_usdt:.2f}")
+                            logger.info("")
+
+                            # If order has ANY fill (even partial), treat it as filled
+                            # Bot will sell whatever was filled
+                            if filled_shares > 0:
+                                logger.warning("⚠️  Order has PARTIAL FILL - will proceed to SELL")
+                                logger.warning(f"   Filled: {filled_shares:.4f} tokens")
+                                logger.warning("")
+
+                                # Extract full fill data
+                                filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order_check)
+
+                                return {
+                                    'status': 'filled',  # Treat partial fill as filled
+                                    'filled_amount': filled_amount,
+                                    'avg_fill_price': avg_fill_price,
+                                    'filled_usdt': filled_usdt,
+                                    'fill_timestamp': get_timestamp(),
+                                    'reason': f'Partial fill after {self.timeout_hours}h timeout'
+                                }
+                            else:
+                                logger.warning("   No fill detected - order will be canceled")
+                                logger.warning("")
+                    except Exception as e:
+                        logger.error(f"⚠️  Could not check order for partial fill: {e}")
+                        logger.warning("   Proceeding with timeout (may lose partial fill!)")
+
                     logger.warning("   Exiting monitoring")
                     logger.warning("")
-                    
+
                     return {
                         'status': 'timeout',
                         'filled_amount': None,

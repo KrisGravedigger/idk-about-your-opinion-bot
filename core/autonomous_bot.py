@@ -30,7 +30,7 @@ import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from logger_config import setup_logger
-from utils import format_price, format_usdt, format_percent, get_timestamp
+from utils import format_price, format_usdt, format_percent, get_timestamp, safe_float
 
 # Import all required modules
 from core.capital_manager import CapitalManager, InsufficientCapitalError, PositionTooSmallError
@@ -149,9 +149,12 @@ class AutonomousBot:
         )
 
         try:
-            # Send initial heartbeat to verify current state
-            logger.debug("Sending initial heartbeat...")
-            self._send_heartbeat_now()
+            # Send initial heartbeat to verify current state (async to avoid blocking)
+            logger.debug("Sending initial heartbeat (async)...")
+            import threading
+            heartbeat_thread = threading.Thread(target=self._send_heartbeat_now, daemon=True)
+            heartbeat_thread.start()
+            # Don't wait for it - let it finish in background
         except Exception as e:
             logger.warning(f"Could not send initial heartbeat: {e}")
 
@@ -273,7 +276,7 @@ class AutonomousBot:
             # But check anyway in case of state corruption
             try:
                 logger.debug("🔍 Pre-stage check: Verifying no orphaned positions...")
-                positions = self.client.get_significant_positions(min_shares=1.0)
+                positions = self.client.get_significant_positions(min_shares=5.0)
 
                 if positions:
                     # We have significant positions but state says IDLE/SCANNING
@@ -291,76 +294,198 @@ class AutonomousBot:
 
                 logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
                 logger.warning(f"   Shares: {shares:.4f}")
-                logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
 
-                # Get outcome_side to determine which token_id to use
-                outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
-                logger.info(f"   Position side: {outcome_side_enum}")
+                # CRITICAL: Check if position value meets minimum order requirement
+                # Before recovering, verify we can actually sell this position
+                # API requires order value >= $1.30, not just shares >= 1.0!
+                logger.info(f"   Checking if position value meets minimum...")
 
-                # Fetch market details to get token_id
-                logger.info(f"   Fetching market details to recover token_id...")
+                should_recover_position = False  # Default: NO recovery unless verified
+
                 try:
+                    # Get outcome_side to fetch correct token_id
+                    outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+
+                    # Fetch market to get token_id for orderbook
                     market_details = self.client.get_market(market_id)
-
-                    if market_details:
-                        # Extract correct token_id based on outcome_side_enum
-                        # NOTE: market_details is Pydantic model, use attribute access
-                        if outcome_side_enum.lower() == 'yes':
-                            token_id = getattr(market_details, 'yes_token_id', '')
-                        else:
-                            token_id = getattr(market_details, 'no_token_id', '')
-
-                        logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
+                    if not market_details:
+                        logger.warning(f"   ⚠️ Could not fetch market details for #{market_id}")
+                        logger.warning(f"   Cannot verify order value - skipping recovery")
                     else:
-                        logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                        # Handle both dict and Pydantic model returns
+                        if isinstance(market_details, dict):
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id_for_check = market_details.get('yes_token_id', '')
+                            else:
+                                token_id_for_check = market_details.get('no_token_id', '')
+                        else:
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id_for_check = getattr(market_details, 'yes_token_id', '')
+                            else:
+                                token_id_for_check = getattr(market_details, 'no_token_id', '')
+
+                        logger.info(f"   Token ID for check: {token_id_for_check[:20] if token_id_for_check else 'EMPTY'}...")
+
+                        # Get orderbook to check current price
+                        if not token_id_for_check:
+                            logger.warning(f"   ⚠️ Token ID is empty!")
+                            logger.warning(f"   Cannot verify order value - skipping recovery")
+                        else:
+                            orderbook = self.client.get_market_orderbook(token_id_for_check)
+                            if not (orderbook and 'asks' in orderbook):
+                                logger.warning(f"   ⚠️ Could not fetch orderbook")
+                                logger.warning(f"   Cannot verify order value - skipping recovery")
+                            else:
+                                asks = orderbook.get('asks', [])
+                                if not asks:
+                                    logger.warning(f"   ⚠️ Orderbook has no asks")
+                                    logger.warning(f"   Cannot verify order value - skipping recovery")
+                                else:
+                                    # Get best ask price (already sorted by api_client)
+                                    best_ask = safe_float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else safe_float(asks[0][0])
+
+                                    # Calculate order value after floor rounding
+                                    import math
+                                    sellable_amount = math.floor(shares * 10) / 10
+                                    order_value = sellable_amount * best_ask
+
+                                    MIN_ORDER_VALUE = 1.30
+
+                                    logger.info(f"   Position: {shares:.4f} shares")
+                                    logger.info(f"   After floor: {sellable_amount:.1f} shares")
+                                    logger.info(f"   Current ask: ${best_ask:.4f}")
+                                    logger.info(f"   Order value: ${order_value:.2f}")
+                                    logger.info(f"   Minimum: ${MIN_ORDER_VALUE:.2f}")
+
+                                    if order_value < MIN_ORDER_VALUE:
+                                        logger.warning("=" * 70)
+                                        logger.warning(f"⚠️  DUST POSITION - cannot recover!")
+                                        logger.warning(f"   Order value ${order_value:.2f} < ${MIN_ORDER_VALUE:.2f} minimum")
+                                        logger.warning(f"   Position cannot be sold due to API minimum")
+                                        logger.warning(f"   Skipping auto-recovery, staying in SCANNING")
+                                        logger.warning("=" * 70)
+                                        logger.info("")
+                                        # Don't recover - let normal SCANNING continue
+                                        # Position will remain as dust and be ignored
+                                        should_recover_position = False
+                                    else:
+                                        logger.info(f"   ✅ Order value OK - proceeding with recovery")
+                                        should_recover_position = True
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Exception while checking order value: {e}")
+                    logger.warning(f"   Cannot verify order value - skipping recovery")
+                    # should_recover_position stays False
+
+                if should_recover_position:
+                    logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
+
+                    # Get outcome_side to determine which token_id to use
+                    outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+                    logger.info(f"   Position side: {outcome_side_enum}")
+
+                    # Fetch market details to get token_id
+                    logger.info(f"   Fetching market details to recover token_id...")
+                    try:
+                        market_details = self.client.get_market(market_id)
+
+                        if market_details:
+                            # Extract correct token_id based on outcome_side_enum
+                            # NOTE: market_details is Pydantic model, use attribute access
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id = getattr(market_details, 'yes_token_id', '')
+                            else:
+                                token_id = getattr(market_details, 'no_token_id', '')
+
+                            logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
+                        else:
+                            logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                            token_id = ''
+
+                    except Exception as e:
+                        logger.error(f"   ❌ Error fetching market details: {e}")
                         token_id = ''
 
-                except Exception as e:
-                    logger.error(f"   ❌ Error fetching market details: {e}")
-                    token_id = ''
+                    # Force state to BUY_FILLED so bot will place SELL
+                    # Try to get real avg_price from position, fallback to calculation
+                    avg_price = pos.get('avg_price', 0)
 
-                # Force state to BUY_FILLED so bot will place SELL
-                # Try to get real avg_price from position, fallback to calculation
-                avg_price = pos.get('avg_price', 0)
+                    if avg_price <= 0:
+                        # Try to calculate from position value (if API provides it)
+                        # Common field names: 'total_value', 'value', 'cost_basis', 'invested'
+                        total_value = (
+                            pos.get('total_value', 0) or
+                            pos.get('value', 0) or
+                            pos.get('cost_basis', 0) or
+                            pos.get('invested', 0)
+                        )
 
-                if avg_price <= 0:
-                    # Try to calculate from position value (if API provides it)
-                    # Common field names: 'total_value', 'value', 'cost_basis', 'invested'
-                    total_value = (
-                        pos.get('total_value', 0) or
-                        pos.get('value', 0) or
-                        pos.get('cost_basis', 0) or
-                        pos.get('invested', 0)
-                    )
+                        if total_value > 0 and shares > 0:
+                            avg_price = total_value / shares
+                            logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
+                            logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
+                        else:
+                            logger.warning(f"⚠️ Cannot calculate avg_price from position value field")
+                            logger.info(f"   Attempting to retrieve from order history...")
 
-                    if total_value > 0 and shares > 0:
-                        avg_price = total_value / shares
-                        logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
-                        logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
-                    else:
-                        logger.warning(f"⚠️ Cannot calculate avg_price - no value field in position")
-                        logger.warning(f"   Using minimal fallback $0.01")
-                        logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                        avg_price = 0.01
+                            # Try to get avg_price from recent order history
+                            try:
+                                orders = self.client.get_my_orders(
+                                    market_id=market_id,
+                                    status='FILLED',
+                                    limit=20
+                                )
 
-                self.state['stage'] = 'BUY_FILLED'
-                self.state['current_position'] = {
-                    'market_id': market_id,
-                    'token_id': token_id,  # ← FIXED: use recovered token_id, not pos.get()
-                    'outcome_side': outcome_side_enum,
-                    'market_title': pos.get('title', f"Recovered market #{market_id}"),
-                    'filled_amount': shares,
-                    'avg_fill_price': avg_price,
-                    'filled_usdt': shares * avg_price,
-                    'fill_timestamp': get_timestamp()
-                }
-                self.state_manager.save_state(self.state)
+                                # Check if API returned valid data
+                                if orders is None or not isinstance(orders, list):
+                                    logger.warning(f"⚠️ API returned invalid orders data (None or not list)")
+                                    logger.warning(f"   Using minimal fallback $0.01")
+                                    avg_price = 0.01
+                                else:
+                                    # Find BUY orders for this market with filled amount
+                                    found_order = False
+                                    for order in orders:
+                                        if order.get('side') == 1:  # BUY order
+                                            filled_shares = safe_float(order.get('filled_shares', 0))
+                                            filled_usdt = safe_float(order.get('filled_amount', 0))
 
-                # Change stage to BUY_FILLED for this execution
-                stage = 'BUY_FILLED'
-                logger.info("✅ State recovered - will execute BUY_FILLED handler")
-                # NOTE: We're in _execute_stage(), not run() loop
-                # Can't use break here - just continue to execute BUY_FILLED handler below
+                                            if filled_shares > 0 and filled_usdt > 0:
+                                                calculated_avg = filled_usdt / filled_shares
+                                                logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
+                                                logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
+                                                avg_price = calculated_avg
+                                                found_order = True
+                                                break
+
+                                    if not found_order:
+                                        # No valid BUY order found
+                                        logger.warning(f"⚠️ No BUY order found in history")
+                                        logger.warning(f"   Using minimal fallback $0.01")
+                                        logger.warning(f"   Stop-loss and P&L will be INACCURATE")
+                                        avg_price = 0.01
+
+                            except Exception as e:
+                                logger.warning(f"⚠️ Could not retrieve order history: {e}")
+                                logger.warning(f"   Using minimal fallback $0.01")
+                                avg_price = 0.01
+
+                    self.state['stage'] = 'BUY_FILLED'
+                    self.state['current_position'] = {
+                        'market_id': market_id,
+                        'token_id': token_id,  # ← FIXED: use recovered token_id, not pos.get()
+                        'outcome_side': outcome_side_enum,
+                        'market_title': pos.get('title', f"Recovered market #{market_id}"),
+                        'filled_amount': shares,
+                        'avg_fill_price': avg_price,
+                        'filled_usdt': shares * avg_price,
+                        'fill_timestamp': get_timestamp()
+                    }
+                    self.state_manager.save_state(self.state)
+
+                    # Change stage to BUY_FILLED for this execution
+                    stage = 'BUY_FILLED'
+                    logger.info("✅ State recovered - will execute BUY_FILLED handler")
+                    # NOTE: We're in _execute_stage(), not run() loop
+                    # Can't use break here - just continue to execute BUY_FILLED handler below
             except Exception as e:
                 logger.debug(f"Pre-stage check failed (non-critical): {e}")
         
@@ -433,8 +558,8 @@ class AutonomousBot:
         logger.info("🔍 Checking for existing active orders...")
         try:
             # Check if we have any active positions with significant shares
-            # Dust positions (< 1.0 shares) are automatically filtered out
-            positions = self.client.get_significant_positions(min_shares=1.0)
+            # Dust positions (< 5.0 shares) are automatically filtered out
+            positions = self.client.get_significant_positions(min_shares=5.0)
 
             if positions:
                 # Take first significant position
@@ -535,8 +660,31 @@ class AutonomousBot:
             
             best_bid = fresh_orderbook['best_bid']
             best_ask = fresh_orderbook['best_ask']
-            
+
+            # VALIDATION: Sanity check orderbook prices before trading
+            spread = best_ask - best_bid
+            if spread < 0:
+                logger.error(f"❌ INVALID ORDERBOOK: Negative spread!")
+                logger.error(f"   Best bid: ${best_bid:.4f}")
+                logger.error(f"   Best ask: ${best_ask:.4f}")
+                logger.error(f"   This indicates crossed market or API data error")
+                logger.error(f"   CANNOT place order with invalid orderbook - resetting to SCANNING")
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return False
+
+            if best_bid <= 0 or best_ask <= 0:
+                logger.error(f"❌ INVALID ORDERBOOK: Zero or negative prices!")
+                logger.error(f"   Best bid: ${best_bid:.4f}, Best ask: ${best_ask:.4f}")
+                return False
+
+            if best_bid > 1.0 or best_ask > 1.0:
+                logger.warning(f"⚠️ SUSPICIOUS: Prices > $1.00 in prediction market!")
+                logger.warning(f"   Best bid: ${best_bid:.4f}, Best ask: ${best_ask:.4f}")
+                # Continue but log warning
+
             logger.info(f"   Bid: {format_price(best_bid)} | Ask: {format_price(best_ask)}")
+            logger.info(f"   Spread: {format_price(spread)}")
             
             # Calculate position size
             try:
@@ -1098,6 +1246,32 @@ class AutonomousBot:
             position['avg_fill_price'] = result.get('avg_fill_price', position.get('price', 0))
             position['filled_usdt'] = result.get('filled_usdt', 0)
             position['fill_timestamp'] = result.get('fill_timestamp')
+
+            # VALIDATION: Check if avg_fill_price is suspiciously low (likely fallback)
+            if position['avg_fill_price'] <= 0.02:
+                logger.warning(f"⚠️ avg_fill_price={position['avg_fill_price']:.4f} is suspiciously low!")
+                logger.warning(f"   This may be fallback value from failed extraction")
+                logger.warning(f"   Attempting to calculate from filled_usdt and filled_amount...")
+
+                filled_usdt = position.get('filled_usdt', 0)
+                filled_amount = position.get('filled_amount', 0)
+
+                if filled_usdt > 0 and filled_amount > 0:
+                    calculated_price = filled_usdt / filled_amount
+                    logger.info(f"✅ Calculated avg_fill_price: ${calculated_price:.4f}")
+                    logger.info(f"   (filled_usdt=${filled_usdt:.2f} / filled_amount={filled_amount:.4f})")
+                    position['avg_fill_price'] = calculated_price
+                else:
+                    # Try using original order price as last resort
+                    order_price = position.get('price', 0)
+                    if order_price > 0:
+                        logger.warning(f"⚠️ Using original order price as fallback: ${order_price:.4f}")
+                        logger.warning(f"   This may not reflect actual fill price!")
+                        position['avg_fill_price'] = order_price
+                    else:
+                        logger.error(f"❌ Cannot determine avg_fill_price!")
+                        logger.error(f"   Stop-loss and P&L will be INACCURATE")
+                        logger.error(f"   Using minimal fallback $0.01")
             
             self.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.state)
@@ -1244,11 +1418,11 @@ class AutonomousBot:
                     logger.warning("=" * 70)
                     logger.info("")
 
-                    # Check if remaining tokens are dust (< 1.0)
-                    if actual_tokens < 1.0:
+                    # Check if remaining tokens are dust (< 5.0)
+                    if actual_tokens < 5.0:
                         logger.info("💡 Action: Remaining position is dust - resetting to SCANNING")
-                        logger.info(f"   Dust positions ({actual_tokens:.4f} tokens) cannot be sold")
-                        logger.info(f"   API requires minimum 1.0 tokens for SELL orders")
+                        logger.info(f"   Dust positions ({actual_tokens:.4f} tokens) are too small to sell")
+                        logger.info(f"   Dust will be accumulated with future positions on this market")
                     else:
                         logger.info("💡 Action: Resetting to SCANNING to find new market")
                         logger.info(f"   Manual sale has left {actual_tokens:.4f} tokens")
@@ -1276,20 +1450,20 @@ class AutonomousBot:
         # =====================================================================
         # DUST POSITION CHECK: Verify position is large enough to sell
         # =====================================================================
-        # API requires makerAmountInBaseToken >= 1.0 for SELL orders
-        # Positions < 1.0 shares (dust) cannot be sold and should be abandoned
-        MIN_SELLABLE_SHARES = 1.0
+        # Dust threshold: positions < 5.0 shares are too small to be worth selling
+        # These will be accumulated and sold together with future positions on same market
+        MIN_SELLABLE_SHARES = 5.0
 
         if filled_amount < MIN_SELLABLE_SHARES:
             logger.warning("=" * 70)
             logger.warning(f"⚠️  DUST POSITION DETECTED!")
-            logger.warning(f"   Position has {filled_amount:.4f} shares (< {MIN_SELLABLE_SHARES} minimum)")
-            logger.warning(f"   API requires makerAmountInBaseToken >= 1.0 for SELL orders")
-            logger.warning(f"   This position cannot be sold - likely from partial fill")
+            logger.warning(f"   Position has {filled_amount:.4f} shares (< {MIN_SELLABLE_SHARES:.1f} minimum)")
+            logger.warning(f"   Positions below {MIN_SELLABLE_SHARES:.1f} shares are too small to be worth selling")
+            logger.warning(f"   Dust will be accumulated and sold with future positions on same market")
             logger.warning("=" * 70)
             logger.info("")
-            logger.info("💡 Action: Abandoning dust position and resetting to SCANNING")
-            logger.info("   Dust positions are typically worth < $1 and not worth selling")
+            logger.info("💡 Action: Saving dust position and resetting to SCANNING")
+            logger.info(f"   Dust ({filled_amount:.4f} shares) will be added to next position on this market")
             logger.info("")
 
             # Reset and find new market
@@ -1318,18 +1492,32 @@ class AutonomousBot:
                     logger.info(f"✅ Recovered filled_amount from position: {filled_amount:.10f}")
                     position['filled_amount'] = filled_amount
                     
-                    # ALSO recover avg_fill_price if missing (required by SellMonitor)
-                    # Use BUY order limit price as fallback - close enough for stop-loss
-                    if not position.get('avg_fill_price') or position.get('avg_fill_price') == 0:
-                        fallback_price = position.get('price', 0)
-                        if fallback_price > 0:
-                            logger.info(f"✅ Using BUY order price as avg_fill_price: ${fallback_price:.4f}")
-                            logger.info(f"   (This is fallback - normally set by BuyMonitor)")
-                            position['avg_fill_price'] = fallback_price
+                    # ALSO recover avg_fill_price if missing or suspiciously low (required by SellMonitor)
+                    current_avg_price = position.get('avg_fill_price', 0)
+
+                    if current_avg_price <= 0.02:  # Suspiciously low (fallback value or failed extraction)
+                        logger.warning(f"⚠️ avg_fill_price={current_avg_price:.4f} is suspiciously low!")
+                        logger.warning(f"   Attempting to calculate from filled_usdt and filled_amount...")
+
+                        filled_usdt = position.get('filled_usdt', 0)
+                        filled_amount_for_calc = position.get('filled_amount', 0)
+
+                        if filled_usdt > 0 and filled_amount_for_calc > 0:
+                            calculated_price = filled_usdt / filled_amount_for_calc
+                            logger.info(f"✅ Calculated avg_fill_price: ${calculated_price:.4f}")
+                            logger.info(f"   (filled_usdt=${filled_usdt:.2f} / filled_amount={filled_amount_for_calc:.4f})")
+                            position['avg_fill_price'] = calculated_price
                         else:
-                            logger.warning(f"⚠️ No valid price found - using minimal fallback $0.01")
-                            logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                            position['avg_fill_price'] = 0.01
+                            # Use BUY order limit price as fallback
+                            fallback_price = position.get('price', 0)
+                            if fallback_price > 0:
+                                logger.warning(f"⚠️ Cannot calculate - using BUY order price: ${fallback_price:.4f}")
+                                logger.warning(f"   (This may not reflect actual fill price)")
+                                position['avg_fill_price'] = fallback_price
+                            else:
+                                logger.error(f"❌ No valid price found - using minimal fallback $0.01")
+                                logger.error(f"   Stop-loss and P&L will be INACCURATE")
+                                position['avg_fill_price'] = 0.01
                     
                     self.state_manager.save_state(self.state)
                 else:
@@ -1361,7 +1549,41 @@ class AutonomousBot:
             
             best_bid = fresh_orderbook['best_bid']
             best_ask = fresh_orderbook['best_ask']
-            
+
+            # ================================================================
+            # ENHANCED DUST CHECK: Verify order VALUE meets minimum
+            # ================================================================
+            # API requires minimum order value of $1.30, NOT just 1.0 tokens!
+            # A position with 3.0 tokens @ $0.40 = $1.20 < $1.30 → DUST!
+            MIN_ORDER_VALUE_USDT = 1.30  # API minimum
+
+            # After floor rounding, amount might be less
+            import math
+            sellable_amount = math.floor(filled_amount * 10) / 10
+            estimated_order_value = sellable_amount * best_ask
+
+            if estimated_order_value < MIN_ORDER_VALUE_USDT:
+                logger.warning("=" * 70)
+                logger.warning(f"⚠️  DUST POSITION DETECTED (order value too low)!")
+                logger.warning(f"   Position: {filled_amount:.4f} shares")
+                logger.warning(f"   After floor: {sellable_amount:.1f} shares")
+                logger.warning(f"   Current ask: ${best_ask:.4f}")
+                logger.warning(f"   Order value: ${estimated_order_value:.2f}")
+                logger.warning(f"   API minimum: ${MIN_ORDER_VALUE_USDT:.2f}")
+                logger.warning(f"   Cannot sell - order value too low!")
+                logger.warning("=" * 70)
+                logger.info("")
+                logger.info("💡 Action: Abandoning dust position and resetting to SCANNING")
+                logger.info("")
+
+                # Reset and find new market
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return True
+
+            logger.info(f"✅ Position value OK: ${estimated_order_value:.2f} (>= ${MIN_ORDER_VALUE_USDT:.2f} minimum)")
+
             # ================================================================
             # HANDLE EDGE CASE: Empty orderbook (99:1 lopsided market)
             # ================================================================
@@ -1386,6 +1608,16 @@ class AutonomousBot:
                 logger.error(f"   Bid: {best_bid}, Ask: {best_ask}")
                 logger.error(f"   Cannot place SELL order without valid prices")
                 return False
+
+            # Validate spread is not negative
+            spread = best_ask - best_bid
+            if spread < 0:
+                logger.error(f"❌ INVALID ORDERBOOK: Negative spread!")
+                logger.error(f"   Best bid: ${best_bid:.4f}")
+                logger.error(f"   Best ask: ${best_ask:.4f}")
+                logger.error(f"   This indicates crossed market or API data error")
+                logger.error(f"   Cannot place SELL order - returning to BUY_FILLED for retry")
+                return False
             
             logger.info(f"   Bid: {format_price(best_bid)} | Ask: {format_price(best_ask)}")
             
@@ -1393,7 +1625,66 @@ class AutonomousBot:
             sell_price = self.pricing.calculate_sell_price(best_bid, best_ask)
             
             logger.info(f"   SELL price: {format_price(sell_price)}")
-            
+
+            # ================================================================
+            # DUST ACCUMULATION: Check for existing dust on this market
+            # ================================================================
+            # Before placing SELL, check if we already have small position (dust)
+            # on this market from previous partial fills. Add it to current SELL.
+            logger.info("🔍 Checking for existing dust position on this market...")
+
+            try:
+                outcome_side = position.get('outcome_side', 'YES')
+                existing_shares = self.client.get_position_shares(
+                    market_id=market_id,
+                    outcome_side=outcome_side
+                )
+                existing_amount = float(existing_shares)
+
+                logger.info(f"   Current position: {filled_amount:.4f} shares")
+                logger.info(f"   Existing position (from API): {existing_amount:.4f} shares")
+
+                # Check if we have MORE shares than expected (dust from previous trades)
+                if existing_amount > filled_amount:
+                    dust_amount = existing_amount - filled_amount
+                    logger.info(f"   ✅ DUST DETECTED: {dust_amount:.4f} shares")
+                    logger.info(f"   Adding dust to SELL order...")
+
+                    # Update filled_amount to include dust
+                    old_amount = filled_amount
+                    filled_amount = existing_amount
+                    position['filled_amount'] = filled_amount
+                    self.state_manager.save_state(self.state)
+
+                    logger.info(f"   📝 Updated SELL amount: {old_amount:.4f} → {filled_amount:.4f} shares")
+                    logger.info(f"   Will sell ALL shares including dust")
+                elif existing_amount < filled_amount:
+                    # API shows LESS than expected - possible manual sale
+                    difference = filled_amount - existing_amount
+                    logger.warning(f"   ⚠️ API shows LESS shares than expected!")
+                    logger.warning(f"   Expected: {filled_amount:.4f}, API: {existing_amount:.4f}")
+                    logger.warning(f"   Difference: {difference:.4f} shares")
+                    logger.warning(f"   Using API value (more accurate)")
+
+                    filled_amount = existing_amount
+                    position['filled_amount'] = filled_amount
+                    self.state_manager.save_state(self.state)
+
+                    # Re-check if still above dust threshold
+                    if filled_amount < 5.0:
+                        logger.warning("   ⚠️ After adjustment, position is now dust!")
+                        logger.info("   Abandoning and resetting to SCANNING")
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+                else:
+                    logger.info(f"   ✅ No dust - amounts match")
+
+            except Exception as e:
+                logger.warning(f"   ⚠️ Could not check for dust: {e}")
+                logger.info(f"   Proceeding with state.json value: {filled_amount:.4f}")
+
             # Place SELL order
             logger.info("📝 Placing SELL order...")
             
@@ -1886,12 +2177,22 @@ class AutonomousBot:
             try:
                 market_id = position['market_id']
                 token_id = position.get('token_id')
+                outcome_side = position.get('outcome_side', 'UNKNOWN')
                 market_title = position.get('market_title', f'Market #{market_id}')
+
+                # DEBUG: Log which token we're fetching orderbook for
+                logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
+                logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
+                logger.debug(f"   outcome_side: {outcome_side}")
 
                 # Get orderbook using token_id (FIXED: was using market_id which doesn't work)
                 orderbook = None
                 if token_id:
                     orderbook = self.client.get_market_orderbook(token_id)
+                    if orderbook:
+                        logger.debug(f"   ✅ Orderbook fetched successfully")
+                    else:
+                        logger.warning(f"   ⚠️ Orderbook fetch returned None for token {token_id[:20]}...")
 
                 if orderbook and 'bids' in orderbook and 'asks' in orderbook:
                     bids = orderbook['bids']
@@ -1902,6 +2203,21 @@ class AutonomousBot:
                         best_bid = float(bids[0].get('price', 0)) if isinstance(bids[0], dict) else float(bids[0][0])
                         best_ask = float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else float(asks[0][0])
                         spread = best_ask - best_bid
+
+                        # DEBUG: Log orderbook prices for verification
+                        logger.debug(f"   📊 Orderbook prices:")
+                        logger.debug(f"      Best bid: ${best_bid:.4f}")
+                        logger.debug(f"      Best ask: ${best_ask:.4f}")
+                        logger.debug(f"      Spread: ${spread:.4f}")
+
+                        # VALIDATION: Check if orderbook data makes sense
+                        if spread < 0:
+                            logger.warning(f"   ⚠️ SUSPICIOUS: Negative spread detected! bid=${best_bid:.4f} > ask=${best_ask:.4f}")
+                            logger.warning(f"   This indicates crossed market or data error")
+                        if best_bid <= 0 or best_ask <= 0:
+                            logger.warning(f"   ⚠️ SUSPICIOUS: Zero or negative price detected!")
+                        if best_bid > 1.0 or best_ask > 1.0:
+                            logger.warning(f"   ⚠️ SUSPICIOUS: Price > $1.00 in prediction market!")
 
                         # Build market info
                         market_info = {

@@ -67,7 +67,8 @@ class TelegramNotifier:
         self,
         message: str,
         parse_mode: str = "HTML",
-        disable_notification: bool = False
+        disable_notification: bool = False,
+        async_send: bool = True
     ) -> bool:
         """
         Send a message to Telegram.
@@ -76,14 +77,47 @@ class TelegramNotifier:
             message: Message text (supports HTML formatting)
             parse_mode: Message parse mode (HTML or Markdown)
             disable_notification: Send silently without notification
+            async_send: If True, send in background thread (non-blocking)
 
         Returns:
             True if sent successfully, False otherwise
+            Note: For async sends, returns True immediately (doesn't wait for response)
         """
         if not self.enabled:
             logger.debug("Telegram disabled, skipping message")
             return False
 
+        # If async requested, send in background thread
+        if async_send:
+            import threading
+            thread = threading.Thread(
+                target=self._send_message_sync,
+                args=(message, parse_mode, disable_notification),
+                daemon=True
+            )
+            thread.start()
+            return True  # Return immediately, don't wait for thread
+
+        # Synchronous send (blocking)
+        return self._send_message_sync(message, parse_mode, disable_notification)
+
+    def _send_message_sync(
+        self,
+        message: str,
+        parse_mode: str = "HTML",
+        disable_notification: bool = False
+    ) -> bool:
+        """
+        Internal method: Send message synchronously (blocking).
+
+        Args:
+            message: Message text
+            parse_mode: Parse mode (HTML/Markdown)
+            disable_notification: Silent notification
+
+        Returns:
+            True if sent successfully, False otherwise
+        """
         try:
             url = f"{self.api_url}/sendMessage"
             payload = {
