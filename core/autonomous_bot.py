@@ -1121,6 +1121,32 @@ class AutonomousBot:
             position['avg_fill_price'] = result.get('avg_fill_price', position.get('price', 0))
             position['filled_usdt'] = result.get('filled_usdt', 0)
             position['fill_timestamp'] = result.get('fill_timestamp')
+
+            # VALIDATION: Check if avg_fill_price is suspiciously low (likely fallback)
+            if position['avg_fill_price'] <= 0.02:
+                logger.warning(f"⚠️ avg_fill_price={position['avg_fill_price']:.4f} is suspiciously low!")
+                logger.warning(f"   This may be fallback value from failed extraction")
+                logger.warning(f"   Attempting to calculate from filled_usdt and filled_amount...")
+
+                filled_usdt = position.get('filled_usdt', 0)
+                filled_amount = position.get('filled_amount', 0)
+
+                if filled_usdt > 0 and filled_amount > 0:
+                    calculated_price = filled_usdt / filled_amount
+                    logger.info(f"✅ Calculated avg_fill_price: ${calculated_price:.4f}")
+                    logger.info(f"   (filled_usdt=${filled_usdt:.2f} / filled_amount={filled_amount:.4f})")
+                    position['avg_fill_price'] = calculated_price
+                else:
+                    # Try using original order price as last resort
+                    order_price = position.get('price', 0)
+                    if order_price > 0:
+                        logger.warning(f"⚠️ Using original order price as fallback: ${order_price:.4f}")
+                        logger.warning(f"   This may not reflect actual fill price!")
+                        position['avg_fill_price'] = order_price
+                    else:
+                        logger.error(f"❌ Cannot determine avg_fill_price!")
+                        logger.error(f"   Stop-loss and P&L will be INACCURATE")
+                        logger.error(f"   Using minimal fallback $0.01")
             
             self.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.state)
@@ -1341,18 +1367,32 @@ class AutonomousBot:
                     logger.info(f"✅ Recovered filled_amount from position: {filled_amount:.10f}")
                     position['filled_amount'] = filled_amount
                     
-                    # ALSO recover avg_fill_price if missing (required by SellMonitor)
-                    # Use BUY order limit price as fallback - close enough for stop-loss
-                    if not position.get('avg_fill_price') or position.get('avg_fill_price') == 0:
-                        fallback_price = position.get('price', 0)
-                        if fallback_price > 0:
-                            logger.info(f"✅ Using BUY order price as avg_fill_price: ${fallback_price:.4f}")
-                            logger.info(f"   (This is fallback - normally set by BuyMonitor)")
-                            position['avg_fill_price'] = fallback_price
+                    # ALSO recover avg_fill_price if missing or suspiciously low (required by SellMonitor)
+                    current_avg_price = position.get('avg_fill_price', 0)
+
+                    if current_avg_price <= 0.02:  # Suspiciously low (fallback value or failed extraction)
+                        logger.warning(f"⚠️ avg_fill_price={current_avg_price:.4f} is suspiciously low!")
+                        logger.warning(f"   Attempting to calculate from filled_usdt and filled_amount...")
+
+                        filled_usdt = position.get('filled_usdt', 0)
+                        filled_amount_for_calc = position.get('filled_amount', 0)
+
+                        if filled_usdt > 0 and filled_amount_for_calc > 0:
+                            calculated_price = filled_usdt / filled_amount_for_calc
+                            logger.info(f"✅ Calculated avg_fill_price: ${calculated_price:.4f}")
+                            logger.info(f"   (filled_usdt=${filled_usdt:.2f} / filled_amount={filled_amount_for_calc:.4f})")
+                            position['avg_fill_price'] = calculated_price
                         else:
-                            logger.warning(f"⚠️ No valid price found - using minimal fallback $0.01")
-                            logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                            position['avg_fill_price'] = 0.01
+                            # Use BUY order limit price as fallback
+                            fallback_price = position.get('price', 0)
+                            if fallback_price > 0:
+                                logger.warning(f"⚠️ Cannot calculate - using BUY order price: ${fallback_price:.4f}")
+                                logger.warning(f"   (This may not reflect actual fill price)")
+                                position['avg_fill_price'] = fallback_price
+                            else:
+                                logger.error(f"❌ No valid price found - using minimal fallback $0.01")
+                                logger.error(f"   Stop-loss and P&L will be INACCURATE")
+                                position['avg_fill_price'] = 0.01
                     
                     self.state_manager.save_state(self.state)
                 else:
