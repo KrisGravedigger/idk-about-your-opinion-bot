@@ -522,20 +522,26 @@ class OpinionClient:
             
             logger.info(f"Placing SELL order: {amount_tokens:.4f} tokens @ ${price:.4f}")
 
-            # CRITICAL FIX: Subtract small epsilon to avoid API rounding errors
-            # API may round 163.79 -> 163.8 during validation, causing:
-            # "Insufficient token balance: 163.8 required, but only 163.79 available"
-            # Solution: subtract 0.01 tokens to ensure we're under the balance
-            ROUNDING_SAFETY_MARGIN = 0.01
-            adjusted_amount = amount_tokens - ROUNDING_SAFETY_MARGIN
+            # CRITICAL FIX: Floor to 1 decimal place to avoid API rounding errors
+            # API rounds to 1 decimal during validation, causing errors like:
+            # - We send: 163.78 (163.79 - 0.01)
+            # - API validates: 163.8 (rounds 163.78 up!)
+            # - Error: "Insufficient token balance: 163.8 required, but only 163.79 available"
+            #
+            # Solution: Floor to 1 decimal place BEFORE sending to API
+            # - 163.79 → 163.7 (API validates 163.7 < 163.79 ✓)
+            # - 100.15 → 100.1 (API validates 100.1 < 100.15 ✓)
+            import math
+            adjusted_amount = math.floor(amount_tokens * 10) / 10
 
-            # Ensure we don't go negative
+            # Ensure we don't go to zero
             if adjusted_amount <= 0:
-                logger.error(f"❌ Amount too small after safety margin: {amount_tokens:.4f} - {ROUNDING_SAFETY_MARGIN} = {adjusted_amount:.4f}")
+                logger.error(f"❌ Amount too small after rounding: floor({amount_tokens:.4f} * 10) / 10 = {adjusted_amount:.4f}")
                 logger.error(f"   Cannot place SELL order with amount <= 0")
                 return None
 
-            logger.debug(f"   Adjusted amount for API rounding safety: {adjusted_amount:.4f} (original: {amount_tokens:.4f})")
+            loss_from_rounding = amount_tokens - adjusted_amount
+            logger.debug(f"   Floored amount for API safety: {adjusted_amount:.1f} (original: {amount_tokens:.4f}, loss: {loss_from_rounding:.4f})")
 
             order_input = PlaceOrderDataInput(
                 marketId=market_id,
