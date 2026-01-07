@@ -30,7 +30,7 @@ import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from logger_config import setup_logger
-from utils import format_price, format_usdt, format_percent, get_timestamp
+from utils import format_price, format_usdt, format_percent, get_timestamp, safe_float
 
 # Import all required modules
 from core.capital_manager import CapitalManager, InsufficientCapitalError, PositionTooSmallError
