@@ -312,10 +312,17 @@ class AutonomousBot:
                         logger.warning(f"   ⚠️ Could not fetch market details for #{market_id}")
                         logger.warning(f"   Cannot verify order value - skipping recovery")
                     else:
-                        if outcome_side_enum.lower() == 'yes':
-                            token_id_for_check = getattr(market_details, 'yes_token_id', '')
+                        # Handle both dict and Pydantic model returns
+                        if isinstance(market_details, dict):
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id_for_check = market_details.get('yes_token_id', '')
+                            else:
+                                token_id_for_check = market_details.get('no_token_id', '')
                         else:
-                            token_id_for_check = getattr(market_details, 'no_token_id', '')
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id_for_check = getattr(market_details, 'yes_token_id', '')
+                            else:
+                                token_id_for_check = getattr(market_details, 'no_token_id', '')
 
                         logger.info(f"   Token ID for check: {token_id_for_check[:20] if token_id_for_check else 'EMPTY'}...")
 
