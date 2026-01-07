@@ -211,7 +211,7 @@ class ReconciliationEngine:
 
         # CASE 1: State is IDLE/COMPLETED but API shows position
         if stage in ['IDLE', 'COMPLETED']:
-            if api_shares and api_shares > self.dust_threshold:
+            if api_shares is not None and api_shares > self.dust_threshold:
                 return Discrepancy(
                     type=DiscrepancyType.PHANTOM_POSITION,
                     severity='HIGH',
