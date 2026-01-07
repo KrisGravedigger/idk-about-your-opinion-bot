@@ -294,6 +294,63 @@ class AutonomousBot:
 
                 logger.warning(f"🔄 AUTO-RECOVERY: Found position in market #{market_id}")
                 logger.warning(f"   Shares: {shares:.4f}")
+
+                # CRITICAL: Check if position value meets minimum order requirement
+                # Before recovering, verify we can actually sell this position
+                # API requires order value >= $1.30, not just shares >= 1.0!
+                logger.info(f"   Checking if position value meets minimum...")
+
+                try:
+                    # Get outcome_side to fetch correct token_id
+                    outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+
+                    # Fetch market to get token_id for orderbook
+                    market_details = self.client.get_market(market_id)
+                    if market_details:
+                        if outcome_side_enum.lower() == 'yes':
+                            token_id_for_check = getattr(market_details, 'yes_token_id', '')
+                        else:
+                            token_id_for_check = getattr(market_details, 'no_token_id', '')
+
+                        # Get orderbook to check current price
+                        if token_id_for_check:
+                            orderbook = self.client.get_market_orderbook(token_id_for_check)
+                            if orderbook and 'asks' in orderbook:
+                                asks = orderbook.get('asks', [])
+                                if asks:
+                                    # Get best ask price (already sorted by api_client)
+                                    best_ask = safe_float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else safe_float(asks[0][0])
+
+                                    # Calculate order value after floor rounding
+                                    import math
+                                    sellable_amount = math.floor(shares * 10) / 10
+                                    order_value = sellable_amount * best_ask
+
+                                    MIN_ORDER_VALUE = 1.30
+
+                                    logger.info(f"   Position: {shares:.4f} shares")
+                                    logger.info(f"   After floor: {sellable_amount:.1f} shares")
+                                    logger.info(f"   Current ask: ${best_ask:.4f}")
+                                    logger.info(f"   Order value: ${order_value:.2f}")
+                                    logger.info(f"   Minimum: ${MIN_ORDER_VALUE:.2f}")
+
+                                    if order_value < MIN_ORDER_VALUE:
+                                        logger.warning("=" * 70)
+                                        logger.warning(f"⚠️  DUST POSITION - cannot recover!")
+                                        logger.warning(f"   Order value ${order_value:.2f} < ${MIN_ORDER_VALUE:.2f} minimum")
+                                        logger.warning(f"   Position cannot be sold due to API minimum")
+                                        logger.warning(f"   Skipping auto-recovery, staying in SCANNING")
+                                        logger.warning("=" * 70)
+                                        logger.info("")
+                                        # Don't recover - let normal SCANNING continue
+                                        # Position will remain as dust and be ignored
+                                        continue  # Skip to next cycle
+                                    else:
+                                        logger.info(f"   ✅ Order value OK - proceeding with recovery")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Could not check order value: {e}")
+                    logger.warning(f"   Proceeding with recovery anyway (may fail later)")
+
                 logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
 
                 # Get outcome_side to determine which token_id to use
