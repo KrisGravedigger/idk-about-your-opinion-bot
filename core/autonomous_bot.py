@@ -276,7 +276,7 @@ class AutonomousBot:
             # But check anyway in case of state corruption
             try:
                 logger.debug("🔍 Pre-stage check: Verifying no orphaned positions...")
-                positions = self.client.get_significant_positions(min_shares=1.0)
+                positions = self.client.get_significant_positions(min_shares=5.0)
 
                 if positions:
                     # We have significant positions but state says IDLE/SCANNING
@@ -558,8 +558,8 @@ class AutonomousBot:
         logger.info("🔍 Checking for existing active orders...")
         try:
             # Check if we have any active positions with significant shares
-            # Dust positions (< 1.0 shares) are automatically filtered out
-            positions = self.client.get_significant_positions(min_shares=1.0)
+            # Dust positions (< 5.0 shares) are automatically filtered out
+            positions = self.client.get_significant_positions(min_shares=5.0)
 
             if positions:
                 # Take first significant position
@@ -1418,11 +1418,11 @@ class AutonomousBot:
                     logger.warning("=" * 70)
                     logger.info("")
 
-                    # Check if remaining tokens are dust (< 1.0)
-                    if actual_tokens < 1.0:
+                    # Check if remaining tokens are dust (< 5.0)
+                    if actual_tokens < 5.0:
                         logger.info("💡 Action: Remaining position is dust - resetting to SCANNING")
-                        logger.info(f"   Dust positions ({actual_tokens:.4f} tokens) cannot be sold")
-                        logger.info(f"   API requires minimum 1.0 tokens for SELL orders")
+                        logger.info(f"   Dust positions ({actual_tokens:.4f} tokens) are too small to sell")
+                        logger.info(f"   Dust will be accumulated with future positions on this market")
                     else:
                         logger.info("💡 Action: Resetting to SCANNING to find new market")
                         logger.info(f"   Manual sale has left {actual_tokens:.4f} tokens")
@@ -1450,20 +1450,20 @@ class AutonomousBot:
         # =====================================================================
         # DUST POSITION CHECK: Verify position is large enough to sell
         # =====================================================================
-        # API requires makerAmountInBaseToken >= 1.0 for SELL orders
-        # Positions < 1.0 shares (dust) cannot be sold and should be abandoned
-        MIN_SELLABLE_SHARES = 1.0
+        # Dust threshold: positions < 5.0 shares are too small to be worth selling
+        # These will be accumulated and sold together with future positions on same market
+        MIN_SELLABLE_SHARES = 5.0
 
         if filled_amount < MIN_SELLABLE_SHARES:
             logger.warning("=" * 70)
             logger.warning(f"⚠️  DUST POSITION DETECTED!")
-            logger.warning(f"   Position has {filled_amount:.4f} shares (< {MIN_SELLABLE_SHARES} minimum)")
-            logger.warning(f"   API requires makerAmountInBaseToken >= 1.0 for SELL orders")
-            logger.warning(f"   This position cannot be sold - likely from partial fill")
+            logger.warning(f"   Position has {filled_amount:.4f} shares (< {MIN_SELLABLE_SHARES:.1f} minimum)")
+            logger.warning(f"   Positions below {MIN_SELLABLE_SHARES:.1f} shares are too small to be worth selling")
+            logger.warning(f"   Dust will be accumulated and sold with future positions on same market")
             logger.warning("=" * 70)
             logger.info("")
-            logger.info("💡 Action: Abandoning dust position and resetting to SCANNING")
-            logger.info("   Dust positions are typically worth < $1 and not worth selling")
+            logger.info("💡 Action: Saving dust position and resetting to SCANNING")
+            logger.info(f"   Dust ({filled_amount:.4f} shares) will be added to next position on this market")
             logger.info("")
 
             # Reset and find new market

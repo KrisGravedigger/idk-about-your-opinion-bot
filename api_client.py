@@ -1028,25 +1028,25 @@ class OpinionClient:
     def get_significant_positions(
         self,
         market_id: Optional[int] = None,
-        min_shares: float = 1.0
+        min_shares: float = 5.0
     ) -> list[dict]:
         """
         Get positions with at least min_shares tokens.
 
-        Filters out dust positions that cannot be sold due to
-        API minimum order size restrictions (makerAmountInBaseToken >= 1).
+        Filters out dust positions that are too small to be worth selling.
+        Dust positions will be accumulated and sold with future positions on same market.
 
         Args:
             market_id: Optional market ID to filter by
-            min_shares: Minimum shares to consider significant (default: 1.0)
+            min_shares: Minimum shares to consider significant (default: 5.0)
 
         Returns:
             List of position dictionaries with shares_owned >= min_shares
 
         Example:
             >>> client = OpinionClient()
-            >>> positions = client.get_significant_positions(min_shares=1.0)
-            >>> # Returns only positions with >= 1.0 shares (can be sold)
+            >>> positions = client.get_significant_positions(min_shares=5.0)
+            >>> # Returns only positions with >= 5.0 shares (worth selling)
         """
         all_positions = self.get_positions(market_id=market_id)
 

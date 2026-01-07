@@ -353,8 +353,8 @@ def main():
         logger.info("🔍 Checking API for orphaned positions...")
 
         try:
-            # Get only significant positions (filters out dust < 1.0 shares automatically)
-            positions = client.get_significant_positions(min_shares=1.0)
+            # Get only significant positions (filters out dust < 5.0 shares automatically)
+            positions = client.get_significant_positions(min_shares=5.0)
 
             if positions:
                 logger.warning("=" * 70)
@@ -526,13 +526,13 @@ def main():
                     has_open_position = True
 
             else:
-                # No significant positions found (dust < 1.0 shares or no positions at all)
+                # No significant positions found (dust < 5.0 shares or no positions at all)
                 # Check if this is pending order with frozen balance (not just old dust)
                 # Get ALL positions (including dust) to check frozen balance
                 all_positions = client.get_positions()
 
                 if all_positions:
-                    logger.info("⚠️  No significant positions (all have < 1.0 shares)")
+                    logger.info("⚠️  No significant positions (all have < 5.0 shares)")
                     logger.info("   Checking if any are PENDING orders (not just dust)...")
 
                     try:
