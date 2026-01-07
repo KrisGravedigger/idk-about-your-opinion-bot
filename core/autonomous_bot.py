@@ -149,9 +149,12 @@ class AutonomousBot:
         )
 
         try:
-            # Send initial heartbeat to verify current state
-            logger.debug("Sending initial heartbeat...")
-            self._send_heartbeat_now()
+            # Send initial heartbeat to verify current state (async to avoid blocking)
+            logger.debug("Sending initial heartbeat (async)...")
+            import threading
+            heartbeat_thread = threading.Thread(target=self._send_heartbeat_now, daemon=True)
+            heartbeat_thread.start()
+            # Don't wait for it - let it finish in background
         except Exception as e:
             logger.warning(f"Could not send initial heartbeat: {e}")
 
@@ -338,10 +341,40 @@ class AutonomousBot:
                         logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
                         logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
                     else:
-                        logger.warning(f"⚠️ Cannot calculate avg_price - no value field in position")
-                        logger.warning(f"   Using minimal fallback $0.01")
-                        logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                        avg_price = 0.01
+                        logger.warning(f"⚠️ Cannot calculate avg_price from position value field")
+                        logger.info(f"   Attempting to retrieve from order history...")
+
+                        # Try to get avg_price from recent order history
+                        try:
+                            orders = self.client.get_my_orders(
+                                market_id=market_id,
+                                status='FILLED',
+                                limit=20
+                            )
+
+                            # Find BUY orders for this market with filled amount
+                            for order in orders:
+                                if order.get('side') == 1:  # BUY order
+                                    filled_shares = safe_float(order.get('filled_shares', 0))
+                                    filled_usdt = safe_float(order.get('filled_amount', 0))
+
+                                    if filled_shares > 0 and filled_usdt > 0:
+                                        calculated_avg = filled_usdt / filled_shares
+                                        logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
+                                        logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
+                                        avg_price = calculated_avg
+                                        break
+                            else:
+                                # No valid BUY order found
+                                logger.warning(f"⚠️ No BUY order found in history")
+                                logger.warning(f"   Using minimal fallback $0.01")
+                                logger.warning(f"   Stop-loss and P&L will be INACCURATE")
+                                avg_price = 0.01
+
+                        except Exception as e:
+                            logger.warning(f"⚠️ Could not retrieve order history: {e}")
+                            logger.warning(f"   Using minimal fallback $0.01")
+                            avg_price = 0.01
 
                 self.state['stage'] = 'BUY_FILLED'
                 self.state['current_position'] = {
