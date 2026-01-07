@@ -521,14 +521,29 @@ class OpinionClient:
                 return None
             
             logger.info(f"Placing SELL order: {amount_tokens:.4f} tokens @ ${price:.4f}")
-            
+
+            # CRITICAL FIX: Subtract small epsilon to avoid API rounding errors
+            # API may round 163.79 -> 163.8 during validation, causing:
+            # "Insufficient token balance: 163.8 required, but only 163.79 available"
+            # Solution: subtract 0.01 tokens to ensure we're under the balance
+            ROUNDING_SAFETY_MARGIN = 0.01
+            adjusted_amount = amount_tokens - ROUNDING_SAFETY_MARGIN
+
+            # Ensure we don't go negative
+            if adjusted_amount <= 0:
+                logger.error(f"❌ Amount too small after safety margin: {amount_tokens:.4f} - {ROUNDING_SAFETY_MARGIN} = {adjusted_amount:.4f}")
+                logger.error(f"   Cannot place SELL order with amount <= 0")
+                return None
+
+            logger.debug(f"   Adjusted amount for API rounding safety: {adjusted_amount:.4f} (original: {amount_tokens:.4f})")
+
             order_input = PlaceOrderDataInput(
                 marketId=market_id,
                 tokenId=token_id,
                 side=OrderSide.SELL,
                 orderType=LIMIT_ORDER,
                 price=str(price),
-                makerAmountInBaseToken=amount_tokens
+                makerAmountInBaseToken=adjusted_amount
             )
             
             response = self._client.place_order(order_input, check_approval=check_approval)
