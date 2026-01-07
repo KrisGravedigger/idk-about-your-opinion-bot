@@ -300,7 +300,7 @@ class AutonomousBot:
                 # API requires order value >= $1.30, not just shares >= 1.0!
                 logger.info(f"   Checking if position value meets minimum...")
 
-                should_recover_position = True  # Default: yes, proceed with recovery
+                should_recover_position = False  # Default: NO recovery unless verified
 
                 try:
                     # Get outcome_side to fetch correct token_id
@@ -308,18 +308,32 @@ class AutonomousBot:
 
                     # Fetch market to get token_id for orderbook
                     market_details = self.client.get_market(market_id)
-                    if market_details:
+                    if not market_details:
+                        logger.warning(f"   ⚠️ Could not fetch market details for #{market_id}")
+                        logger.warning(f"   Cannot verify order value - skipping recovery")
+                    else:
                         if outcome_side_enum.lower() == 'yes':
                             token_id_for_check = getattr(market_details, 'yes_token_id', '')
                         else:
                             token_id_for_check = getattr(market_details, 'no_token_id', '')
 
+                        logger.info(f"   Token ID for check: {token_id_for_check[:20] if token_id_for_check else 'EMPTY'}...")
+
                         # Get orderbook to check current price
-                        if token_id_for_check:
+                        if not token_id_for_check:
+                            logger.warning(f"   ⚠️ Token ID is empty!")
+                            logger.warning(f"   Cannot verify order value - skipping recovery")
+                        else:
                             orderbook = self.client.get_market_orderbook(token_id_for_check)
-                            if orderbook and 'asks' in orderbook:
+                            if not (orderbook and 'asks' in orderbook):
+                                logger.warning(f"   ⚠️ Could not fetch orderbook")
+                                logger.warning(f"   Cannot verify order value - skipping recovery")
+                            else:
                                 asks = orderbook.get('asks', [])
-                                if asks:
+                                if not asks:
+                                    logger.warning(f"   ⚠️ Orderbook has no asks")
+                                    logger.warning(f"   Cannot verify order value - skipping recovery")
+                                else:
                                     # Get best ask price (already sorted by api_client)
                                     best_ask = safe_float(asks[0].get('price', 0)) if isinstance(asks[0], dict) else safe_float(asks[0][0])
 
@@ -349,10 +363,11 @@ class AutonomousBot:
                                         should_recover_position = False
                                     else:
                                         logger.info(f"   ✅ Order value OK - proceeding with recovery")
+                                        should_recover_position = True
                 except Exception as e:
-                    logger.warning(f"   ⚠️ Could not check order value: {e}")
-                    logger.warning(f"   Proceeding with recovery anyway (may fail later)")
-                    # should_recover_position stays True
+                    logger.warning(f"   ⚠️ Exception while checking order value: {e}")
+                    logger.warning(f"   Cannot verify order value - skipping recovery")
+                    # should_recover_position stays False
 
                 if should_recover_position:
                     logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
