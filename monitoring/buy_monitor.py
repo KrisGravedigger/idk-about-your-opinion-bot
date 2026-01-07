@@ -27,7 +27,7 @@ import time
 from typing import Dict, Any, Tuple
 from datetime import datetime, timedelta
 from logger_config import setup_logger
-from utils import safe_float, format_price, format_percent, get_timestamp
+from utils import safe_float, format_price, format_percent, get_timestamp, interruptible_sleep
 from monitoring.liquidity_checker import LiquidityChecker
 
 logger = setup_logger(__name__)
@@ -281,7 +281,7 @@ class BuyMonitor:
 
                 if not order:
                     logger.warning(f"[{check_time}] ⚠️  Failed to fetch order status")
-                    time.sleep(self.check_interval)
+                    interruptible_sleep(self.check_interval)
                     continue
                 
                 status = order.get('status')  # int: 0=pending, 1=partial, 2=finished, 3=cancelled, 4=expired
@@ -346,8 +346,8 @@ class BuyMonitor:
                 # ORDER STILL PENDING
                 # =============================================================
                 logger.info(f"[{check_time}] ⏳ Order {status_enum}... (check #{check_count})")
-                
-                time.sleep(self.check_interval)
+
+                interruptible_sleep(self.check_interval)
         
         except KeyboardInterrupt:
             logger.info("")

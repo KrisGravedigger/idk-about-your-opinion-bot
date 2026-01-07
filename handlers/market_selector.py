@@ -12,7 +12,7 @@ import time
 from typing import Dict, Any, Optional
 
 from logger_config import setup_logger
-from utils import format_price, format_usdt, get_timestamp, safe_float
+from utils import format_price, format_usdt, get_timestamp, safe_float, interruptible_sleep
 from core.capital_manager import InsufficientCapitalError, PositionTooSmallError
 
 logger = setup_logger(__name__)
@@ -310,8 +310,8 @@ class MarketSelector:
 
             if not top_markets:
                 logger.warning("No suitable markets found")
-                logger.info("Waiting before next scan...")
-                time.sleep(60)  # Wait 1 minute before retry
+                logger.info("Waiting 1 minute before next scan...")
+                interruptible_sleep(60)  # Wait 1 minute, but responsive to CTRL+C
                 return True
 
             # Select best market

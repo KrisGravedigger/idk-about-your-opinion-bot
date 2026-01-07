@@ -30,7 +30,7 @@ import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from logger_config import setup_logger
-from utils import format_price, format_usdt, format_percent, get_timestamp, safe_float
+from utils import format_price, format_usdt, format_percent, get_timestamp, safe_float, interruptible_sleep
 
 # Import all required modules
 from core.capital_manager import CapitalManager, InsufficientCapitalError, PositionTooSmallError
@@ -207,13 +207,13 @@ class AutonomousBot:
 
                 if not success:
                     logger.error(f"Stage {stage} failed - pausing before retry")
-                    time.sleep(self.cycle_delay * 3)  # Longer delay on error
+                    interruptible_sleep(self.cycle_delay * 3)  # Longer delay on error, but responsive
 
                 # Check if heartbeat should be sent
                 self._check_and_send_heartbeat()
 
-                # Brief pause between cycles
-                time.sleep(self.cycle_delay)
+                # Brief pause between cycles (responsive to CTRL+C)
+                interruptible_sleep(self.cycle_delay)
         
         except KeyboardInterrupt:
             logger.info("")
