@@ -82,14 +82,15 @@ venv.bak/
 .venv
 
 # ============================================================================
-# LEGACY & TEST CODE - EXCLUDED FROM PRODUCTION
+# LEGACY CODE - EXCLUDED FROM PRODUCTION
 # ============================================================================
 legacy/
-tests/
-test_*.py
-*_test.py
-test/
-testing/
+# Note: tests/ directory is now included (unit test suite added in refactoring)
+# tests/
+# test_*.py
+# *_test.py
+# test/
+# testing/
 
 # ============================================================================
 # BACKUP & TEMPORARY FILES
