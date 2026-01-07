@@ -81,6 +81,14 @@ MIN_POSITION_SIZE_USDT = 50.0         # Minimum order size allowed by platform
 MIN_POSITION_FOR_POINTS_USDT = 10.0  # Minimum size to earn airdrop points
 WARN_IF_BELOW_POINTS_THRESHOLD = True  # Log warning if position < 10 USDT
 
+# Order size constraints
+MIN_ORDER_VALUE_USDT = 1.30           # API minimum order value ($1.30)
+MIN_SELLABLE_SHARES = 5.0             # Minimum shares to be worth selling (dust threshold)
+DUST_THRESHOLD = 5.0                  # Same as MIN_SELLABLE_SHARES (for compatibility)
+
+# Manual sale detection threshold
+MANUAL_SALE_THRESHOLD_PERCENT = 95.0  # % of position missing = manual sale detected
+
 # =============================================================================
 # BONUS MARKETS CONFIGURATION
 # =============================================================================

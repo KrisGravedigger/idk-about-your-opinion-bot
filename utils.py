@@ -517,6 +517,51 @@ def validate_market(market_data: dict) -> tuple[bool, str]:
     return (True, "")
 
 
+def convert_to_dict(obj: Any) -> dict:
+    """
+    Convert Pydantic model or other objects to dict.
+
+    This helper eliminates repeated Pydantic→dict conversion code
+    throughout the codebase.
+
+    Args:
+        obj: Object to convert (Pydantic model, dict, or other)
+
+    Returns:
+        Dictionary representation of the object
+
+    Example:
+        >>> from pydantic import BaseModel
+        >>> class User(BaseModel):
+        ...     name: str
+        ...     age: int
+        >>> user = User(name="Alice", age=30)
+        >>> convert_to_dict(user)
+        {'name': 'Alice', 'age': 30}
+
+        >>> convert_to_dict({'already': 'dict'})
+        {'already': 'dict'}
+    """
+    # Already a dict - return as-is
+    if isinstance(obj, dict):
+        return obj
+
+    # Pydantic v2 model (has model_dump)
+    if hasattr(obj, 'model_dump'):
+        return obj.model_dump()
+
+    # Pydantic v1 model (has dict method)
+    if hasattr(obj, 'dict'):
+        return obj.dict()
+
+    # Fallback: try __dict__ attribute
+    if hasattr(obj, '__dict__'):
+        return obj.__dict__
+
+    # Last resort: wrap in dict
+    return {'value': obj}
+
+
 # =============================================================================
 # TIME HELPERS
 # =============================================================================
