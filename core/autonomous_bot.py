@@ -300,6 +300,8 @@ class AutonomousBot:
                 # API requires order value >= $1.30, not just shares >= 1.0!
                 logger.info(f"   Checking if position value meets minimum...")
 
+                should_recover_position = True  # Default: yes, proceed with recovery
+
                 try:
                     # Get outcome_side to fetch correct token_id
                     outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
@@ -344,122 +346,124 @@ class AutonomousBot:
                                         logger.info("")
                                         # Don't recover - let normal SCANNING continue
                                         # Position will remain as dust and be ignored
-                                        continue  # Skip to next cycle
+                                        should_recover_position = False
                                     else:
                                         logger.info(f"   ✅ Order value OK - proceeding with recovery")
                 except Exception as e:
                     logger.warning(f"   ⚠️ Could not check order value: {e}")
                     logger.warning(f"   Proceeding with recovery anyway (may fail later)")
+                    # should_recover_position stays True
 
-                logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
+                if should_recover_position:
+                    logger.info(f"   Recovering to BUY_FILLED stage to handle SELL...")
 
-                # Get outcome_side to determine which token_id to use
-                outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
-                logger.info(f"   Position side: {outcome_side_enum}")
+                    # Get outcome_side to determine which token_id to use
+                    outcome_side_enum = pos.get('outcome_side_enum', 'Yes')
+                    logger.info(f"   Position side: {outcome_side_enum}")
 
-                # Fetch market details to get token_id
-                logger.info(f"   Fetching market details to recover token_id...")
-                try:
-                    market_details = self.client.get_market(market_id)
+                    # Fetch market details to get token_id
+                    logger.info(f"   Fetching market details to recover token_id...")
+                    try:
+                        market_details = self.client.get_market(market_id)
 
-                    if market_details:
-                        # Extract correct token_id based on outcome_side_enum
-                        # NOTE: market_details is Pydantic model, use attribute access
-                        if outcome_side_enum.lower() == 'yes':
-                            token_id = getattr(market_details, 'yes_token_id', '')
+                        if market_details:
+                            # Extract correct token_id based on outcome_side_enum
+                            # NOTE: market_details is Pydantic model, use attribute access
+                            if outcome_side_enum.lower() == 'yes':
+                                token_id = getattr(market_details, 'yes_token_id', '')
+                            else:
+                                token_id = getattr(market_details, 'no_token_id', '')
+
+                            logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
                         else:
-                            token_id = getattr(market_details, 'no_token_id', '')
+                            logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                            token_id = ''
 
-                        logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
-                    else:
-                        logger.error(f"   ❌ Could not fetch market details for #{market_id}")
+                    except Exception as e:
+                        logger.error(f"   ❌ Error fetching market details: {e}")
                         token_id = ''
 
-                except Exception as e:
-                    logger.error(f"   ❌ Error fetching market details: {e}")
-                    token_id = ''
+                    # Force state to BUY_FILLED so bot will place SELL
+                    # Try to get real avg_price from position, fallback to calculation
+                    avg_price = pos.get('avg_price', 0)
 
-                # Force state to BUY_FILLED so bot will place SELL
-                # Try to get real avg_price from position, fallback to calculation
-                avg_price = pos.get('avg_price', 0)
+                    if avg_price <= 0:
+                        # Try to calculate from position value (if API provides it)
+                        # Common field names: 'total_value', 'value', 'cost_basis', 'invested'
+                        total_value = (
+                            pos.get('total_value', 0) or
+                            pos.get('value', 0) or
+                            pos.get('cost_basis', 0) or
+                            pos.get('invested', 0)
+                        )
 
-                if avg_price <= 0:
-                    # Try to calculate from position value (if API provides it)
-                    # Common field names: 'total_value', 'value', 'cost_basis', 'invested'
-                    total_value = (
-                        pos.get('total_value', 0) or
-                        pos.get('value', 0) or
-                        pos.get('cost_basis', 0) or
-                        pos.get('invested', 0)
-                    )
+                        if total_value > 0 and shares > 0:
+                            avg_price = total_value / shares
+                            logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
+                            logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
+                        else:
+                            logger.warning(f"⚠️ Cannot calculate avg_price from position value field")
+                            logger.info(f"   Attempting to retrieve from order history...")
 
-                    if total_value > 0 and shares > 0:
-                        avg_price = total_value / shares
-                        logger.info(f"✅ Calculated avg_price from position: ${avg_price:.4f}")
-                        logger.info(f"   (value=${total_value:.2f} / shares={shares:.4f})")
-                    else:
-                        logger.warning(f"⚠️ Cannot calculate avg_price from position value field")
-                        logger.info(f"   Attempting to retrieve from order history...")
+                            # Try to get avg_price from recent order history
+                            try:
+                                orders = self.client.get_my_orders(
+                                    market_id=market_id,
+                                    status='FILLED',
+                                    limit=20
+                                )
 
-                        # Try to get avg_price from recent order history
-                        try:
-                            orders = self.client.get_my_orders(
-                                market_id=market_id,
-                                status='FILLED',
-                                limit=20
-                            )
+                                # Check if API returned valid data
+                                if orders is None or not isinstance(orders, list):
+                                    logger.warning(f"⚠️ API returned invalid orders data (None or not list)")
+                                    logger.warning(f"   Using minimal fallback $0.01")
+                                    avg_price = 0.01
+                                else:
+                                    # Find BUY orders for this market with filled amount
+                                    found_order = False
+                                    for order in orders:
+                                        if order.get('side') == 1:  # BUY order
+                                            filled_shares = safe_float(order.get('filled_shares', 0))
+                                            filled_usdt = safe_float(order.get('filled_amount', 0))
 
-                            # Check if API returned valid data
-                            if orders is None or not isinstance(orders, list):
-                                logger.warning(f"⚠️ API returned invalid orders data (None or not list)")
+                                            if filled_shares > 0 and filled_usdt > 0:
+                                                calculated_avg = filled_usdt / filled_shares
+                                                logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
+                                                logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
+                                                avg_price = calculated_avg
+                                                found_order = True
+                                                break
+
+                                    if not found_order:
+                                        # No valid BUY order found
+                                        logger.warning(f"⚠️ No BUY order found in history")
+                                        logger.warning(f"   Using minimal fallback $0.01")
+                                        logger.warning(f"   Stop-loss and P&L will be INACCURATE")
+                                        avg_price = 0.01
+
+                            except Exception as e:
+                                logger.warning(f"⚠️ Could not retrieve order history: {e}")
                                 logger.warning(f"   Using minimal fallback $0.01")
                                 avg_price = 0.01
-                            else:
-                                # Find BUY orders for this market with filled amount
-                                found_order = False
-                                for order in orders:
-                                    if order.get('side') == 1:  # BUY order
-                                        filled_shares = safe_float(order.get('filled_shares', 0))
-                                        filled_usdt = safe_float(order.get('filled_amount', 0))
 
-                                        if filled_shares > 0 and filled_usdt > 0:
-                                            calculated_avg = filled_usdt / filled_shares
-                                            logger.info(f"✅ Found BUY order: filled={filled_shares:.4f} shares @ ${filled_usdt:.2f}")
-                                            logger.info(f"   Calculated avg_price: ${calculated_avg:.4f}")
-                                            avg_price = calculated_avg
-                                            found_order = True
-                                            break
+                    self.state['stage'] = 'BUY_FILLED'
+                    self.state['current_position'] = {
+                        'market_id': market_id,
+                        'token_id': token_id,  # ← FIXED: use recovered token_id, not pos.get()
+                        'outcome_side': outcome_side_enum,
+                        'market_title': pos.get('title', f"Recovered market #{market_id}"),
+                        'filled_amount': shares,
+                        'avg_fill_price': avg_price,
+                        'filled_usdt': shares * avg_price,
+                        'fill_timestamp': get_timestamp()
+                    }
+                    self.state_manager.save_state(self.state)
 
-                                if not found_order:
-                                    # No valid BUY order found
-                                    logger.warning(f"⚠️ No BUY order found in history")
-                                    logger.warning(f"   Using minimal fallback $0.01")
-                                    logger.warning(f"   Stop-loss and P&L will be INACCURATE")
-                                    avg_price = 0.01
-
-                        except Exception as e:
-                            logger.warning(f"⚠️ Could not retrieve order history: {e}")
-                            logger.warning(f"   Using minimal fallback $0.01")
-                            avg_price = 0.01
-
-                self.state['stage'] = 'BUY_FILLED'
-                self.state['current_position'] = {
-                    'market_id': market_id,
-                    'token_id': token_id,  # ← FIXED: use recovered token_id, not pos.get()
-                    'outcome_side': outcome_side_enum,
-                    'market_title': pos.get('title', f"Recovered market #{market_id}"),
-                    'filled_amount': shares,
-                    'avg_fill_price': avg_price,
-                    'filled_usdt': shares * avg_price,
-                    'fill_timestamp': get_timestamp()
-                }
-                self.state_manager.save_state(self.state)
-
-                # Change stage to BUY_FILLED for this execution
-                stage = 'BUY_FILLED'
-                logger.info("✅ State recovered - will execute BUY_FILLED handler")
-                # NOTE: We're in _execute_stage(), not run() loop
-                # Can't use break here - just continue to execute BUY_FILLED handler below
+                    # Change stage to BUY_FILLED for this execution
+                    stage = 'BUY_FILLED'
+                    logger.info("✅ State recovered - will execute BUY_FILLED handler")
+                    # NOTE: We're in _execute_stage(), not run() loop
+                    # Can't use break here - just continue to execute BUY_FILLED handler below
             except Exception as e:
                 logger.debug(f"Pre-stage check failed (non-critical): {e}")
         
