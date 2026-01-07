@@ -42,9 +42,6 @@ from scoring import calculate_market_score
 # Initialize logger
 logger = setup_logger(__name__)
 
-# Initialize logger
-logger = setup_logger(__name__)
-
 
 def calculate_orderbook_balance(bids: list, asks: list) -> Optional[float]:
     """
