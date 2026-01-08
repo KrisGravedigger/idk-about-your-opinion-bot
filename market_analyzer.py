@@ -7,20 +7,26 @@ Scans Opinion.trade markets for optimal spread farming opportunities.
 
 Usage:
     python market_analyzer.py                    # Default filters
-    python market_analyzer.py --min-spread 10    # Custom minimum spread
+    python market_analyzer.py --min-spread 3     # Custom minimum spread
     python market_analyzer.py --no-csv           # Skip CSV export
     python market_analyzer.py --top 50           # Show top 50 results
+    python market_analyzer.py --min-prob 0.2 --max-prob 0.9  # Custom probability range
 
 Strategy Focus:
-    - High spread (min 5%)
+    - High spread (min spread %)
     - High volume (for liquidity)
-    - Biased probability (66-80% on one side)
-    - Good orderbook balance (60-85% sweet spot)
+    - Probability range (filters outcomes by mid-price)
+    - Orderbook bias (60-85% sweet spot) - ONLY affects scoring, NOT filtering
+
+Important:
+    - Bias (orderbook balance) is NOT a hard filter!
+    - It's only used for ranking/scoring opportunities
+    - If you get 0 results, try relaxing --min-spread or probability range
 
 Output:
     - Console table with top N opportunities
     - CSV export with all filtered results
-    - Summary statistics
+    - Summary statistics with rejection reasons
 """
 
 import argparse
@@ -171,16 +177,16 @@ class MarketAnalyzer:
     def scan_markets(
         self,
         min_spread_pct: float = 5.0,
-        min_prob: float = 0.66,
-        max_prob: float = 0.80
+        min_prob: float = 0.30,
+        max_prob: float = 0.85
     ) -> List[OutcomeOpportunity]:
         """
         Scan all markets and return filtered opportunities.
 
         Args:
             min_spread_pct: Minimum spread % (default: 5.0)
-            min_prob: Minimum outcome probability (default: 0.66)
-            max_prob: Maximum outcome probability (default: 0.80)
+            min_prob: Minimum outcome probability (default: 0.30)
+            max_prob: Maximum outcome probability (default: 0.85)
 
         Returns:
             List of OutcomeOpportunity objects
@@ -190,7 +196,7 @@ class MarketAnalyzer:
         logger.info("📊 FILTERS:")
         logger.info(f"   - Min spread: {min_spread_pct}%")
         logger.info(f"   - Probability: {min_prob*100:.0f}-{max_prob*100:.0f}%")
-        logger.info(f"   - Bias sweet spot: 60-85% bid volume")
+        logger.info(f"   - Bias: NOT filtered (used only for scoring)")
         logger.info("")
 
         # Fetch all active markets
@@ -205,6 +211,8 @@ class MarketAnalyzer:
 
         opportunities = []
         total_outcomes = 0
+        rejected_spread = 0
+        rejected_probability = 0
 
         # Analyze each market
         for i, market in enumerate(markets):
@@ -227,9 +235,12 @@ class MarketAnalyzer:
                 total_outcomes += 1
                 opp = self.analyze_outcome(market, "YES", yes_token_id, yes_orderbook)
                 if opp:
-                    # Apply filters
-                    if (opp.spread_pct >= min_spread_pct and
-                        min_prob <= opp.probability <= max_prob):
+                    # Apply filters with tracking
+                    if opp.spread_pct < min_spread_pct:
+                        rejected_spread += 1
+                    elif not (min_prob <= opp.probability <= max_prob):
+                        rejected_probability += 1
+                    else:
                         opportunities.append(opp)
 
             # Analyze NO outcome
@@ -237,14 +248,19 @@ class MarketAnalyzer:
                 total_outcomes += 1
                 opp = self.analyze_outcome(market, "NO", no_token_id, no_orderbook)
                 if opp:
-                    # Apply filters
-                    if (opp.spread_pct >= min_spread_pct and
-                        min_prob <= opp.probability <= max_prob):
+                    # Apply filters with tracking
+                    if opp.spread_pct < min_spread_pct:
+                        rejected_spread += 1
+                    elif not (min_prob <= opp.probability <= max_prob):
+                        rejected_probability += 1
+                    else:
                         opportunities.append(opp)
 
         logger.info("")
         logger.info(f"✅ Found {total_outcomes} total outcomes")
-        logger.info(f"🎯 After filters: {len(opportunities)} outcomes")
+        logger.info(f"   ❌ Rejected (spread < {min_spread_pct}%): {rejected_spread}")
+        logger.info(f"   ❌ Rejected (probability outside {min_prob*100:.0f}-{max_prob*100:.0f}%): {rejected_probability}")
+        logger.info(f"🎯 After filters: {len(opportunities)} outcomes ({len(opportunities)/total_outcomes*100:.1f}%)")
         logger.info("")
 
         return opportunities
@@ -388,15 +404,15 @@ def main():
     parser.add_argument(
         '--min-prob',
         type=float,
-        default=0.66,
-        help='Minimum outcome probability (default: 0.66)'
+        default=0.30,
+        help='Minimum outcome probability (default: 0.30)'
     )
 
     parser.add_argument(
         '--max-prob',
         type=float,
-        default=0.80,
-        help='Maximum outcome probability (default: 0.80)'
+        default=0.85,
+        help='Maximum outcome probability (default: 0.85)'
     )
 
     parser.add_argument(

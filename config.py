@@ -154,8 +154,8 @@ USE_SPREAD_FARMING = False  # Set True to activate
 # When USE_SPREAD_FARMING = True, these parameters override defaults:
 SPREAD_FARMING_CONFIG = {
     'scoring_profile': 'spread_farming',
-    'outcome_min_probability': 0.66,
-    'outcome_max_probability': 0.80,
+    'outcome_min_probability': 0.30,  # Relaxed: 30-85% (was 66-80%)
+    'outcome_max_probability': 0.85,
     'min_spread_pct': 5.0,
     'orderbook_balance_range': None,  # Disable hard filter, use bias_score instead
     'min_hours_until_close': None,    # Timeframe not critical
