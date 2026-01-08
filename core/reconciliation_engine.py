@@ -198,7 +198,7 @@ class ReconciliationEngine:
         # Get actual position from API
         try:
             api_shares = None
-            if market_id > 0:
+            if market_id is not None and market_id > 0:
                 api_shares_raw = self.client.get_position_shares(
                     market_id=market_id,
                     outcome_side=outcome_side
@@ -254,7 +254,7 @@ class ReconciliationEngine:
 
         # CASE 3: Invalid state data
         if stage in ['BUY_FILLED', 'SELL_PLACED', 'SELL_MONITORING']:
-            if market_id == 0 or state_shares == 0:
+            if market_id in [0, None] or state_shares == 0:
                 return Discrepancy(
                     type=DiscrepancyType.INVALID_STATE,
                     severity='HIGH',
