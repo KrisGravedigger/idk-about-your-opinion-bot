@@ -224,6 +224,20 @@ class SellHandler:
             # Update statistics
             self.bot._update_statistics(pnl)
 
+            # Record SELL transaction in history
+            self.bot.transaction_history.record_sell(
+                market_id=position.get('market_id', 0),
+                market_title=position.get('market_title', 'Unknown market'),
+                token_id=position.get('token_id', ''),
+                shares=result['filled_amount'],
+                price=result['avg_fill_price'],
+                amount_usdt=result['filled_usdt'],
+                order_id=position.get('sell_order_id', 'unknown'),
+                outcome=position.get('outcome_side', 'YES'),
+                pnl_usdt=float(pnl.pnl),
+                pnl_percent=float(pnl.pnl_percent)
+            )
+
             self.state['stage'] = 'COMPLETED'
             self.state_manager.save_state(self.state)
 

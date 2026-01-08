@@ -730,8 +730,13 @@ class OpinionClient:
             if not response.result or not hasattr(response.result, 'list'):
                 logger.debug("No orders in response")
                 return []
-            
+
             orders = response.result.list
+
+            # Handle case where list attribute exists but is None
+            if orders is None:
+                logger.debug("Orders list is None (no orders)")
+                return []
             
             # Convert Pydantic models to dicts
             converted_orders = []

@@ -166,17 +166,19 @@ class OrderManager:
         market_id: int,
         token_id: str,
         price: float,
-        amount_tokens: float
+        amount_tokens: float,
+        outcome_side: str = "YES"
     ) -> Optional[dict]:
         """
         Place a SELL limit order.
-        
+
         Args:
             market_id: Market ID
-            token_id: YES token ID
+            token_id: Token ID (YES or NO)
             price: Limit price
             amount_tokens: Amount of tokens to sell
-            
+            outcome_side: Which side we're selling ("YES" or "NO")
+
         Returns:
             Order result dict with order_id, or None on failure
         """
@@ -194,53 +196,32 @@ class OrderManager:
         try:
             # RETRY LOGIC: API may need time to update position after fill
             actual_balance = 0.0
-            detected_outcome = "UNKNOWN"
             max_retries = 3
-            
-            # Determine outcome_side from current bot state
-            # This should be passed from autonomous_bot, but we'll try to detect it
-            # TEMPORARY: Check both YES and NO, use whichever has balance
-            
+
+            # Use the outcome_side parameter to check the correct position
+            outcome_side_upper = outcome_side.upper()
+            logger.debug(f"   Checking {outcome_side_upper} position for market #{market_id}")
+
             for attempt in range(1, max_retries + 1):
-                # Try YES first
-                yes_balance_decimal = self.client.get_position_shares(
+                # Check the specific outcome_side we're selling
+                balance_decimal = self.client.get_position_shares(
                     market_id=market_id,
-                    outcome_side="YES"
+                    outcome_side=outcome_side_upper
                 )
-                yes_balance = float(yes_balance_decimal)
-                
-                # Try NO
-                no_balance_decimal = self.client.get_position_shares(
-                    market_id=market_id,
-                    outcome_side="NO"
-                )
-                no_balance = float(no_balance_decimal)
-                
-                # Use whichever has balance
-                if yes_balance > 0:
-                    actual_balance = yes_balance
-                    detected_outcome = "YES"
-                    logger.debug(f"   Detected YES position: {actual_balance:.10f} tokens")
-                elif no_balance > 0:
-                    actual_balance = no_balance
-                    detected_outcome = "NO"
-                    logger.debug(f"   Detected NO position: {actual_balance:.10f} tokens")
-                else:
-                    actual_balance = 0.0
-                    detected_outcome = "UNKNOWN"
-                
+                actual_balance = float(balance_decimal) if balance_decimal else 0.0
+
                 if actual_balance > 0:
-                    logger.info(f"✅ Position found on attempt {attempt}: {actual_balance:.10f} {detected_outcome} tokens")
+                    logger.info(f"✅ Position found on attempt {attempt}: {actual_balance:.10f} {outcome_side_upper} tokens")
                     break
                 else:
                     if attempt < max_retries:
-                        logger.warning(f"⚠️ Attempt {attempt}/{max_retries}: No position found, retrying in 2 seconds...")
+                        logger.warning(f"⚠️ Attempt {attempt}/{max_retries}: No {outcome_side_upper} position found, retrying in 2 seconds...")
                         import time
                         time.sleep(2)
                     else:
-                        logger.error(f"❌ After {max_retries} attempts, still no position found!")
-            
-            logger.debug(f"   Position shares ({detected_outcome}): {actual_balance:.10f}")
+                        logger.error(f"❌ After {max_retries} attempts, still no {outcome_side_upper} position found!")
+
+            logger.debug(f"   Position shares ({outcome_side_upper}): {actual_balance:.10f}")
             
             # FALLBACK: If API returns 0, use requested amount
             if actual_balance == 0 and amount_tokens > 0:

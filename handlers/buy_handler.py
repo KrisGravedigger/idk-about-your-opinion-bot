@@ -47,6 +47,57 @@ class BuyHandler:
         self.order_manager = bot.order_manager
         self.telegram = bot.telegram
 
+    def _calculate_avg_fill_price(self, position: dict, filled_amount: float) -> float:
+        """
+        Calculate avg_fill_price using best available data.
+
+        Priority:
+        1. Calculate from filled_usdt / filled_amount
+        2. Use order price from position
+        3. Get current market price
+        4. Last resort: reject (don't use 0.01)
+
+        Args:
+            position: Position dict with order data
+            filled_amount: Filled tokens amount
+
+        Returns:
+            Calculated avg_fill_price
+        """
+        # Try #1: Calculate from filled_usdt
+        filled_usdt = position.get('filled_usdt', 0)
+        if filled_usdt > 0 and filled_amount > 0:
+            avg_price = filled_usdt / filled_amount
+            logger.info(f"   💰 Calculated avg_fill_price from filled_usdt: ${avg_price:.4f}")
+            return avg_price
+
+        # Try #2: Use order price
+        order_price = position.get('price', 0)
+        if order_price > 0:
+            logger.info(f"   💰 Using order price as avg_fill_price: ${order_price:.4f}")
+            return order_price
+
+        # Try #3: Get current market price
+        token_id = position.get('token_id')
+        if token_id:
+            try:
+                orderbook = self.client.get_market_orderbook(token_id)
+                if orderbook and 'bids' in orderbook:
+                    bids = orderbook.get('bids', [])
+                    if bids:
+                        best_bid = max(float(bid.get('price', 0)) for bid in bids)
+                        if best_bid > 0:
+                            logger.warning(f"   ⚠️  Using current market bid as avg_fill_price: ${best_bid:.4f}")
+                            logger.warning(f"   P&L calculations may be slightly inaccurate")
+                            return best_bid
+            except Exception as e:
+                logger.warning(f"   Could not get market price: {e}")
+
+        # Last resort: This shouldn't happen - reject
+        logger.error(f"   ❌ Cannot determine avg_fill_price!")
+        logger.error(f"   No filled_usdt, no order price, no market data")
+        raise ValueError("Cannot determine avg_fill_price - insufficient data")
+
     def handle_buy_placed(self) -> bool:
         """
         BUY_PLACED stage: BUY order placed, ready to monitor.
@@ -108,8 +159,19 @@ class BuyHandler:
 
                     # Update state with filled data
                     position['filled_amount'] = tokens
-                    position['avg_fill_price'] = position.get('price', 0.01)
-                    position['filled_usdt'] = tokens * position['avg_fill_price']
+
+                    # Calculate avg_fill_price intelligently
+                    try:
+                        position['avg_fill_price'] = self._calculate_avg_fill_price(position, tokens)
+                        position['filled_usdt'] = tokens * position['avg_fill_price']
+                    except ValueError as e:
+                        logger.error(f"   Failed to calculate avg_fill_price: {e}")
+                        logger.info("   Resetting to SCANNING")
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+
                     position['fill_timestamp'] = get_timestamp()
 
                     self.state['stage'] = 'BUY_FILLED'
@@ -184,8 +246,19 @@ class BuyHandler:
 
                     # Update state as if BUY was filled
                     position['filled_amount'] = tokens
-                    position['avg_fill_price'] = position.get('price', 0.01)
-                    position['filled_usdt'] = tokens * position['avg_fill_price']
+
+                    # Calculate avg_fill_price intelligently
+                    try:
+                        position['avg_fill_price'] = self._calculate_avg_fill_price(position, tokens)
+                        position['filled_usdt'] = tokens * position['avg_fill_price']
+                    except ValueError as e:
+                        logger.error(f"   Failed to calculate avg_fill_price: {e}")
+                        logger.info("   Resetting to SCANNING")
+                        self.state_manager.reset_position(self.state)
+                        self.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.state)
+                        return True
+
                     position['fill_timestamp'] = get_timestamp()
 
                     self.state['stage'] = 'BUY_FILLED'
@@ -257,6 +330,13 @@ class BuyHandler:
         if status == 'filled':
             logger.info("✅ BUY order filled!")
 
+            # Record transaction in history for audit trail
+            order_id = position.get('order_id', 'unknown')
+            market_id = position.get('market_id', 0)
+            market_title = position.get('market_title', 'Unknown market')
+            token_id = position.get('token_id', '')
+            outcome = position.get('outcome_side', 'YES')
+
             # Update state with fill data
             filled_from_monitor = result.get('filled_amount', 0)
 
@@ -311,6 +391,18 @@ class BuyHandler:
                         logger.error(f"   Stop-loss and P&L will be INACCURATE")
                         logger.error(f"   Using minimal fallback $0.01")
 
+            # Record BUY transaction in history
+            self.bot.transaction_history.record_buy(
+                market_id=market_id,
+                market_title=market_title,
+                token_id=token_id,
+                shares=position.get('filled_amount', 0),
+                price=position.get('avg_fill_price', 0),
+                amount_usdt=position.get('filled_usdt', 0),
+                order_id=order_id,
+                outcome=outcome
+            )
+
             self.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.state)
 
@@ -351,6 +443,27 @@ class BuyHandler:
         market_id = position['market_id']
         token_id = position.get('token_id')
         filled_amount = position['filled_amount']
+
+        # CRITICAL: Validate and fix avg_fill_price if suspicious
+        # This handles cases where state.json has 0.01$ from failed recovery
+        avg_fill_price = position.get('avg_fill_price', 0)
+        if avg_fill_price <= 0.02:  # Suspiciously low (0.01$ is clearly wrong)
+            logger.warning(f"⚠️  avg_fill_price is suspiciously low: ${avg_fill_price:.4f}")
+            logger.info("   Recalculating avg_fill_price from available data...")
+
+            try:
+                recalculated_price = self._calculate_avg_fill_price(position, filled_amount)
+                position['avg_fill_price'] = recalculated_price
+                position['filled_usdt'] = filled_amount * recalculated_price
+                self.state_manager.save_state(self.state)
+                logger.info(f"   ✅ Corrected avg_fill_price: ${avg_fill_price:.4f} → ${recalculated_price:.4f}")
+            except ValueError as e:
+                logger.error(f"   ❌ Could not recalculate avg_fill_price: {e}")
+                logger.info("   Resetting to SCANNING")
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return False
 
         # Validate token_id
         outcome_side = position.get('outcome_side', 'YES')
@@ -501,7 +614,8 @@ class BuyHandler:
                 market_id=market_id,
                 token_id=token_id,
                 price=sell_price,
-                amount_tokens=filled_amount
+                amount_tokens=filled_amount,
+                outcome_side=outcome_side
             )
 
             if not result:

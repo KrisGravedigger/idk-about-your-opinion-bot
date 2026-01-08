@@ -12,7 +12,7 @@ import time
 from typing import Dict, Any, Optional
 
 from logger_config import setup_logger
-from utils import format_price, format_usdt, get_timestamp, safe_float
+from utils import format_price, format_usdt, get_timestamp, safe_float, interruptible_sleep
 from core.capital_manager import InsufficientCapitalError, PositionTooSmallError
 
 logger = setup_logger(__name__)
@@ -99,12 +99,21 @@ class MarketSelector:
                 logger.error(f"   ❌ Error fetching market details: {e}")
                 token_id = ''
 
+            # Validate token_id - CRITICAL for placing SELL orders
+            if not token_id or token_id == '':
+                logger.error(f"   ❌ Cannot recover position without valid token_id")
+                logger.error(f"   This position cannot be managed by the bot")
+                logger.info(f"   💡 Skipping this position - will look for new opportunities")
+                return False
+
             # Recover state with real avg_price if available
             avg_price = pos.get('avg_price', 0)
             if avg_price <= 0:
-                logger.warning(f"⚠️ Recovered position missing avg_price, using minimal fallback $0.01")
-                logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                avg_price = 0.01
+                logger.error(f"   ❌ Cannot recover position without valid avg_price")
+                logger.error(f"   Position avg_price: {avg_price}")
+                logger.error(f"   This position cannot be managed by the bot (stop-loss won't work)")
+                logger.info(f"   💡 Skipping this position - will look for new opportunities")
+                return False
 
             self.state['stage'] = 'BUY_FILLED'
             self.state['current_position'] = {
@@ -310,8 +319,8 @@ class MarketSelector:
 
             if not top_markets:
                 logger.warning("No suitable markets found")
-                logger.info("Waiting before next scan...")
-                time.sleep(60)  # Wait 1 minute before retry
+                logger.info("Waiting 1 minute before next scan...")
+                interruptible_sleep(60)  # Wait 1 minute, but responsive to CTRL+C
                 return True
 
             # Select best market

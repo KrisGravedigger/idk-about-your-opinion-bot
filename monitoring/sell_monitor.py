@@ -30,7 +30,7 @@ import time
 from typing import Dict, Any, Tuple
 from datetime import datetime, timedelta
 from logger_config import setup_logger
-from utils import safe_float, format_price, format_percent, round_price, get_timestamp
+from utils import safe_float, format_price, format_percent, round_price, get_timestamp, interruptible_sleep
 from monitoring.liquidity_checker import LiquidityChecker
 
 logger = setup_logger(__name__)
@@ -142,7 +142,43 @@ class SellMonitor:
         buy_price = safe_float(position.get('avg_fill_price', 0))
         filled_amount = safe_float(position.get('filled_amount', 0))
         sell_price = position.get('sell_price', 0)
-                        
+
+        # CRITICAL: Validate and fix avg_fill_price if suspicious
+        # This handles cases where state.json has 0.01$ from failed recovery
+        if buy_price <= 0.02:  # Suspiciously low (0.01$ is clearly wrong)
+            logger.warning(f"⚠️  avg_fill_price is suspiciously low: ${buy_price:.4f}")
+            logger.info("   Attempting to recalculate from available data...")
+
+            # Try to get price from orderbook
+            recalculated = False
+            try:
+                orderbook = self.client.get_market_orderbook(token_id)
+                if orderbook and 'bids' in orderbook:
+                    bids = orderbook.get('bids', [])
+                    if bids:
+                        best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+                        if best_bid > 0:
+                            logger.info(f"   Using current market bid as avg_fill_price: ${best_bid:.4f}")
+                            buy_price = best_bid
+                            position['avg_fill_price'] = best_bid
+                            position['filled_usdt'] = filled_amount * best_bid
+
+                            # Save corrected state
+                            from core.state_manager import StateManager
+                            state_file = self.config.get('STATE_FILE', 'state.json')
+                            state_manager = StateManager(state_file)
+                            state_manager.save_state(self.state)
+
+                            logger.info(f"   ✅ Corrected avg_fill_price: ${buy_price:.4f}")
+                            logger.warning(f"   ⚠️  P&L may still be inaccurate (estimate from current market)")
+                            recalculated = True
+            except Exception as e:
+                logger.warning(f"   Could not get market price: {e}")
+
+            if not recalculated:
+                logger.warning("   ❌ Could not recalculate avg_fill_price")
+                logger.warning("   Continuing with existing value - P&L will be VERY inaccurate")
+
         check_count = 0
         last_liquidity_check = 0
         LIQUIDITY_CHECK_INTERVAL = 5  # Check every 5th iteration
@@ -153,25 +189,118 @@ class SellMonitor:
                 check_time = datetime.now().strftime("%H:%M:%S")
                 
                 # =============================================================
-                # CHECK: TIMEOUT
+                # CHECK: TIMEOUT - REEVALUATE PRICE COMPETITIVENESS
                 # =============================================================
                 if datetime.now() >= timeout_at:
                     logger.warning("")
-                    logger.warning("=" * 50)
-                    logger.warning("⏰ SELL ORDER TIMEOUT")
-                    logger.warning("=" * 50)
+                    logger.warning("=" * 70)
+                    logger.warning("⏰ SELL ORDER TIMEOUT - REEVALUATING")
+                    logger.warning("=" * 70)
                     logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
-                    logger.warning("   Exiting monitoring")
                     logger.warning("")
-                    
-                    return {
-                        'status': 'timeout',
-                        'filled_amount': None,
-                        'avg_fill_price': None,
-                        'filled_usdt': None,
-                        'fill_timestamp': None,
-                        'reason': f'Order pending for {self.timeout_hours} hours without fill'
-                    }
+                    logger.info("   🔍 Checking if our price is still competitive...")
+
+                    # Get our order details
+                    order = self.client.get_order(order_id)
+                    if not order:
+                        logger.error("   ❌ Could not fetch order - canceling")
+                        return {
+                            'status': 'timeout',
+                            'filled_amount': None,
+                            'avg_fill_price': None,
+                            'filled_usdt': None,
+                            'fill_timestamp': None,
+                            'reason': f'Order pending for {self.timeout_hours} hours - could not verify price'
+                        }
+
+                    our_price = safe_float(order.get('price', 0))
+                    logger.info(f"   Our ask price: ${our_price:.4f}")
+
+                    # Get current market orderbook
+                    try:
+                        orderbook = self.client.get_market_orderbook(token_id)
+                        if not orderbook or 'asks' not in orderbook:
+                            logger.warning("   ⚠️  Could not fetch orderbook - canceling to be safe")
+                            return {
+                                'status': 'timeout',
+                                'filled_amount': None,
+                                'avg_fill_price': None,
+                                'filled_usdt': None,
+                                'fill_timestamp': None,
+                                'reason': f'Order pending for {self.timeout_hours} hours - could not verify market'
+                            }
+
+                        asks = orderbook.get('asks', [])
+                        if not asks:
+                            logger.warning("   ⚠️  No asks in orderbook - market may be illiquid")
+                            return {
+                                'status': 'timeout',
+                                'filled_amount': None,
+                                'avg_fill_price': None,
+                                'filled_usdt': None,
+                                'fill_timestamp': None,
+                                'reason': f'Order pending for {self.timeout_hours} hours - no liquidity'
+                            }
+
+                        # Find best ask (lowest price)
+                        best_ask = min(safe_float(ask.get('price', 999)) for ask in asks)
+                        logger.info(f"   Market best ask: ${best_ask:.4f}")
+
+                        # Check if our price is competitive (within 0.1% of best ask)
+                        # We allow tiny margin for floating point and bonus for being first at price
+                        price_diff_pct = abs(our_price - best_ask) / best_ask * 100 if best_ask > 0 else 999
+
+                        if price_diff_pct <= 0.1:  # Within 0.1% - we're competitive
+                            logger.info("")
+                            logger.info("   ✅ OUR PRICE IS COMPETITIVE!")
+                            logger.info(f"   Price difference: {price_diff_pct:.3f}% (< 0.1% threshold)")
+                            logger.info("")
+                            logger.info("   🎁 BONUS: Keeping order for market making incentive")
+                            logger.info(f"   📅 Extending timeout by {self.timeout_hours} hours")
+                            logger.info("")
+
+                            # Extend timeout
+                            from datetime import timedelta
+                            new_timeout = datetime.now() + timedelta(hours=self.timeout_hours)
+                            timeout_at = new_timeout
+
+                            logger.info(f"   New timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                            logger.info("   Continuing monitoring...")
+                            logger.info("")
+
+                            # Continue monitoring - don't return, just update timeout_at and continue loop
+
+                        else:
+                            # Our price is NOT competitive - cancel and retry
+                            logger.warning("")
+                            logger.warning("   ❌ OUR PRICE IS NOT COMPETITIVE")
+                            logger.warning(f"   Our ask: ${our_price:.4f}")
+                            logger.warning(f"   Best ask: ${best_ask:.4f}")
+                            logger.warning(f"   Difference: {price_diff_pct:.2f}%")
+                            logger.warning("")
+                            logger.warning("   Strategy: Cancel and place more aggressive order")
+                            logger.warning("")
+
+                            return {
+                                'status': 'timeout',
+                                'filled_amount': None,
+                                'avg_fill_price': None,
+                                'filled_usdt': None,
+                                'fill_timestamp': None,
+                                'reason': f'Order pending for {self.timeout_hours} hours - price not competitive (best: ${best_ask:.4f}, ours: ${our_price:.4f})'
+                            }
+
+                    except Exception as e:
+                        logger.error(f"   ❌ Error checking price competitiveness: {e}")
+                        logger.warning("   Canceling order to be safe")
+                        return {
+                            'status': 'timeout',
+                            'filled_amount': None,
+                            'avg_fill_price': None,
+                            'filled_usdt': None,
+                            'fill_timestamp': None,
+                            'reason': f'Order pending for {self.timeout_hours} hours - error: {e}'
+                        }
                 
                 # =============================================================
                 # CHECK: STOP-LOSS (if enabled)
@@ -271,7 +400,7 @@ class SellMonitor:
 
                 if not order:
                     logger.warning(f"[{check_time}] ⚠️  Failed to fetch order status")
-                    time.sleep(self.check_interval)
+                    interruptible_sleep(self.check_interval)
                     continue
                 
                 status = order.get('status')  # int: 0=pending, 1=partial, 2=finished, 3=cancelled, 4=expired
@@ -303,6 +432,59 @@ class SellMonitor:
                         'reason': None
                     }
                 
+                # =============================================================
+                # CHECK: PARTIAL FILL WITH DUST REMAINING
+                # =============================================================
+                # If order is partially filled and remaining < dust threshold,
+                # cancel the order and proceed with filled amount
+                filled_shares = safe_float(order.get('filled_shares', 0))
+                order_shares = safe_float(order.get('order_shares', 0))
+
+                if filled_shares > 0 and order_shares > 0:
+                    remaining_shares = order_shares - filled_shares
+                    dust_threshold = 5.0  # Same as config dust threshold
+
+                    # Check if remaining is dust
+                    if 0 < remaining_shares < dust_threshold:
+                        logger.info("")
+                        logger.info("=" * 70)
+                        logger.warning("⚠️  PARTIAL FILL WITH DUST REMAINING")
+                        logger.info("=" * 70)
+                        logger.info(f"   Ordered: {order_shares:.4f} tokens")
+                        logger.info(f"   Filled: {filled_shares:.4f} tokens")
+                        logger.info(f"   Remaining: {remaining_shares:.4f} tokens (< {dust_threshold} dust threshold)")
+                        logger.info("")
+                        logger.info("   🎯 Strategy: Cancel remaining dust and proceed with filled amount")
+                        logger.info("")
+
+                        # Cancel the order to clear the remaining dust
+                        try:
+                            logger.info(f"   🧹 Cancelling order to clear dust...")
+                            self.client.cancel_order(order_id)
+                            logger.info(f"   ✅ Order cancelled")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️  Could not cancel order: {e}")
+                            logger.warning(f"   Proceeding anyway with filled amount")
+
+                        # Extract fill data for the filled portion
+                        filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order)
+
+                        logger.info("")
+                        logger.info(f"   📊 Proceeding with filled portion:")
+                        logger.info(f"   Sold: {filled_amount:.4f} tokens")
+                        logger.info(f"   Avg price: {format_price(avg_fill_price)}")
+                        logger.info(f"   Proceeds: ${filled_usdt:.2f}")
+                        logger.info("")
+
+                        return {
+                            'status': 'filled',
+                            'filled_amount': filled_amount,
+                            'avg_fill_price': avg_fill_price,
+                            'filled_usdt': filled_usdt,
+                            'fill_timestamp': get_timestamp(),
+                            'reason': f'Partial fill - cancelled {remaining_shares:.4f} dust'
+                        }
+
                 # =============================================================
                 # CHECK: ORDER CANCELLED/EXPIRED
                 # =============================================================
@@ -336,8 +518,8 @@ class SellMonitor:
                 # ORDER STILL PENDING
                 # =============================================================
                 logger.info(f"[{check_time}] ⏳ SELL {status_enum}... (check #{check_count})")
-                
-                time.sleep(self.check_interval)
+
+                interruptible_sleep(self.check_interval)
         
         except KeyboardInterrupt:
             logger.info("")
@@ -584,13 +766,14 @@ class SellMonitor:
     def _extract_fill_data(self, order: Dict[str, Any]) -> Tuple[float, float, float]:
         """
         Extract fill data from order response.
-        
+
         Tries primary fields first (filled_shares, price, filled_amount).
         Falls back to extracting from trades[] array if primary data missing.
-        
+        Finally tries order_shares/order_amount fields (for API bug workaround).
+
         Args:
             order: Order dictionary from API
-            
+
         Returns:
             Tuple of (filled_amount_tokens, avg_fill_price, filled_usdt)
         """
@@ -598,57 +781,93 @@ class SellMonitor:
         filled_shares = safe_float(order.get('filled_shares', 0))
         fill_price = safe_float(order.get('price', 0))
         filled_usdt = safe_float(order.get('filled_amount', 0))
-        
+
         # Validation: if data is missing, extract from trades
         if filled_shares == 0 or fill_price == 0:
             logger.warning("⚠️  Missing fill data in order, extracting from trades...")
-            
+
             trades = order.get('trades', [])
             if trades:
                 total_shares = 0.0
                 total_proceeds = 0.0
-                
+
                 for trade in trades:
                     # Extract shares and amount
                     # IMPORTANT: trades[] returns values in WEI (18 decimals)
                     # Must divide by 1e18 to get human-readable values
                     shares_wei = safe_float(trade.get('shares', 0))
                     proceeds_wei = safe_float(trade.get('amount', 0))
-                    
+
                     shares = shares_wei / 1e18
                     proceeds = proceeds_wei / 1e18
-                    
+
                     total_shares += shares
                     total_proceeds += proceeds
-                
+
                 filled_shares = total_shares
                 fill_price = (total_proceeds / total_shares) if total_shares > 0 else 0
                 filled_usdt = total_proceeds
-                
+
                 logger.info(f"   ✅ Extracted from {len(trades)} trade(s)")
             else:
                 logger.error("   ❌ No trades data available")
-        
-        # FALLBACK: Calculate from order amount and price if still missing
+
+        # FALLBACK 1: Try order_shares and order_amount (API bug workaround)
+        # Sometimes API returns filled_shares=0 but order_shares has the real value
         if filled_shares == 0:
-            logger.warning("⚠️  FALLBACK: Calculating fill data from order fields")
-            
+            logger.warning("⚠️  FALLBACK 1: Trying order_shares/order_amount fields...")
+
+            order_shares = safe_float(order.get('order_shares', 0))
+            order_amount = safe_float(order.get('order_amount', 0))
+            price = safe_float(order.get('price', 0))
+
+            # Validate: for a Finished order, these should be non-zero
+            if order_shares > 0 and price > 0:
+                filled_shares = order_shares
+                fill_price = price
+                # Calculate USDT from shares * price if order_amount missing
+                filled_usdt = order_amount if order_amount > 0 else (order_shares * price)
+
+                logger.info(f"   ✅ Extracted from order_shares/order_amount")
+                logger.info(f"   Result: shares={filled_shares:.4f}, price={fill_price:.4f}, usdt={filled_usdt:.2f}")
+            else:
+                logger.warning(f"   ⚠️  order_shares={order_shares}, price={price} - insufficient data")
+
+        # FALLBACK 2: Calculate from order amount and price if still missing
+        if filled_shares == 0:
+            logger.warning("⚠️  FALLBACK 2: Calculating fill data from order fields")
+
             # Try to get from order amount (tokens to sell) and price
             amount_tokens = safe_float(order.get('amount', 0))
             price = safe_float(order.get('price', 0))
-            
+
             if amount_tokens > 0 and price > 0:
                 filled_shares = amount_tokens
                 fill_price = price
                 filled_usdt = amount_tokens * price
-                
+
                 logger.info(f"   ✅ Calculated from order: tokens={amount_tokens}, price={price}")
                 logger.info(f"   Result: shares={filled_shares:.4f}, price={fill_price:.4f}, usdt={filled_usdt:.2f}")
             else:
-                logger.error(f"   ❌ FALLBACK FAILED - insufficient order data")
+                logger.error(f"   ❌ ALL FALLBACKS FAILED - insufficient order data")
                 logger.error(f"   amount={amount_tokens}, price={price}")
                 logger.error(f"   Full order: {order}")
-        
+
+        # VALIDATION: For a Finished order, shares should NEVER be zero
+        status_enum = order.get('status_enum', 'unknown')
+        if status_enum == 'Finished' and filled_shares == 0:
+            logger.error("")
+            logger.error("=" * 70)
+            logger.error("❌ CRITICAL: API returned Finished order with 0 shares!")
+            logger.error("=" * 70)
+            logger.error(f"   This is an API bug. Order claims to be filled but has no fill data.")
+            logger.error(f"   Order ID: {order.get('order_id', 'N/A')}")
+            logger.error(f"   Market ID: {order.get('market_id', 'N/A')}")
+            logger.error(f"   Status: {status_enum}")
+            logger.error(f"   Please check the web UI to verify actual transaction.")
+            logger.error("=" * 70)
+            logger.error("")
+
         return (filled_shares, fill_price, filled_usdt)
 
 

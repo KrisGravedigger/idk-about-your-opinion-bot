@@ -569,11 +569,55 @@ def convert_to_dict(obj: Any) -> dict:
 def get_timestamp() -> str:
     """
     Get current timestamp in ISO format.
-    
+
     Returns:
         ISO formatted timestamp string
     """
     return datetime.now().isoformat()
+
+
+def interruptible_sleep(seconds: float, interval: float = 0.1) -> None:
+    """
+    Sleep for specified duration but allow KeyboardInterrupt to break early.
+
+    Problem: time.sleep() is atomic and cannot be interrupted mid-sleep.
+    Solution: Sleep in small chunks and check for interrupts frequently.
+
+    Args:
+        seconds: Total duration to sleep (in seconds)
+        interval: Chunk size for each sleep iteration (default: 0.1s = 100ms)
+
+    Raises:
+        KeyboardInterrupt: If user presses CTRL+C during sleep
+
+    Example:
+        >>> # Sleep for 10 seconds, but responsive to CTRL+C every 100ms
+        >>> interruptible_sleep(10.0)
+
+        >>> # Sleep for 60 seconds, check every 0.5s
+        >>> interruptible_sleep(60.0, interval=0.5)
+    """
+    import time
+
+    if seconds <= 0:
+        return
+
+    # Calculate number of chunks
+    num_chunks = int(seconds / interval)
+    remainder = seconds % interval
+
+    # Sleep in chunks (more responsive to interrupts)
+    try:
+        for _ in range(num_chunks):
+            time.sleep(interval)
+
+        # Sleep the remainder
+        if remainder > 0:
+            time.sleep(remainder)
+
+    except KeyboardInterrupt:
+        # Propagate interrupt immediately
+        raise
 
 
 def format_duration(seconds: float) -> str:
