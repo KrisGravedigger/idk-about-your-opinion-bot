@@ -444,6 +444,27 @@ class BuyHandler:
         token_id = position.get('token_id')
         filled_amount = position['filled_amount']
 
+        # CRITICAL: Validate and fix avg_fill_price if suspicious
+        # This handles cases where state.json has 0.01$ from failed recovery
+        avg_fill_price = position.get('avg_fill_price', 0)
+        if avg_fill_price <= 0.02:  # Suspiciously low (0.01$ is clearly wrong)
+            logger.warning(f"⚠️  avg_fill_price is suspiciously low: ${avg_fill_price:.4f}")
+            logger.info("   Recalculating avg_fill_price from available data...")
+
+            try:
+                recalculated_price = self._calculate_avg_fill_price(position, filled_amount)
+                position['avg_fill_price'] = recalculated_price
+                position['filled_usdt'] = filled_amount * recalculated_price
+                self.state_manager.save_state(self.state)
+                logger.info(f"   ✅ Corrected avg_fill_price: ${avg_fill_price:.4f} → ${recalculated_price:.4f}")
+            except ValueError as e:
+                logger.error(f"   ❌ Could not recalculate avg_fill_price: {e}")
+                logger.info("   Resetting to SCANNING")
+                self.state_manager.reset_position(self.state)
+                self.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.state)
+                return False
+
         # Validate token_id
         outcome_side = position.get('outcome_side', 'YES')
         is_valid, recovered_token_id = self.validator.validate_token_id(token_id, market_id, outcome_side)
