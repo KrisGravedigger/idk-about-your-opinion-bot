@@ -218,7 +218,8 @@ class ReconciliationEngine:
                 # Get pending orders from API
                 pending_orders = self.client.get_my_orders(status='PENDING', limit=10)
 
-                if pending_orders and len(pending_orders) > 0:
+                # Explicit None check for defensive programming
+                if pending_orders is not None and len(pending_orders) > 0:
                     # Found orphaned pending order(s)!
                     order = pending_orders[0]  # Take first one
                     order_id = order.get('order_id', 'unknown')
