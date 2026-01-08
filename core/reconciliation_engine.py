@@ -288,7 +288,10 @@ class ReconciliationEngine:
                 )
 
         # CASE 2: State has position but API doesn't (or very different)
-        if stage in ['BUY_FILLED', 'SELL_PLACED', 'SELL_MONITORING']:
+        # CRITICAL FIX: Skip position checks for SELL_PLACED/SELL_MONITORING
+        # When a SELL order is active, shares are frozen in the order and won't appear in get_position_shares()
+        # This would incorrectly trigger MISSING_POSITION discrepancy
+        if stage == 'BUY_FILLED':
             if api_shares is not None:
                 # Check if shares match (within tolerance)
                 shares_diff = abs(state_shares - api_shares)
@@ -318,6 +321,13 @@ class ReconciliationEngine:
                         suggested_strategy=RecoveryStrategy.UPDATE_SHARES,
                         metadata={'shares_diff': shares_diff, 'actual_outcome_side': actual_outcome_side}
                     )
+
+        elif stage in ['SELL_PLACED', 'SELL_MONITORING']:
+            # SELL order active - shares are frozen in the order
+            # Don't check position shares because they're legitimately locked
+            # Just log for debugging
+            logger.debug(f"   Stage {stage}: Shares frozen in SELL order, skipping position check")
+            logger.debug(f"   State: {state_shares:.4f} shares, API available: {api_shares:.4f} (rest frozen in order)")
 
         # CASE 3: Invalid state data
         if stage in ['BUY_FILLED', 'SELL_PLACED', 'SELL_MONITORING']:
