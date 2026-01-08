@@ -56,6 +56,7 @@ class DiscrepancyType(Enum):
     SHARES_MISMATCH = "shares_mismatch"    # Position exists but shares differ
 
     # Order execution issues
+    ORPHANED_ORDER = "orphaned_order"      # Pending order exists but state doesn't know
     ZERO_FILL_BUG = "zero_fill_bug"        # Order Finished but filled_shares=0
     PARTIAL_FILL = "partial_fill"          # Only part of order executed
 
@@ -72,6 +73,7 @@ class RecoveryStrategy(Enum):
     HYBRID_SYNC = "hybrid_sync"                  # Use both API + history
     UPDATE_SHARES = "update_shares"              # Just update share count
     RESET_TO_IDLE = "reset_to_idle"              # Clean slate
+    CANCEL_AND_RESET = "cancel_and_reset"        # Cancel orphaned order and reset
     WAIT_AND_RETRY = "wait_and_retry"            # Likely API lag, wait
     NO_ACTION = "no_action"                      # Everything OK
 
@@ -209,6 +211,42 @@ class ReconciliationEngine:
             logger.warning(f"   Could not fetch API position: {e}")
             api_shares = None
 
+        # CASE 0: Check for orphaned pending orders (HIGHEST PRIORITY!)
+        # If state is IDLE/SCANNING but we have pending orders, that's a critical issue
+        if stage in ['IDLE', 'SCANNING']:
+            try:
+                # Get pending orders from API
+                pending_orders = self.client.get_my_orders(status='PENDING', limit=10)
+
+                if pending_orders and len(pending_orders) > 0:
+                    # Found orphaned pending order(s)!
+                    order = pending_orders[0]  # Take first one
+                    order_id = order.get('order_id', 'unknown')
+                    market_id = order.get('market_id', 0)
+                    status_enum = order.get('status_enum', 'unknown')
+                    side_enum = order.get('side_enum', 'unknown')
+
+                    logger.warning(f"   ⚠️  Found {len(pending_orders)} orphaned pending order(s)!")
+                    logger.warning(f"   First order: {side_enum} on market #{market_id}, status: {status_enum}")
+
+                    return Discrepancy(
+                        type=DiscrepancyType.ORPHANED_ORDER,
+                        severity='HIGH',
+                        description=f"State is {stage} but found {len(pending_orders)} pending order(s) - likely from incomplete cycle",
+                        state_data={'stage': stage},
+                        api_data={
+                            'order_id': order_id,
+                            'market_id': market_id,
+                            'status': status_enum,
+                            'side': side_enum,
+                            'total_orphaned': len(pending_orders)
+                        },
+                        suggested_strategy=RecoveryStrategy.CANCEL_AND_RESET,
+                        metadata={'all_orders': pending_orders}
+                    )
+            except Exception as e:
+                logger.debug(f"Could not check for orphaned orders: {e}")
+
         # CASE 1: State is IDLE/COMPLETED but API shows position
         if stage in ['IDLE', 'COMPLETED']:
             if api_shares is not None and api_shares > self.dust_threshold:
@@ -308,6 +346,9 @@ class ReconciliationEngine:
 
         elif strategy == RecoveryStrategy.RESET_TO_IDLE:
             result = self._reset_to_idle(state, discrepancy)
+
+        elif strategy == RecoveryStrategy.CANCEL_AND_RESET:
+            result = self._cancel_and_reset(state, discrepancy)
 
         else:
             result = RecoveryResult(
@@ -620,6 +661,97 @@ class ReconciliationEngine:
             actions_taken=actions,
             state_changes=state_changes,
             reason="Reset to clean state as last resort"
+        )
+
+    def _cancel_and_reset(
+        self,
+        state: Dict[str, Any],
+        discrepancy: Discrepancy
+    ) -> RecoveryResult:
+        """
+        Cancel orphaned pending orders and reset state (ORPHANED_ORDER case).
+
+        State is IDLE/SCANNING but API shows pending orders.
+        Cancel all pending orders and reset to clean IDLE state.
+        """
+        actions = []
+        state_changes = {}
+
+        # Get orphaned orders from discrepancy metadata
+        all_orders = discrepancy.metadata.get('all_orders', [])
+        api_data = discrepancy.api_data
+
+        if not all_orders:
+            # Fallback: try to cancel just the first order from api_data
+            order_id = api_data.get('order_id')
+            if order_id:
+                all_orders = [{'order_id': order_id, 'market_id': api_data.get('market_id', 0)}]
+
+        actions.append(f"Found {len(all_orders)} orphaned pending order(s)")
+
+        # Cancel each orphaned order
+        cancelled_count = 0
+        failed_count = 0
+
+        for order in all_orders:
+            order_id = order.get('order_id', 'unknown')
+            market_id = order.get('market_id', 0)
+
+            try:
+                logger.info(f"   Cancelling orphaned order {order_id} (market #{market_id})...")
+                success = self.client.cancel_order(order_id)
+
+                if success:
+                    cancelled_count += 1
+                    actions.append(f"Cancelled order {order_id} on market #{market_id}")
+                    logger.info(f"   ✅ Cancelled successfully")
+                else:
+                    failed_count += 1
+                    actions.append(f"⚠️  Failed to cancel order {order_id}")
+                    logger.warning(f"   ⚠️  Cancellation failed (may be already filled/cancelled)")
+
+            except Exception as e:
+                failed_count += 1
+                actions.append(f"⚠️  Error cancelling order {order_id}: {str(e)}")
+                logger.error(f"   ❌ Error: {e}")
+
+        # Reset state to IDLE
+        logger.info("   Resetting state to IDLE...")
+        self.state_manager.reset_position(state)
+        state['stage'] = 'IDLE'
+
+        state_changes = {
+            'stage': 'IDLE',
+            'current_position': 'cleared',
+            'orders_cancelled': cancelled_count,
+            'cancellations_failed': failed_count
+        }
+
+        actions.append(f"Cancelled {cancelled_count}/{len(all_orders)} order(s)")
+        if failed_count > 0:
+            actions.append(f"⚠️  {failed_count} cancellation(s) failed (likely already filled/cancelled)")
+        actions.append("Reset state to IDLE")
+
+        # Save state
+        self.state_manager.save_state(state)
+        actions.append("Saved updated state")
+
+        # Determine success based on results
+        if cancelled_count > 0 or failed_count == len(all_orders):
+            # Success if we cancelled at least one OR all failed (meaning they were already done)
+            success = True
+            reason = f"Cancelled {cancelled_count} orphaned order(s) and reset to IDLE"
+        else:
+            success = False
+            reason = f"Failed to cancel any of {len(all_orders)} order(s)"
+
+        return RecoveryResult(
+            success=success,
+            strategy=RecoveryStrategy.CANCEL_AND_RESET,
+            actions_taken=actions,
+            state_changes=state_changes,
+            reason=reason,
+            metadata={'cancelled': cancelled_count, 'failed': failed_count}
         )
 
     def _send_recovery_notification(
