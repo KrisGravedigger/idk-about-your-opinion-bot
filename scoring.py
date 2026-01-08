@@ -473,7 +473,15 @@ def calculate_market_score(
     # Liquidity depth
     if 'liquidity_depth' in weights and orderbook:
         scores['liquidity_depth'] = score_liquidity_depth(orderbook)
-    
+
+    # Bias score (spread farming)
+    if 'bias_score' in weights and orderbook:
+        bid_volume_pct = calculate_bid_volume_percentage(orderbook)
+        if bid_volume_pct is not None:
+            scores['bias_score'] = calculate_bias_score(bid_volume_pct)
+        else:
+            scores['bias_score'] = 0.0
+
     # Calculate weighted sum
     final_score = 0.0
     for metric, weight in weights.items():
@@ -516,7 +524,7 @@ def normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
 def get_available_metrics() -> List[str]:
     """
     Return list of all available scoring metrics.
-    
+
     Useful for config validation and documentation.
     """
     return [
@@ -526,7 +534,91 @@ def get_available_metrics() -> List[str]:
         'spread',
         'volume_24h',
         'liquidity_depth',
+        'bias_score',
     ]
+
+
+# =============================================================================
+# ORDERBOOK BIAS METRICS (SPREAD FARMING)
+# =============================================================================
+
+def calculate_bid_volume_percentage(orderbook: Dict[str, List[Dict[str, str]]]) -> Optional[float]:
+    """
+    Calculate percentage of total orderbook volume on bid side.
+
+    Args:
+        orderbook: Dict with 'bids' and 'asks' lists
+
+    Returns:
+        Percentage (0-100) of volume on bid side, or None if orderbook empty
+
+    Example:
+        >>> orderbook = {'bids': [...], 'asks': [...]}
+        >>> calculate_bid_volume_percentage(orderbook)
+        68.5  # 68.5% of volume is on bid side
+    """
+    if not orderbook:
+        return None
+
+    bids = orderbook.get('bids', [])
+    asks = orderbook.get('asks', [])
+
+    if not bids or not asks:
+        return None
+
+    # Calculate total volume on each side
+    bid_volume = 0.0
+    for bid in bids:
+        try:
+            bid_volume += float(bid.get('size', 0))
+        except (ValueError, TypeError):
+            pass
+
+    ask_volume = 0.0
+    for ask in asks:
+        try:
+            ask_volume += float(ask.get('size', 0))
+        except (ValueError, TypeError):
+            pass
+
+    total_volume = bid_volume + ask_volume
+
+    if total_volume == 0:
+        return None
+
+    bid_percentage = (bid_volume / total_volume) * 100
+    return bid_percentage
+
+
+def calculate_bias_score(bid_volume_pct: float) -> float:
+    """
+    Calculate bias score based on orderbook imbalance.
+
+    Rewards orderbooks tilted 60-85% to bid side (sweet spot for probability trading).
+    Score decreases linearly outside this range.
+
+    Args:
+        bid_volume_pct: Percentage of total orderbook volume on bid side (0-100)
+
+    Returns:
+        float: Score between 0.0 and 1.0
+
+    Examples:
+        >>> calculate_bias_score(70.0)  # Sweet spot
+        1.0
+        >>> calculate_bias_score(50.0)  # Balanced
+        0.833
+        >>> calculate_bias_score(90.0)  # Too biased
+        0.667
+    """
+    if 60 <= bid_volume_pct <= 85:
+        return 1.0
+    elif bid_volume_pct < 60:
+        # Linear decay from 60% down to 0%
+        return max(0.0, bid_volume_pct / 60)
+    else:  # > 85%
+        # Linear decay from 85% to 100%
+        return max(0.0, (100 - bid_volume_pct) / 15)
 
 
 # =============================================================================

@@ -145,6 +145,23 @@ OUTCOME_MAX_PROBABILITY = 0.84  # Skip if implied probability > 80%
 OUTCOME_PROBABILITY_METHOD = 'mid_price'
 
 # =============================================================================
+# SPREAD FARMING STRATEGY PARAMETERS
+# =============================================================================
+
+# Enable spread farming mode (uses spread_farming profile + overrides)
+USE_SPREAD_FARMING = False  # Set True to activate
+
+# When USE_SPREAD_FARMING = True, these parameters override defaults:
+SPREAD_FARMING_CONFIG = {
+    'scoring_profile': 'spread_farming',
+    'outcome_min_probability': 0.66,
+    'outcome_max_probability': 0.80,
+    'min_spread_pct': 5.0,
+    'orderbook_balance_range': None,  # Disable hard filter, use bias_score instead
+    'min_hours_until_close': None,    # Timeframe not critical
+}
+
+# =============================================================================
 # MARKET FILTERS
 # =============================================================================
 
@@ -336,7 +353,20 @@ def validate_config():
     
     if SAFETY_MARGIN_CENTS < 0.0001 or SAFETY_MARGIN_CENTS > 0.01:
         errors.append(f"SAFETY_MARGIN_CENTS must be 0.0001-0.01, got {SAFETY_MARGIN_CENTS}")
-    
+
+    # Check spread farming configuration
+    if USE_SPREAD_FARMING:
+        # Warn if DEFAULT_SCORING_PROFILE is not spread_farming
+        if DEFAULT_SCORING_PROFILE != 'spread_farming':
+            warnings.append(
+                f"USE_SPREAD_FARMING is True but DEFAULT_SCORING_PROFILE is '{DEFAULT_SCORING_PROFILE}'. "
+                f"Consider setting DEFAULT_SCORING_PROFILE = 'spread_farming' or let the bot override it."
+            )
+
+        # Validate spread_farming profile exists
+        if 'spread_farming' not in SCORING_PROFILES:
+            errors.append("USE_SPREAD_FARMING is True but 'spread_farming' profile not found in SCORING_PROFILES")
+
     return (len(errors) == 0, errors, warnings)
 
 
@@ -374,6 +404,17 @@ SCORING_PROFILES = {
         },
         'bonus_multiplier': 1.2,
         'invert_spread': False,
+    },
+    'spread_farming': {
+        'description': 'High spread + high volume + biased outcomes (66-80% probability)',
+        'weights': {
+            'spread': 0.60,
+            'volume_24h': 0.25,
+            'bias_score': 0.15,
+        },
+        'bonus_multiplier': 1.5,
+        'invert_spread': False,
+        'min_spread_pct': 5.0,
     },
 }
 
