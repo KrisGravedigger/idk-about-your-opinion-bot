@@ -174,6 +174,9 @@ class AutonomousBot:
         try:
             # Send initial heartbeat to verify current state (async to avoid blocking)
             logger.debug("Sending initial heartbeat (async)...")
+            # Set last_heartbeat BEFORE sending to prevent duplicate in first cycle
+            from datetime import datetime
+            self.last_heartbeat = datetime.now()
             import threading
             heartbeat_thread = threading.Thread(target=self._send_heartbeat_now, daemon=True)
             heartbeat_thread.start()
@@ -549,6 +552,7 @@ class AutonomousBot:
         market_info = None
         order_info = None
         position_value = 0.0
+        outcome_side = None
 
         # Get market info and order details if in active position
         if position and position.get('market_id'):
@@ -675,7 +679,8 @@ class AutonomousBot:
             market_info=market_info,
             order_info=order_info,
             balance=balance,
-            position_value=position_value
+            position_value=position_value,
+            outcome_side=outcome_side
         )
 
         self.last_heartbeat = now

@@ -225,7 +225,8 @@ class TelegramNotifier:
 
 ⏰ Stopped at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
-        return self.send_message(message.strip())
+        # Send synchronously (async_send=False) to ensure message is sent before program exits
+        return self.send_message(message.strip(), async_send=False)
 
     def send_heartbeat(
         self,
@@ -233,7 +234,8 @@ class TelegramNotifier:
         market_info: Optional[Dict[str, Any]] = None,
         order_info: Optional[Dict[str, Any]] = None,
         balance: float = 0,
-        position_value: float = 0
+        position_value: float = 0,
+        outcome_side: Optional[str] = None
     ) -> bool:
         """
         Send periodic heartbeat update.
@@ -244,6 +246,7 @@ class TelegramNotifier:
             order_info: Current order details (price, amounts, position in book)
             balance: Available USDT balance
             position_value: Current position value in USDT
+            outcome_side: Market outcome side (YES/NO) if in position
 
         Returns:
             True if sent successfully
@@ -263,7 +266,14 @@ class TelegramNotifier:
 💓 <b>HEARTBEAT</b>
 
 📍 <b>Status:</b> {status_emoji} {stage}
+"""
 
+        # Add outcome side (YES/NO) if in position
+        if outcome_side:
+            side_emoji = '✅' if outcome_side == 'YES' else '❌'
+            message += f"📌 <b>Market side:</b> {side_emoji} {outcome_side}\n"
+
+        message += f"""
 💰 <b>Balance:</b>
    • Available: ${balance:.2f}
    • Position value: ${position_value:.2f}
@@ -518,12 +528,14 @@ if __name__ == "__main__":
         stage='BUY_MONITORING',
         market_info={
             'market_id': 12345,
+            'market_title': 'Will Bitcoin reach $100k by end of 2024?',
             'spread': 0.05,
             'best_bid': 0.65,
             'best_ask': 0.70
         },
         balance=50.0,
-        position_value=50.0
+        position_value=50.0,
+        outcome_side='YES'
     )
     time.sleep(2)
 
