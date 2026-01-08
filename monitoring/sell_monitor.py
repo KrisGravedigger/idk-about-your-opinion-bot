@@ -165,7 +165,8 @@ class SellMonitor:
 
                             # Save corrected state
                             from core.state_manager import StateManager
-                            state_manager = StateManager(self.config)
+                            state_file = self.config.get('STATE_FILE', 'state.json')
+                            state_manager = StateManager(state_file)
                             state_manager.save_state(self.state)
 
                             logger.info(f"   ✅ Corrected avg_fill_price: ${buy_price:.4f}")
