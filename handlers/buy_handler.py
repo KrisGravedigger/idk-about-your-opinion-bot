@@ -520,7 +520,8 @@ class BuyHandler:
                 market_id=market_id,
                 token_id=token_id,
                 price=sell_price,
-                amount_tokens=filled_amount
+                amount_tokens=filled_amount,
+                outcome_side=outcome_side
             )
 
             if not result:
