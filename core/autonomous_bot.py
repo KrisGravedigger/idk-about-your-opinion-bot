@@ -534,6 +534,15 @@ class AutonomousBot:
 
         now = datetime.now()
 
+        # IMPORTANT: Reload state from disk to get fresh stage info
+        # Monitor callbacks use stale self.state which can be outdated
+        try:
+            fresh_state = self.state_manager.load_state()
+            if fresh_state:
+                self.state = fresh_state
+        except Exception as e:
+            logger.warning(f"Could not reload state for heartbeat: {e}")
+
         # Gather information for heartbeat
         stage = self.state.get('stage', 'IDLE')
         position = self.state.get('current_position', {})

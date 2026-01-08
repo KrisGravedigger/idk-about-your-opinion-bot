@@ -153,25 +153,118 @@ class SellMonitor:
                 check_time = datetime.now().strftime("%H:%M:%S")
                 
                 # =============================================================
-                # CHECK: TIMEOUT
+                # CHECK: TIMEOUT - REEVALUATE PRICE COMPETITIVENESS
                 # =============================================================
                 if datetime.now() >= timeout_at:
                     logger.warning("")
-                    logger.warning("=" * 50)
-                    logger.warning("⏰ SELL ORDER TIMEOUT")
-                    logger.warning("=" * 50)
+                    logger.warning("=" * 70)
+                    logger.warning("⏰ SELL ORDER TIMEOUT - REEVALUATING")
+                    logger.warning("=" * 70)
                     logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
-                    logger.warning("   Exiting monitoring")
                     logger.warning("")
-                    
-                    return {
-                        'status': 'timeout',
-                        'filled_amount': None,
-                        'avg_fill_price': None,
-                        'filled_usdt': None,
-                        'fill_timestamp': None,
-                        'reason': f'Order pending for {self.timeout_hours} hours without fill'
-                    }
+                    logger.info("   🔍 Checking if our price is still competitive...")
+
+                    # Get our order details
+                    order = self.client.get_order(order_id)
+                    if not order:
+                        logger.error("   ❌ Could not fetch order - canceling")
+                        return {
+                            'status': 'timeout',
+                            'filled_amount': None,
+                            'avg_fill_price': None,
+                            'filled_usdt': None,
+                            'fill_timestamp': None,
+                            'reason': f'Order pending for {self.timeout_hours} hours - could not verify price'
+                        }
+
+                    our_price = safe_float(order.get('price', 0))
+                    logger.info(f"   Our ask price: ${our_price:.4f}")
+
+                    # Get current market orderbook
+                    try:
+                        orderbook = self.client.get_market_orderbook(token_id)
+                        if not orderbook or 'asks' not in orderbook:
+                            logger.warning("   ⚠️  Could not fetch orderbook - canceling to be safe")
+                            return {
+                                'status': 'timeout',
+                                'filled_amount': None,
+                                'avg_fill_price': None,
+                                'filled_usdt': None,
+                                'fill_timestamp': None,
+                                'reason': f'Order pending for {self.timeout_hours} hours - could not verify market'
+                            }
+
+                        asks = orderbook.get('asks', [])
+                        if not asks:
+                            logger.warning("   ⚠️  No asks in orderbook - market may be illiquid")
+                            return {
+                                'status': 'timeout',
+                                'filled_amount': None,
+                                'avg_fill_price': None,
+                                'filled_usdt': None,
+                                'fill_timestamp': None,
+                                'reason': f'Order pending for {self.timeout_hours} hours - no liquidity'
+                            }
+
+                        # Find best ask (lowest price)
+                        best_ask = min(safe_float(ask.get('price', 999)) for ask in asks)
+                        logger.info(f"   Market best ask: ${best_ask:.4f}")
+
+                        # Check if our price is competitive (within 0.1% of best ask)
+                        # We allow tiny margin for floating point and bonus for being first at price
+                        price_diff_pct = abs(our_price - best_ask) / best_ask * 100 if best_ask > 0 else 999
+
+                        if price_diff_pct <= 0.1:  # Within 0.1% - we're competitive
+                            logger.info("")
+                            logger.info("   ✅ OUR PRICE IS COMPETITIVE!")
+                            logger.info(f"   Price difference: {price_diff_pct:.3f}% (< 0.1% threshold)")
+                            logger.info("")
+                            logger.info("   🎁 BONUS: Keeping order for market making incentive")
+                            logger.info(f"   📅 Extending timeout by {self.timeout_hours} hours")
+                            logger.info("")
+
+                            # Extend timeout
+                            from datetime import timedelta
+                            new_timeout = datetime.now() + timedelta(hours=self.timeout_hours)
+                            timeout_at = new_timeout
+
+                            logger.info(f"   New timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                            logger.info("   Continuing monitoring...")
+                            logger.info("")
+
+                            # Continue monitoring - don't return, just update timeout_at and continue loop
+
+                        else:
+                            # Our price is NOT competitive - cancel and retry
+                            logger.warning("")
+                            logger.warning("   ❌ OUR PRICE IS NOT COMPETITIVE")
+                            logger.warning(f"   Our ask: ${our_price:.4f}")
+                            logger.warning(f"   Best ask: ${best_ask:.4f}")
+                            logger.warning(f"   Difference: {price_diff_pct:.2f}%")
+                            logger.warning("")
+                            logger.warning("   Strategy: Cancel and place more aggressive order")
+                            logger.warning("")
+
+                            return {
+                                'status': 'timeout',
+                                'filled_amount': None,
+                                'avg_fill_price': None,
+                                'filled_usdt': None,
+                                'fill_timestamp': None,
+                                'reason': f'Order pending for {self.timeout_hours} hours - price not competitive (best: ${best_ask:.4f}, ours: ${our_price:.4f})'
+                            }
+
+                    except Exception as e:
+                        logger.error(f"   ❌ Error checking price competitiveness: {e}")
+                        logger.warning("   Canceling order to be safe")
+                        return {
+                            'status': 'timeout',
+                            'filled_amount': None,
+                            'avg_fill_price': None,
+                            'filled_usdt': None,
+                            'fill_timestamp': None,
+                            'reason': f'Order pending for {self.timeout_hours} hours - error: {e}'
+                        }
                 
                 # =============================================================
                 # CHECK: STOP-LOSS (if enabled)
