@@ -314,6 +314,59 @@ class BuyMonitor:
                     }
                 
                 # =============================================================
+                # CHECK: PARTIAL FILL WITH DUST REMAINING
+                # =============================================================
+                # If order is partially filled and remaining < dust threshold,
+                # cancel the order and proceed with filled amount
+                filled_shares = safe_float(order.get('filled_shares', 0))
+                order_shares = safe_float(order.get('order_shares', 0))
+
+                if filled_shares > 0 and order_shares > 0:
+                    remaining_shares = order_shares - filled_shares
+                    dust_threshold = 5.0  # Same as config dust threshold
+
+                    # Check if remaining is dust
+                    if 0 < remaining_shares < dust_threshold:
+                        logger.info("")
+                        logger.info("=" * 70)
+                        logger.warning("⚠️  PARTIAL FILL WITH DUST REMAINING")
+                        logger.info("=" * 70)
+                        logger.info(f"   Ordered: {order_shares:.4f} tokens")
+                        logger.info(f"   Filled: {filled_shares:.4f} tokens")
+                        logger.info(f"   Remaining: {remaining_shares:.4f} tokens (< {dust_threshold} dust threshold)")
+                        logger.info("")
+                        logger.info("   🎯 Strategy: Cancel remaining dust and proceed with filled amount")
+                        logger.info("")
+
+                        # Cancel the order to clear the remaining dust
+                        try:
+                            logger.info(f"   🧹 Cancelling order to clear dust...")
+                            self.client.cancel_order(order_id)
+                            logger.info(f"   ✅ Order cancelled")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️  Could not cancel order: {e}")
+                            logger.warning(f"   Proceeding anyway with filled amount")
+
+                        # Extract fill data for the filled portion
+                        filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order)
+
+                        logger.info("")
+                        logger.info(f"   📊 Proceeding with filled portion:")
+                        logger.info(f"   Filled: {filled_amount:.4f} YES tokens")
+                        logger.info(f"   Avg price: {format_price(avg_fill_price)}")
+                        logger.info(f"   Total cost: ${filled_usdt:.2f}")
+                        logger.info("")
+
+                        return {
+                            'status': 'filled',
+                            'filled_amount': filled_amount,
+                            'avg_fill_price': avg_fill_price,
+                            'filled_usdt': filled_usdt,
+                            'fill_timestamp': get_timestamp(),
+                            'reason': f'Partial fill - cancelled {remaining_shares:.4f} dust'
+                        }
+
+                # =============================================================
                 # CHECK: ORDER CANCELLED/EXPIRED
                 # =============================================================
                 # Support both US spelling (Canceled) and UK spelling (Cancelled)
