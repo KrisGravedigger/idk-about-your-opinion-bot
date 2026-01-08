@@ -99,12 +99,21 @@ class MarketSelector:
                 logger.error(f"   ❌ Error fetching market details: {e}")
                 token_id = ''
 
+            # Validate token_id - CRITICAL for placing SELL orders
+            if not token_id or token_id == '':
+                logger.error(f"   ❌ Cannot recover position without valid token_id")
+                logger.error(f"   This position cannot be managed by the bot")
+                logger.info(f"   💡 Skipping this position - will look for new opportunities")
+                return False
+
             # Recover state with real avg_price if available
             avg_price = pos.get('avg_price', 0)
             if avg_price <= 0:
-                logger.warning(f"⚠️ Recovered position missing avg_price, using minimal fallback $0.01")
-                logger.warning(f"   Stop-loss may not work correctly with fallback price")
-                avg_price = 0.01
+                logger.error(f"   ❌ Cannot recover position without valid avg_price")
+                logger.error(f"   Position avg_price: {avg_price}")
+                logger.error(f"   This position cannot be managed by the bot (stop-loss won't work)")
+                logger.info(f"   💡 Skipping this position - will look for new opportunities")
+                return False
 
             self.state['stage'] = 'BUY_FILLED'
             self.state['current_position'] = {
