@@ -142,7 +142,42 @@ class SellMonitor:
         buy_price = safe_float(position.get('avg_fill_price', 0))
         filled_amount = safe_float(position.get('filled_amount', 0))
         sell_price = position.get('sell_price', 0)
-                        
+
+        # CRITICAL: Validate and fix avg_fill_price if suspicious
+        # This handles cases where state.json has 0.01$ from failed recovery
+        if buy_price <= 0.02:  # Suspiciously low (0.01$ is clearly wrong)
+            logger.warning(f"⚠️  avg_fill_price is suspiciously low: ${buy_price:.4f}")
+            logger.info("   Attempting to recalculate from available data...")
+
+            # Try to get price from orderbook
+            recalculated = False
+            try:
+                orderbook = self.client.get_market_orderbook(token_id)
+                if orderbook and 'bids' in orderbook:
+                    bids = orderbook.get('bids', [])
+                    if bids:
+                        best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+                        if best_bid > 0:
+                            logger.info(f"   Using current market bid as avg_fill_price: ${best_bid:.4f}")
+                            buy_price = best_bid
+                            position['avg_fill_price'] = best_bid
+                            position['filled_usdt'] = filled_amount * best_bid
+
+                            # Save corrected state
+                            from core.state_manager import StateManager
+                            state_manager = StateManager(self.config)
+                            state_manager.save_state(self.state)
+
+                            logger.info(f"   ✅ Corrected avg_fill_price: ${buy_price:.4f}")
+                            logger.warning(f"   ⚠️  P&L may still be inaccurate (estimate from current market)")
+                            recalculated = True
+            except Exception as e:
+                logger.warning(f"   Could not get market price: {e}")
+
+            if not recalculated:
+                logger.warning("   ❌ Could not recalculate avg_fill_price")
+                logger.warning("   Continuing with existing value - P&L will be VERY inaccurate")
+
         check_count = 0
         last_liquidity_check = 0
         LIQUIDITY_CHECK_INTERVAL = 5  # Check every 5th iteration
