@@ -511,6 +511,7 @@ def main():
                         bot.state['current_position'] = {
                             'market_id': market_id,
                             'token_id': token_id,
+                            'outcome_side': outcome_side_enum.upper(),  # CRITICAL: Set outcome_side from API
                             'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
                             'filled_amount': shares,
                             'avg_fill_price': pos.get('avg_price', 0.01),

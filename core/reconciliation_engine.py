@@ -200,13 +200,40 @@ class ReconciliationEngine:
         # Get actual position from API
         try:
             api_shares = None
+            actual_outcome_side = outcome_side  # Track which side we actually found
             if market_id is not None and market_id > 0:
                 api_shares_raw = self.client.get_position_shares(
                     market_id=market_id,
                     outcome_side=outcome_side
                 )
                 api_shares = safe_float(api_shares_raw) if api_shares_raw else 0.0
-                logger.debug(f"   API position: {api_shares:.4f} shares in market #{market_id}")
+                logger.debug(f"   API position ({outcome_side}): {api_shares:.4f} shares in market #{market_id}")
+
+                # IMPORTANT: If api_shares doesn't match expected and is very small (dust),
+                # check the OPPOSITE side - we might have the wrong outcome_side
+                if state_shares > 5.0 and api_shares < 5.0:
+                    # State expects significant position, but found only dust on this side
+                    # Check the opposite side
+                    opposite_side = 'NO' if outcome_side == 'YES' else 'YES'
+                    logger.debug(f"   Found only dust on {outcome_side} side, checking {opposite_side}...")
+
+                    try:
+                        opposite_shares_raw = self.client.get_position_shares(
+                            market_id=market_id,
+                            outcome_side=opposite_side
+                        )
+                        opposite_shares = safe_float(opposite_shares_raw) if opposite_shares_raw else 0.0
+                        logger.debug(f"   API position ({opposite_side}): {opposite_shares:.4f} shares")
+
+                        # If we found a larger position on the opposite side, use that instead
+                        if opposite_shares >= state_shares * 0.9:  # Within 10% of expected
+                            logger.info(f"   ✅ Found position on {opposite_side} side instead of {outcome_side}")
+                            logger.info(f"   Updating outcome_side: {outcome_side} → {opposite_side}")
+                            api_shares = opposite_shares
+                            actual_outcome_side = opposite_side
+                    except Exception as e2:
+                        logger.debug(f"   Could not check {opposite_side} side: {e2}")
+
         except Exception as e:
             logger.warning(f"   Could not fetch API position: {e}")
             api_shares = None
@@ -272,9 +299,10 @@ class ReconciliationEngine:
                         type=DiscrepancyType.MISSING_POSITION,
                         severity='HIGH',
                         description=f"State expects {state_shares:.4f} shares but API shows {api_shares:.4f}",
-                        state_data={'stage': stage, 'market_id': market_id, 'shares': state_shares},
-                        api_data={'market_id': market_id, 'shares': api_shares, 'outcome': outcome_side},
-                        suggested_strategy=RecoveryStrategy.SYNC_FROM_HISTORY
+                        state_data={'stage': stage, 'market_id': market_id, 'shares': state_shares, 'outcome_side': outcome_side},
+                        api_data={'market_id': market_id, 'shares': api_shares, 'outcome': actual_outcome_side},
+                        suggested_strategy=RecoveryStrategy.SYNC_FROM_HISTORY,
+                        metadata={'actual_outcome_side': actual_outcome_side}  # Pass corrected side to reconciliation
                     )
 
                 elif shares_diff > self.tolerance_shares:
@@ -285,10 +313,10 @@ class ReconciliationEngine:
                         type=DiscrepancyType.SHARES_MISMATCH,
                         severity=severity,
                         description=f"Share mismatch: state={state_shares:.4f}, API={api_shares:.4f}, diff={shares_diff:.4f}",
-                        state_data={'stage': stage, 'market_id': market_id, 'shares': state_shares},
-                        api_data={'market_id': market_id, 'shares': api_shares, 'outcome': outcome_side},
+                        state_data={'stage': stage, 'market_id': market_id, 'shares': state_shares, 'outcome_side': outcome_side},
+                        api_data={'market_id': market_id, 'shares': api_shares, 'outcome': actual_outcome_side},
                         suggested_strategy=RecoveryStrategy.UPDATE_SHARES,
-                        metadata={'shares_diff': shares_diff}
+                        metadata={'shares_diff': shares_diff, 'actual_outcome_side': actual_outcome_side}
                     )
 
         # CASE 3: Invalid state data
@@ -542,6 +570,14 @@ class ReconciliationEngine:
         old_shares = position.get('filled_amount', 0)
         position['filled_amount'] = api_shares
 
+        # CRITICAL: Update outcome_side if we found position on different side
+        actual_outcome_side = discrepancy.metadata.get('actual_outcome_side')
+        if actual_outcome_side and actual_outcome_side != position.get('outcome_side'):
+            old_side = position.get('outcome_side', 'UNKNOWN')
+            position['outcome_side'] = actual_outcome_side
+            actions.append(f"Updated outcome_side: {old_side} → {actual_outcome_side}")
+            logger.info(f"   ✅ Corrected outcome_side: {old_side} → {actual_outcome_side}")
+
         # Recalculate filled_usdt if we have avg_fill_price
         avg_price = position.get('avg_fill_price', 0)
         if avg_price > 0:
@@ -550,6 +586,9 @@ class ReconciliationEngine:
         state_changes = {
             'current_position.filled_amount': f"{old_shares:.4f} → {api_shares:.4f}"
         }
+
+        if actual_outcome_side and actual_outcome_side != discrepancy.state_data.get('outcome_side'):
+            state_changes['current_position.outcome_side'] = f"{discrepancy.state_data.get('outcome_side', 'UNKNOWN')} → {actual_outcome_side}"
 
         actions.append(f"Updated filled_amount: {old_shares:.4f} → {api_shares:.4f}")
 
