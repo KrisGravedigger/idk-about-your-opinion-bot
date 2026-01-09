@@ -61,7 +61,7 @@ class OutcomeOpportunity:
     spread_pct: float
     probability: float
     bid_volume_pct: float
-    volume_24h: float
+    volume_24h: float  # Actually lifetime volume (API doesn't provide 24h)
     orders_bid: int
     orders_ask: int
     hours_to_close: Optional[float]
@@ -150,7 +150,14 @@ class MarketAnalyzer:
 
         # Calculate score using liquidity farming weights
         # bias_score: 50% (MAIN edge), volume: 35%, spread: 15%
-        volume_24h = float(market.get('volume24h', 0))
+
+        # IMPORTANT: API doesn't return volume24h, use lifetime 'volume' instead
+        # This is total volume since market creation (better than 0!)
+        volume_str = market.get('volume', '0')
+        try:
+            volume_24h = float(volume_str)
+        except (ValueError, TypeError):
+            volume_24h = 0.0
 
         # Calculate bias_score (60-85% sweet spot)
         from scoring import calculate_bias_score
@@ -302,11 +309,20 @@ class MarketAnalyzer:
         print(f"📈 TOP {len(top_opps)} OPPORTUNITIES:")
         print()
         print("┌──────┬────────┬────────┬────────┬─────────┬────────┬──────────┬────────┐")
-        print("│ Rank │ Mkt ID │ Outcme │ Spread │  Prob   │  Bias  │ Vol 24h  │  Score │")
+        print("│ Rank │ Mkt ID │ Outcme │ Spread │  Prob   │  Bias  │ Vol (LT) │  Score │")
         print("├──────┼────────┼────────┼────────┼─────────┼────────┼──────────┼────────┤")
 
         for i, opp in enumerate(top_opps, 1):
-            print(f"│ {i:4} │ {opp.market_id:6} │ {opp.outcome:6} │ {opp.spread_pct:5.1f}% │ {opp.probability*100:6.1f}% │ {opp.bid_volume_pct:5.1f}% │ ${opp.volume_24h:7.0f} │ {opp.score:6.1f} │")
+            # Format volume with K/M suffix for readability
+            vol = opp.volume_24h
+            if vol >= 1_000_000:
+                vol_str = f"${vol/1_000_000:.1f}M"
+            elif vol >= 1_000:
+                vol_str = f"${vol/1_000:.0f}K"
+            else:
+                vol_str = f"${vol:.0f}"
+
+            print(f"│ {i:4} │ {opp.market_id:6} │ {opp.outcome:6} │ {opp.spread_pct:5.1f}% │ {opp.probability*100:6.1f}% │ {opp.bid_volume_pct:5.1f}% │ {vol_str:>8} │ {opp.score:6.1f} │")
 
         print("└──────┴────────┴────────┴────────┴─────────┴────────┴──────────┴────────┘")
         print()
@@ -321,7 +337,7 @@ class MarketAnalyzer:
             print(f"   Spread: {best.spread_pct:.2f}% (${best.spread_usd:.4f})")
             print(f"   Probability: {best.probability*100:.1f}%")
             print(f"   Bias: {best.bid_volume_pct:.1f}% bid volume")
-            print(f"   Volume 24h: ${best.volume_24h:.2f}")
+            print(f"   Volume (lifetime): ${best.volume_24h:,.0f}")
             if best.hours_to_close:
                 print(f"   Closes in: {best.hours_to_close:.1f} hours")
             print()
@@ -350,7 +366,7 @@ class MarketAnalyzer:
                 'market_id', 'title', 'outcome',
                 'best_bid', 'best_ask', 'spread_usd', 'spread_pct',
                 'probability', 'bid_volume_pct',
-                'volume_24h', 'orders_bid', 'orders_ask',
+                'volume_lifetime', 'orders_bid', 'orders_ask',
                 'hours_to_close', 'score'
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -367,7 +383,7 @@ class MarketAnalyzer:
                     'spread_pct': f"{opp.spread_pct:.2f}",
                     'probability': f"{opp.probability:.4f}",
                     'bid_volume_pct': f"{opp.bid_volume_pct:.2f}",
-                    'volume_24h': f"{opp.volume_24h:.2f}",
+                    'volume_lifetime': f"{opp.volume_24h:.2f}",  # Note: field name is volume_24h but contains lifetime
                     'orders_bid': opp.orders_bid,
                     'orders_ask': opp.orders_ask,
                     'hours_to_close': f"{opp.hours_to_close:.1f}" if opp.hours_to_close else "",
@@ -398,7 +414,7 @@ class MarketAnalyzer:
         print(f"   Outcomes generated: {total_outcomes}")
         print(f"   After filters: {len(opportunities)} ({len(opportunities)/total_outcomes*100:.1f}%)")
         print(f"   Average spread: {avg_spread:.1f}%")
-        print(f"   Average volume: ${avg_volume:.2f}")
+        print(f"   Average volume (lifetime): ${avg_volume:,.0f}")
         print(f"   Average bias: {avg_bias:.1f}%")
         print()
 
