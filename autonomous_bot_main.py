@@ -213,9 +213,10 @@ def main():
         BONUS_MARKETS_FILE,
         DEFAULT_SCORING_PROFILE,
 
-        # Spread Farming
-        USE_SPREAD_FARMING,
-        SPREAD_FARMING_CONFIG,
+        # Liquidity Farming
+        USE_LIQUIDITY_FARMING,
+        LIQUIDITY_FARMING_CONFIG,
+        USE_SPREAD_FARMING,  # Backward compatibility
 
         # Telegram
         TELEGRAM_HEARTBEAT_INTERVAL_HOURS
@@ -283,32 +284,36 @@ def main():
     }
 
     # =========================================================================
-    # APPLY SPREAD FARMING OVERRIDES
+    # APPLY LIQUIDITY FARMING OVERRIDES
     # =========================================================================
-    if USE_SPREAD_FARMING:
-        logger.info("🎯 Spread Farming mode ACTIVE - applying overrides...")
-        logger.info(f"   Scoring profile: {SPREAD_FARMING_CONFIG['scoring_profile']}")
-        logger.info(f"   Min spread: {SPREAD_FARMING_CONFIG['min_spread_pct']}%")
-        logger.info(f"   Probability range: {SPREAD_FARMING_CONFIG['outcome_min_probability']*100:.0f}%-{SPREAD_FARMING_CONFIG['outcome_max_probability']*100:.0f}%")
+    # Support both USE_LIQUIDITY_FARMING and USE_SPREAD_FARMING (backward compat)
+    if USE_LIQUIDITY_FARMING or USE_SPREAD_FARMING:
+        strategy_name = "Liquidity Farming" if USE_LIQUIDITY_FARMING else "Spread Farming (deprecated)"
+        strategy_config = LIQUIDITY_FARMING_CONFIG  # Both point to same config now
 
-        # Override config with spread farming parameters
-        config['SCORING_PROFILE'] = SPREAD_FARMING_CONFIG['scoring_profile']
+        logger.info(f"🎯 {strategy_name} mode ACTIVE - applying overrides...")
+        logger.info(f"   Scoring profile: {strategy_config['scoring_profile']}")
+        logger.info(f"   Probability range: {strategy_config['outcome_min_probability']*100:.0f}%-{strategy_config['outcome_max_probability']*100:.0f}%")
+        logger.info(f"   Min spread: {strategy_config['min_spread_pct']}% (0% = no filter)")
+
+        # Override config with liquidity farming parameters
+        config['SCORING_PROFILE'] = strategy_config['scoring_profile']
 
         # Override outcome filters
         # Note: These are module-level imports, so we need to import and patch them
         import config as config_module
-        config_module.OUTCOME_MIN_PROBABILITY = SPREAD_FARMING_CONFIG['outcome_min_probability']
-        config_module.OUTCOME_MAX_PROBABILITY = SPREAD_FARMING_CONFIG['outcome_max_probability']
+        config_module.OUTCOME_MIN_PROBABILITY = strategy_config['outcome_min_probability']
+        config_module.OUTCOME_MAX_PROBABILITY = strategy_config['outcome_max_probability']
 
         # Override orderbook balance range (None = disable hard filter)
-        if SPREAD_FARMING_CONFIG['orderbook_balance_range'] is not None:
-            config_module.ORDERBOOK_BALANCE_RANGE = SPREAD_FARMING_CONFIG['orderbook_balance_range']
+        if strategy_config['orderbook_balance_range'] is not None:
+            config_module.ORDERBOOK_BALANCE_RANGE = strategy_config['orderbook_balance_range']
         else:
             config_module.ORDERBOOK_BALANCE_RANGE = None
 
         # Override min hours until close (None = disable filter)
-        if SPREAD_FARMING_CONFIG['min_hours_until_close'] is not None:
-            config_module.MIN_HOURS_UNTIL_CLOSE = SPREAD_FARMING_CONFIG['min_hours_until_close']
+        if strategy_config['min_hours_until_close'] is not None:
+            config_module.MIN_HOURS_UNTIL_CLOSE = strategy_config['min_hours_until_close']
         else:
             config_module.MIN_HOURS_UNTIL_CLOSE = None
 

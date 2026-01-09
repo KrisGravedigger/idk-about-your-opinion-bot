@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """
-Market Analyzer - Spread Farming Strategy Scout
-==============================================
+Market Analyzer - Liquidity Farming Strategy Scout
+==================================================
 
-Scans Opinion.trade markets for optimal spread farming opportunities.
+Scans Opinion.trade markets for optimal liquidity farming opportunities.
+
+Liquidity Farming Strategy:
+    1. PROBABILITY EDGE (main): Target 66-85% biased markets where you have statistical advantage
+    2. MARKET MAKING (secondary): Provide liquidity and earn from volume over time
+    3. SPREAD (bonus): Nice to have, but NOT the primary goal (even 1% is OK!)
 
 Usage:
-    python market_analyzer.py                    # Default filters
-    python market_analyzer.py --min-spread 3     # Custom minimum spread
+    python market_analyzer.py                    # Default: 66-85% probability
+    python market_analyzer.py --min-prob 0.60    # Custom probability range
     python market_analyzer.py --no-csv           # Skip CSV export
     python market_analyzer.py --top 50           # Show top 50 results
-    python market_analyzer.py --min-prob 0.2 --max-prob 0.9  # Custom probability range
 
-Strategy Focus:
-    - High spread (min spread %)
-    - High volume (for liquidity)
-    - Probability range (filters outcomes by mid-price)
-    - Orderbook bias (60-85% sweet spot) - ONLY affects scoring, NOT filtering
+Scoring (how opportunities are ranked):
+    - Bias score: 50% weight (MAIN edge - orderbook imbalance 60-85% sweet spot)
+    - Volume: 35% weight (liquidity for market making)
+    - Spread: 15% weight (bonus only - NOT a requirement!)
 
 Important:
-    - Bias (orderbook balance) is NOT a hard filter!
-    - It's only used for ranking/scoring opportunities
-    - If you get 0 results, try relaxing --min-spread or probability range
+    - Spread is NOT a hard filter anymore (defaults to 0%)
+    - Focus is on PROBABILITY EDGE (66-85% biased markets)
+    - Even 1-2% spread is profitable with probability edge + market making
 
 Output:
     - Console table with top N opportunities
@@ -143,16 +146,26 @@ class MarketAnalyzer:
         bid_volume_pct = calculate_bid_volume_percentage(orderbook)
 
         if bid_volume_pct is None:
-            bid_volume_pct = 0.0
+            bid_volume_pct = 50.0  # Default to balanced
 
-        # Calculate score (spread × volume × balance_deviation)
+        # Calculate score using liquidity farming weights
+        # bias_score: 50% (MAIN edge), volume: 35%, spread: 15%
         volume_24h = float(market.get('volume24h', 0))
 
-        # Balance deviation score (how far from 50/50)
-        balance_score = abs(bid_volume_pct - 50) / 50  # 0-1 where 1 = extreme bias
+        # Calculate bias_score (60-85% sweet spot)
+        from scoring import calculate_bias_score
+        bias_score = calculate_bias_score(bid_volume_pct)
 
-        # Combined score
-        score = spread_pct * (volume_24h / 1000.0) * balance_score
+        # Normalize volume (log scale to handle wide range)
+        import math
+        volume_score = min(math.log10(max(volume_24h, 1)) / 5.0, 1.0)  # log scale, max at $100k
+
+        # Spread score (normalized to 0-1, 20% = 1.0)
+        spread_score = min(spread_pct / 20.0, 1.0)
+
+        # Weighted combination (matches liquidity_farming profile)
+        score = (bias_score * 0.50) + (volume_score * 0.35) + (spread_score * 0.15)
+        score *= 100  # Scale to 0-100 for easier reading
 
         # Hours until close
         hours_to_close = self.calculate_hours_until_close(market.get('cutoff_at'))
@@ -176,27 +189,31 @@ class MarketAnalyzer:
 
     def scan_markets(
         self,
-        min_spread_pct: float = 5.0,
-        min_prob: float = 0.30,
+        min_spread_pct: float = 0.0,
+        min_prob: float = 0.66,
         max_prob: float = 0.85
     ) -> List[OutcomeOpportunity]:
         """
         Scan all markets and return filtered opportunities.
 
         Args:
-            min_spread_pct: Minimum spread % (default: 5.0)
-            min_prob: Minimum outcome probability (default: 0.30)
-            max_prob: Maximum outcome probability (default: 0.85)
+            min_spread_pct: Minimum spread % (default: 0.0 - no filter!)
+            min_prob: Minimum outcome probability (default: 0.66 - biased markets only)
+            max_prob: Maximum outcome probability (default: 0.85 - sweet spot 66-85%)
 
         Returns:
             List of OutcomeOpportunity objects
         """
-        logger.info("🔍 Scanning Opinion.trade markets for spread farming opportunities...")
+        logger.info("🔍 Scanning Opinion.trade markets for liquidity farming opportunities...")
+        logger.info("")
+        logger.info("📊 STRATEGY:")
+        logger.info(f"   1. PROBABILITY EDGE (50% weight): Target {min_prob*100:.0f}-{max_prob*100:.0f}% biased markets")
+        logger.info(f"   2. MARKET MAKING (35% weight): Orderbook imbalance 60-85% sweet spot")
+        logger.info(f"   3. SPREAD BONUS (15% weight): Any spread is OK (min: {min_spread_pct}%)")
         logger.info("")
         logger.info("📊 FILTERS:")
-        logger.info(f"   - Min spread: {min_spread_pct}%")
-        logger.info(f"   - Probability: {min_prob*100:.0f}-{max_prob*100:.0f}%")
-        logger.info(f"   - Bias: NOT filtered (used only for scoring)")
+        logger.info(f"   - Probability: {min_prob*100:.0f}-{max_prob*100:.0f}% (main filter)")
+        logger.info(f"   - Min spread: {min_spread_pct}% (0% = no filter)")
         logger.info("")
 
         # Fetch all active markets
@@ -397,22 +414,22 @@ def main():
     parser.add_argument(
         '--min-spread',
         type=float,
-        default=5.0,
-        help='Minimum spread %% (default: 5.0)'
+        default=0.0,
+        help='Minimum spread %% (default: 0.0 - no filter)'
     )
 
     parser.add_argument(
         '--min-prob',
         type=float,
-        default=0.30,
-        help='Minimum outcome probability (default: 0.30)'
+        default=0.66,
+        help='Minimum outcome probability (default: 0.66 - biased markets)'
     )
 
     parser.add_argument(
         '--max-prob',
         type=float,
         default=0.85,
-        help='Maximum outcome probability (default: 0.85)'
+        help='Maximum outcome probability (default: 0.85 - sweet spot 66-85%%)'
     )
 
     parser.add_argument(
