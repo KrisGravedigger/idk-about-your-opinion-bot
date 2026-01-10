@@ -41,6 +41,10 @@ from config_validator import (
     validate_full_config, validate_credentials
 )
 
+# Disable SSL warnings (Opinion.trade uses self-signed cert)
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 class ToolTip:
     """Tooltip widget for providing help text on hover."""
@@ -1689,9 +1693,9 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     # Import SDK
                     from opinion_clob_sdk import Client
 
-                    # Try to create client
+                    # Try to create client (note: parameter is 'apikey' not 'api_key')
                     test_client = Client(
-                        api_key=api_key,
+                        apikey=api_key,
                         base_url=api_host
                     )
                     results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')

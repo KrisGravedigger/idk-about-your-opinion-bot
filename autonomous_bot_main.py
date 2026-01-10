@@ -60,6 +60,12 @@ import sys
 import argparse
 from pathlib import Path
 
+# Fix for Windows UTF-8 console output (handles emoji and unicode characters)
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 # Local imports
 from config_loader import config
 from logger_config import setup_logger, log_startup_banner
