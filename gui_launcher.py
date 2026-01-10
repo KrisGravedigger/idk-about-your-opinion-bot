@@ -1007,13 +1007,43 @@ class BotLauncherGUI:
         ).pack(side='left', padx=5)
         
         ttk.Button(
-            util_frame, 
-            text="📁 Open Folder", 
+            util_frame,
+            text="📁 Open Folder",
             command=self.open_folder,
             width=15
         ).pack(side='left', padx=5)
-        
-        launcher_frame.pack(fill='x', padx=10, pady=5)
+
+        ttk.Button(
+            util_frame,
+            text="🗑️ Clear Logs",
+            command=self.clear_log_viewer,
+            width=15
+        ).pack(side='left', padx=5)
+
+        # Real-time log viewer
+        log_viewer_frame = ttk.LabelFrame(launcher_frame, text="Real-Time Bot Output", padding=5)
+        log_viewer_frame.pack(fill='both', expand=True, pady=(10, 0))
+
+        self.log_viewer = scrolledtext.ScrolledText(
+            log_viewer_frame,
+            height=15,
+            wrap='word',
+            font=('Consolas', 9) if sys.platform == 'win32' else ('Courier', 9),
+            bg='#1e1e1e',
+            fg='#d4d4d4',
+            insertbackground='white',
+            state='disabled'
+        )
+        self.log_viewer.pack(fill='both', expand=True)
+
+        # Configure text tags for colored output
+        self.log_viewer.tag_config('timestamp', foreground='#808080')
+        self.log_viewer.tag_config('info', foreground='#4ec9b0')
+        self.log_viewer.tag_config('warning', foreground='#dcdcaa')
+        self.log_viewer.tag_config('error', foreground='#f48771')
+        self.log_viewer.tag_config('success', foreground='#b5cea8')
+
+        launcher_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
     def setup_action_buttons(self):
         """Create action buttons section."""
@@ -1440,7 +1470,110 @@ Note: Credentials remain in .env file (not affected by this import)."""
         self.config_changed = True
         
         self.update_status_bar("✨ Created new configuration from defaults")
-        
+
+    def clear_log_viewer(self):
+        """Clear the real-time log viewer."""
+        self.log_viewer.config(state='normal')
+        self.log_viewer.delete('1.0', 'end')
+        self.log_viewer.config(state='disabled')
+        self.update_status_bar("🗑️ Log viewer cleared")
+
+    def append_to_log_viewer(self, text, tag=None):
+        """Append text to log viewer (thread-safe)."""
+        def _append():
+            self.log_viewer.config(state='normal')
+            if tag:
+                self.log_viewer.insert('end', text, tag)
+            else:
+                self.log_viewer.insert('end', text)
+            self.log_viewer.see('end')  # Auto-scroll to bottom
+            self.log_viewer.config(state='disabled')
+
+        # Call from GUI thread
+        self.root.after(0, _append)
+
+    def read_bot_output(self):
+        """Background thread that reads bot stdout/stderr and displays in log viewer."""
+        try:
+            import select
+            has_select = True
+        except ImportError:
+            # Windows doesn't have select for pipes
+            has_select = False
+
+        def is_process_running():
+            return self.bot_process and self.bot_process.poll() is None
+
+        # Add startup message
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+        self.append_to_log_viewer("Bot started. Waiting for output...\n", 'info')
+
+        if has_select:
+            # Unix-like: use select for non-blocking reads
+            import select
+            while is_process_running():
+                try:
+                    # Check if data is available (timeout 0.1s)
+                    readable, _, _ = select.select([self.bot_process.stdout, self.bot_process.stderr], [], [], 0.1)
+
+                    for stream in readable:
+                        line = stream.readline()
+                        if line:
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+
+                            # Color code based on content
+                            line_lower = line.lower()
+                            if 'error' in line_lower or 'exception' in line_lower or 'traceback' in line_lower:
+                                self.append_to_log_viewer(line, 'error')
+                            elif 'warning' in line_lower or 'warn' in line_lower:
+                                self.append_to_log_viewer(line, 'warning')
+                            elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
+                                self.append_to_log_viewer(line, 'success')
+                            elif 'info' in line_lower or '📊' in line or '🔍' in line:
+                                self.append_to_log_viewer(line, 'info')
+                            else:
+                                self.append_to_log_viewer(line)
+                except Exception as e:
+                    # Don't crash the thread on read errors
+                    pass
+        else:
+            # Windows: simple blocking readline (with PYTHONUNBUFFERED this should work)
+            while is_process_running():
+                try:
+                    # Read from stdout
+                    line = self.bot_process.stdout.readline()
+                    if line:
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+
+                        # Color code based on content
+                        line_lower = line.lower()
+                        if 'error' in line_lower or 'exception' in line_lower or 'traceback' in line_lower:
+                            self.append_to_log_viewer(line, 'error')
+                        elif 'warning' in line_lower or 'warn' in line_lower:
+                            self.append_to_log_viewer(line, 'warning')
+                        elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
+                            self.append_to_log_viewer(line, 'success')
+                        elif 'info' in line_lower or '📊' in line or '🔍' in line:
+                            self.append_to_log_viewer(line, 'info')
+                        else:
+                            self.append_to_log_viewer(line)
+                except Exception as e:
+                    # Process might have ended
+                    pass
+
+        # Process ended - add final message
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.append_to_log_viewer(f"\n[{timestamp}] ", 'timestamp')
+        if self.bot_process and self.bot_process.returncode == 0:
+            self.append_to_log_viewer("Bot stopped gracefully.\n", 'success')
+        elif self.bot_process:
+            self.append_to_log_viewer(f"Bot exited with code {self.bot_process.returncode}\n", 'error')
+        else:
+            self.append_to_log_viewer("Bot process ended.\n", 'info')
+
     def start_bot(self):
         """Launch bot as subprocess."""
         if self.bot_process and self.bot_process.poll() is None:
@@ -1481,6 +1614,9 @@ Note: Credentials remain in .env file (not affected by this import)."""
             return
         
         try:
+            # Clear log viewer for new run
+            self.clear_log_viewer()
+
             # Prepare environment with unbuffered output
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'  # Force unbuffered output (immediate logs)
@@ -1501,34 +1637,24 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     time.sleep(1)
                     if self.bot_process and self.bot_process.poll() is not None:
                         # Bot crashed!
-                        try:
-                            stderr_output = self.bot_process.stderr.read() if self.bot_process.stderr else ""
-                            stdout_output = self.bot_process.stdout.read() if self.bot_process.stdout else ""
-                        except:
-                            stderr_output = ""
-                            stdout_output = ""
-
                         error_msg = f"Bot crashed after ~{i+1} seconds!\n\n"
                         error_msg += f"Exit code: {self.bot_process.returncode}\n\n"
-
-                        if stderr_output:
-                            error_msg += f"Error output:\n{stderr_output[:800]}\n\n"
-                        if stdout_output:
-                            error_msg += f"Standard output:\n{stdout_output[:800]}"
-
-                        if not stderr_output and not stdout_output:
-                            error_msg += "\n(No output captured - bot may have closed immediately)"
+                        error_msg += "Check the log viewer below for error details."
 
                         # Show error in GUI thread
-                        self.root.after(0, lambda: messagebox.showerror("Bot Crashed", error_msg))
-                        self.root.after(0, lambda: self.update_status_bar(f"❌ Bot crashed after {i+1}s"))
+                        self.root.after(0, lambda msg=error_msg: messagebox.showerror("Bot Crashed", msg))
+                        self.root.after(0, lambda s=f"❌ Bot crashed after {i+1}s": self.update_status_bar(s))
                         return
 
                 # After 15 seconds, bot seems stable
-                self.root.after(0, lambda: self.update_status_bar(f"✅ Bot running normally (PID: {self.bot_process.pid})"))
+                pid = self.bot_process.pid if self.bot_process else 0
+                self.root.after(0, lambda p=pid: self.update_status_bar(f"✅ Bot running normally (PID: {p})"))
 
             # Start monitoring thread
             threading.Thread(target=check_bot_startup, daemon=True).start()
+
+            # Start log reader thread for real-time output
+            threading.Thread(target=self.read_bot_output, daemon=True).start()
 
             # Update UI
             self.start_button.config(state='disabled')
@@ -1692,7 +1818,10 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 results_text.insert('end', f"   ⚠️  Connection test: {str(e)[:100]}\n", 'warning')
 
             # Test 3b: Try to initialize SDK client (if we have credentials)
-            if api_key:
+            private_key = self.private_key_var.get().strip()
+            rpc_url = self.rpc_url_var.get().strip()
+
+            if api_key and private_key and rpc_url:
                 results_text.insert('end', f"   Testing SDK initialization...\n")
                 try:
                     # Import SDK
@@ -1703,8 +1832,8 @@ Note: Credentials remain in .env file (not affected by this import)."""
                         host=api_host,
                         apikey=api_key,
                         chain_id=56,  # BSC mainnet
-                        private_key=self.private_key_var.get() if self.private_key_var.get() else "0" * 64,
-                        rpc_url=self.rpc_url_var.get()
+                        private_key=private_key,
+                        rpc_url=rpc_url
                     )
                     results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')
 
@@ -1731,8 +1860,18 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     error_str = str(e)
                     if "apikey" in error_str.lower():
                         results_text.insert('end', f"   ❌ Invalid API key format\n", 'error')
+                    elif "normalize" in error_str.lower() or "0x" in error_str:
+                        results_text.insert('end', f"   ❌ Invalid private key or RPC URL format\n", 'error')
                     else:
                         results_text.insert('end', f"   ❌ SDK test failed: {error_str[:200]}\n", 'error')
+            elif api_key:
+                # Have API key but missing other credentials
+                missing = []
+                if not private_key:
+                    missing.append("Private Key")
+                if not rpc_url:
+                    missing.append("RPC URL")
+                results_text.insert('end', f"   ℹ️  Skipping SDK test - missing: {', '.join(missing)}\n", 'info')
             else:
                 results_text.insert('end', f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
             
