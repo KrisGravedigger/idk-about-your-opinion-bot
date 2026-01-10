@@ -11,13 +11,17 @@ Liquidity Farming Strategy:
     3. SPREAD (bonus): Nice to have, but NOT the primary goal (even 1% is OK!)
 
 Usage:
-    python market_analyzer.py                        # Default: scan all 140+ markets
-    python market_analyzer.py --limit 50             # Fast: scan only first 50 markets
-    python market_analyzer.py --min-prob 0.60        # Custom probability range
-    python market_analyzer.py --no-csv               # Skip CSV export
-    python market_analyzer.py --top 50               # Show top 50 results
-    python market_analyzer.py --refine-top-n 20      # Hybrid: refine top 20 with volume24h
-    python market_analyzer.py --limit 50 --refine-top-n 20  # Fast scan + refinement
+    # 🚀 FAST MODE (recommended) - Use top markets by volume24h
+    python market_analyzer.py --top-volume 40        # 3.5× faster! (~10 min)
+    python market_analyzer.py --top-volume 20        # Quick test (~5 min)
+
+    # SLOW MODE (comprehensive) - Scan all markets from SDK
+    python market_analyzer.py                        # Default: scan all 140+ markets (~40 min)
+    python market_analyzer.py --limit 50             # Test: scan only first 50 markets (~12 min)
+
+    # Custom filters
+    python market_analyzer.py --top-volume 40 --min-prob 0.60
+    python market_analyzer.py --top-volume 40 --top 50
 
 Scoring (how opportunities are ranked):
     - Bias score: 50% weight (MAIN edge - orderbook imbalance 60-85% sweet spot)
@@ -29,26 +33,32 @@ Important:
     - Focus is on PROBABILITY EDGE (66-85% biased markets)
     - Even 1-2% spread is profitable with probability edge + market making
 
-Performance (--limit N):
-    Scanning 140+ markets takes ~30-40 minutes (280 orderbook fetches).
-    Use --limit to speed up testing:
-        - --limit 50  → ~10 minutes (100 fetches)
-        - --limit 20  → ~5 minutes (40 fetches)
-    Good for testing filters before full scan.
+Performance Options:
 
-Hybrid Optimization (--refine-top-n):
-    SDK returns lifetime 'volume' but not 'volume24h'. Raw API has volume24h.
+    🚀 --top-volume N (RECOMMENDED):
+        Fetches top N markets sorted by volume24h from raw API.
+        Then fetches orderbooks only for those N markets.
 
-    WITHOUT --refine-top-n (default):
-        - Uses lifetime volume from SDK (fast, 1 API call)
-        - Good approximation for most cases
+        Example: --top-volume 40
+        - Fetches: 40 markets + 80 orderbooks = 81 API calls
+        - Time: ~10 minutes (vs 40 minutes for all markets)
+        - Result: 3.5× faster with BEST opportunities!
 
-    WITH --refine-top-n 20:
-        - Step 1: Rank all ~140 markets by lifetime volume (SDK - fast)
-        - Step 2: Fetch precise volume24h for top 20 (raw API - 20 calls)
-        - Step 3: Re-rank top 20 with accurate 24h volume
-        - Result: 85% fewer API calls vs fetching volume24h for all markets
-        - Best for: Finding most active opportunities with precise recent volume
+    --limit N (slower, unsorted):
+        Fetches ALL 140 markets from SDK, then limits to first N.
+        Still fetches orderbooks for N markets, but NOT sorted by volume.
+
+        Example: --limit 50
+        - Fetches: 140 markets + 100 orderbooks = 241 calls
+        - Time: ~12 minutes (slower than --top-volume 50)
+
+Hybrid Optimization (--refine-top-n) [DEPRECATED]:
+    NOTE: --top-volume is better! It gets volume24h upfront, no refinement needed.
+
+    --refine-top-n is only useful for SLOW mode (no --top-volume):
+        - Rank by lifetime volume → fetch volume24h for top N → re-rank
+        - Example: --refine-top-n 20 (adds 20 API calls)
+        - Better: Use --top-volume instead!
 
 Output:
     - Console table with top N opportunities
@@ -83,6 +93,74 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # =============================================================================
 # RAW API HELPERS - For accessing volume24h field not available in SDK
 # =============================================================================
+
+def fetch_top_markets_by_volume24h(limit: int = 50) -> List[Dict]:
+    """
+    Fetch top N markets sorted by volume24h using raw API.
+
+    PERFORMANCE OPTIMIZATION:
+    Instead of fetching ALL 140 markets and filtering later, this directly
+    fetches the top N most active markets by 24h volume. This dramatically
+    reduces the number of orderbook fetches needed.
+
+    Example:
+        - OLD: Fetch 140 markets, get orderbooks for 280 outcomes, filter → 40 min
+        - NEW: Fetch top 40, get orderbooks for 80 outcomes, filter → 10 min
+        Result: 3.5× faster!
+
+    Args:
+        limit: Number of top markets to fetch (default: 50)
+
+    Returns:
+        List of market dicts with volume24h field included
+    """
+    try:
+        url = "https://proxy.opinion.trade:8443/openapi/market"
+        headers = {"apikey": API_KEY}
+        params = {
+            "status": "activated",
+            "sortBy": 5,  # Sort by volume24h
+            "order": "desc",
+            "limit": limit,
+            "page": 1
+        }
+
+        logger.info(f"🚀 FAST MODE: Fetching top {limit} markets by volume24h from raw API...")
+
+        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+        data = response.json()
+
+        if data.get("errno") == 0 and data.get("result"):
+            markets = data["result"].get("list", [])
+
+            # Convert raw API format to SDK-compatible format
+            sdk_format_markets = []
+            for m in markets:
+                sdk_market = {
+                    'market_id': m.get('marketId'),
+                    'market_title': m.get('marketTitle'),
+                    'yes_token_id': m.get('yesTokenId'),
+                    'no_token_id': m.get('noTokenId'),
+                    'cutoff_at': m.get('cutoffAt'),
+                    'volume': m.get('volume'),  # Lifetime
+                    'volume24h': m.get('volume24h'),  # 24h - this is why we use raw API!
+                    'volume7d': m.get('volume7d'),  # Bonus: 7d volume
+                    'status': m.get('status'),
+                    'quote_token': m.get('quoteToken'),
+                    'chain_id': m.get('chainId'),
+                }
+                sdk_format_markets.append(sdk_market)
+
+            logger.info(f"✅ Fetched {len(sdk_format_markets)} top markets (sorted by volume24h)")
+            return sdk_format_markets
+        else:
+            logger.error(f"❌ Raw API error: {data.get('errmsg')}")
+            return []
+
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch top markets: {e}")
+        return []
+
 
 def fetch_market_volume24h(market_id: int) -> Optional[float]:
     """
@@ -305,13 +383,20 @@ class MarketAnalyzer:
         # Calculate score using liquidity farming weights
         # bias_score: 50% (MAIN edge), volume: 35%, spread: 15%
 
-        # IMPORTANT: API doesn't return volume24h, use lifetime 'volume' instead
-        # This is total volume since market creation (better than 0!)
-        volume_str = market.get('volume', '0')
-        try:
-            volume_24h = float(volume_str)
-        except (ValueError, TypeError):
-            volume_24h = 0.0
+        # Volume: prefer volume24h if available (from raw API), fallback to lifetime volume
+        volume_24h_str = market.get('volume24h')  # From raw API (--top-volume mode)
+        if volume_24h_str:
+            try:
+                volume_24h = float(volume_24h_str)
+            except (ValueError, TypeError):
+                volume_24h = 0.0
+        else:
+            # Fallback: use lifetime volume from SDK
+            volume_str = market.get('volume', '0')
+            try:
+                volume_24h = float(volume_str)
+            except (ValueError, TypeError):
+                volume_24h = 0.0
 
         # Calculate bias_score (60-85% sweet spot)
         from scoring import calculate_bias_score
@@ -353,7 +438,8 @@ class MarketAnalyzer:
         min_spread_pct: float = 0.0,
         min_prob: float = 0.66,
         max_prob: float = 0.85,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        top_volume: Optional[int] = None
     ) -> List[OutcomeOpportunity]:
         """
         Scan all markets and return filtered opportunities.
@@ -362,7 +448,8 @@ class MarketAnalyzer:
             min_spread_pct: Minimum spread % (default: 0.0 - no filter!)
             min_prob: Minimum outcome probability (default: 0.66 - biased markets only)
             max_prob: Maximum outcome probability (default: 0.85 - sweet spot 66-85%)
-            limit: Limit scan to first N markets (default: None - scan all)
+            limit: Limit scan to first N markets from SDK (default: None - scan all)
+            top_volume: FAST MODE - Fetch top N markets by volume24h from raw API (default: None)
 
         Returns:
             List of OutcomeOpportunity objects
@@ -379,20 +466,31 @@ class MarketAnalyzer:
         logger.info(f"   - Min spread: {min_spread_pct}% (0% = no filter)")
         logger.info("")
 
-        # Fetch all active markets
-        markets = self.client.get_all_active_markets()
+        # Fetch markets (FAST MODE: top by volume24h, or SLOW MODE: all from SDK)
+        if top_volume and top_volume > 0:
+            # FAST MODE: Fetch top N markets sorted by volume24h from raw API
+            markets = fetch_top_markets_by_volume24h(limit=top_volume)
+            if not markets:
+                logger.error("❌ Failed to fetch markets from raw API, falling back to SDK...")
+                markets = self.client.get_all_active_markets()[:top_volume]
+        else:
+            # SLOW MODE: Fetch all markets from SDK (unsorted)
+            markets = self.client.get_all_active_markets()
 
         if not markets:
             logger.warning("No active markets found!")
             return []
 
-        # Apply limit if specified
+        # Apply limit if specified (only for SDK mode)
         total_available = len(markets)
-        if limit and limit > 0:
+        if limit and limit > 0 and not top_volume:
             markets = markets[:limit]
             logger.info(f"   Found {total_available} active markets (limiting scan to first {len(markets)})")
         else:
-            logger.info(f"   Found {len(markets)} active markets")
+            if top_volume:
+                logger.info(f"   Using top {len(markets)} markets by volume24h (sorted)")
+            else:
+                logger.info(f"   Found {len(markets)} active markets")
 
         logger.info("")
 
@@ -483,7 +581,7 @@ class MarketAnalyzer:
         print(f"📈 TOP {len(top_opps)} OPPORTUNITIES:")
         print()
         print("┌──────┬────────┬────────┬────────┬─────────┬────────┬──────────┬────────┐")
-        print("│ Rank │ Mkt ID │ Outcme │ Spread │  Prob   │  Bias  │ Vol (LT) │  Score │")
+        print("│ Rank │ Mkt ID │ Outcme │ Spread │  Prob   │  Bias  │  Volume  │  Score │")
         print("├──────┼────────┼────────┼────────┼─────────┼────────┼──────────┼────────┤")
 
         for i, opp in enumerate(top_opps, 1):
@@ -623,12 +721,24 @@ def main():
     )
 
     parser.add_argument(
+        '--top-volume',
+        type=int,
+        default=None,
+        metavar='N',
+        help='🚀 FAST MODE: Fetch only top N markets by volume24h (3.5× faster!). '
+             'Uses raw API sorted by volume24h, then fetches orderbooks only for top N. '
+             'Example: --top-volume 40 → fetches 80 orderbooks instead of 280 (10 min vs 40 min). '
+             'Recommended: 40-50 for production, 20 for testing.'
+    )
+
+    parser.add_argument(
         '--limit',
         type=int,
         default=None,
         metavar='N',
-        help='PERFORMANCE: Limit scan to first N markets (for testing/fast scans). '
-             'Example: --limit 50 scans only first 50 markets instead of all 140+'
+        help='SLOWER: Limit scan to first N markets from SDK (unsorted). '
+             'Use --top-volume instead for better performance. '
+             'Example: --limit 50 scans only first 50 markets (but not sorted by volume)'
     )
 
     parser.add_argument(
@@ -673,7 +783,8 @@ def main():
             min_spread_pct=args.min_spread,
             min_prob=args.min_prob,
             max_prob=args.max_prob,
-            limit=args.limit
+            limit=args.limit,
+            top_volume=args.top_volume
         )
     except Exception as e:
         logger.error(f"❌ Error scanning markets: {e}")
