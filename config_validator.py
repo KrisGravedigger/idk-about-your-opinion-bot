@@ -363,12 +363,13 @@ def validate_full_config(config_dict: dict) -> Tuple[bool, List[str], List[str]]
         if warn:
             warnings.append(f"Scoring Weights: {warn}")
 
-    # Check minimum balance vs capital
-    if 'min_balance_to_continue_usdt' in config_dict and 'capital_amount_usdt' in config_dict:
-        if config_dict['min_balance_to_continue_usdt'] > config_dict['capital_amount_usdt']:
-            warnings.append(
-                "Minimum Balance is higher than Capital Amount - bot may stop immediately"
-            )
+    # Check minimum balance vs capital (only in Fixed Amount mode)
+    if config_dict.get('capital_mode') == 'fixed':
+        if 'min_balance_to_continue_usdt' in config_dict and 'capital_amount_usdt' in config_dict:
+            if config_dict['min_balance_to_continue_usdt'] > config_dict['capital_amount_usdt']:
+                warnings.append(
+                    "Minimum Balance to Continue is higher than Fixed Amount - bot may stop immediately after first trade"
+                )
 
     return (len(errors) == 0, errors, warnings)
 

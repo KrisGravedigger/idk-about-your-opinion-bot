@@ -82,7 +82,7 @@ class BotLauncherGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Opinion Trading Bot - Configuration & Launcher v0.3")
-        self.root.geometry("1000x750")
+        self.root.geometry("1000x900")
         
         # Initialize variables
         self.config_data: Dict[str, Any] = {}
@@ -1485,20 +1485,42 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 text=True,
                 bufsize=1
             )
-            
+
+            # Monitor bot for early crashes
+            def check_bot_startup():
+                time.sleep(2)  # Wait 2 seconds
+                if self.bot_process and self.bot_process.poll() is not None:
+                    # Bot crashed!
+                    stderr_output = self.bot_process.stderr.read() if self.bot_process.stderr else ""
+                    stdout_output = self.bot_process.stdout.read() if self.bot_process.stdout else ""
+
+                    error_msg = f"Bot crashed immediately after startup!\n\n"
+                    error_msg += f"Exit code: {self.bot_process.returncode}\n\n"
+
+                    if stderr_output:
+                        error_msg += f"Error output:\n{stderr_output[:500]}\n\n"
+                    if stdout_output:
+                        error_msg += f"Output:\n{stdout_output[:500]}"
+
+                    # Show error in GUI thread
+                    self.root.after(0, lambda: messagebox.showerror("Bot Crashed", error_msg))
+                    self.root.after(0, lambda: self.update_status_bar("❌ Bot crashed on startup"))
+
+            # Start monitoring thread
+            threading.Thread(target=check_bot_startup, daemon=True).start()
+
             # Update UI
             self.start_button.config(state='disabled')
             self.stop_button.config(state='normal')
             self.bot_status_label.config(text="🟢 Running", foreground="green")
             self.pid_label.config(text=str(self.bot_process.pid))
-            
+
             # Start runtime counter
             self.bot_start_time = time.time()
             self.update_runtime()
-            
-            self.update_status_bar(f"✅ Bot started successfully (PID: {self.bot_process.pid})")
-            messagebox.showinfo("Bot Started", f"Bot started successfully!\n\nPID: {self.bot_process.pid}\n\nView logs for details.")
-            
+
+            self.update_status_bar(f"✅ Bot started (PID: {self.bot_process.pid}). Monitoring startup...")
+
         except Exception as e:
             messagebox.showerror("Start Failed", f"Failed to start bot:\n\n{str(e)}")
             self.update_status_bar(f"❌ Failed to start bot: {str(e)}")
@@ -1629,13 +1651,21 @@ Note: Credentials remain in .env file (not affected by this import)."""
             try:
                 import requests
                 api_host = self.api_host_var.get()
-                response = requests.get(f"{api_host}/health", timeout=5)
+                # Try to get markets list (real API endpoint)
+                response = requests.get(f"{api_host}/markets", timeout=10)
                 if response.status_code == 200:
+                    data = response.json()
                     results_text.insert('end', f"   ✅ API is reachable: {api_host}\n", 'success')
+                    results_text.insert('end', f"   ℹ️  Found {len(data)} markets\n", 'info')
                 else:
-                    results_text.insert('end', f"   ⚠️  API returned status {response.status_code}\n", 'warning')
+                    results_text.insert('end', f"   ❌ API returned status {response.status_code}\n", 'error')
+                    results_text.insert('end', f"   Response: {response.text[:100]}\n", 'error')
+            except requests.exceptions.Timeout:
+                results_text.insert('end', f"   ❌ API request timed out\n", 'error')
+            except requests.exceptions.ConnectionError:
+                results_text.insert('end', f"   ❌ Cannot connect to API - check internet connection\n", 'error')
             except Exception as e:
-                results_text.insert('end', f"   ❌ Cannot reach API: {str(e)}\n", 'error')
+                results_text.insert('end', f"   ❌ API test failed: {str(e)}\n", 'error')
             
             results_text.insert('end', "\n")
             
