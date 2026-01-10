@@ -11,10 +11,11 @@ Liquidity Farming Strategy:
     3. SPREAD (bonus): Nice to have, but NOT the primary goal (even 1% is OK!)
 
 Usage:
-    python market_analyzer.py                    # Default: 66-85% probability
-    python market_analyzer.py --min-prob 0.60    # Custom probability range
-    python market_analyzer.py --no-csv           # Skip CSV export
-    python market_analyzer.py --top 50           # Show top 50 results
+    python market_analyzer.py                        # Default: 66-85% probability
+    python market_analyzer.py --min-prob 0.60        # Custom probability range
+    python market_analyzer.py --no-csv               # Skip CSV export
+    python market_analyzer.py --top 50               # Show top 50 results
+    python market_analyzer.py --refine-top-n 20      # Hybrid: refine top 20 with volume24h
 
 Scoring (how opportunities are ranked):
     - Bias score: 50% weight (MAIN edge - orderbook imbalance 60-85% sweet spot)
@@ -26,6 +27,20 @@ Important:
     - Focus is on PROBABILITY EDGE (66-85% biased markets)
     - Even 1-2% spread is profitable with probability edge + market making
 
+Hybrid Optimization (--refine-top-n):
+    SDK returns lifetime 'volume' but not 'volume24h'. Raw API has volume24h.
+
+    WITHOUT --refine-top-n (default):
+        - Uses lifetime volume from SDK (fast, 1 API call)
+        - Good approximation for most cases
+
+    WITH --refine-top-n 20:
+        - Step 1: Rank all ~140 markets by lifetime volume (SDK - fast)
+        - Step 2: Fetch precise volume24h for top 20 (raw API - 20 calls)
+        - Step 3: Re-rank top 20 with accurate 24h volume
+        - Result: 85% fewer API calls vs fetching volume24h for all markets
+        - Best for: Finding most active opportunities with precise recent volume
+
 Output:
     - Console table with top N opportunities
     - CSV export with all filtered results
@@ -34,13 +49,16 @@ Output:
 
 import argparse
 import csv
+import math
+import os
+import requests
 from datetime import datetime
 from typing import List, Dict, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # Local imports
 from api_client import OpinionClient, create_client
-from config import SPREAD_FARMING_CONFIG
+from config import SPREAD_FARMING_CONFIG, API_KEY
 from scoring import calculate_bid_volume_percentage, calculate_bias_score
 from utils import calculate_spread, format_price, format_percent
 from logger_config import setup_logger
@@ -48,6 +66,133 @@ from logger_config import setup_logger
 # Initialize logger
 logger = setup_logger(__name__)
 
+# Disable SSL warnings for raw API calls (Opinion.trade uses self-signed cert)
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+# =============================================================================
+# RAW API HELPERS - For accessing volume24h field not available in SDK
+# =============================================================================
+
+def fetch_market_volume24h(market_id: int) -> Optional[float]:
+    """
+    Fetch precise 24h volume for a specific market using raw API.
+
+    The SDK doesn't return volume24h, but the raw OpenAPI endpoint does.
+    This function makes a direct HTTP call to get the accurate 24h volume.
+
+    Args:
+        market_id: Market ID to fetch
+
+    Returns:
+        24h volume in USDT, or None if fetch failed
+    """
+    try:
+        url = "https://proxy.opinion.trade:8443/openapi/market"
+        headers = {"apikey": API_KEY}
+        params = {
+            "status": "activated",
+            "marketId": market_id,
+            "limit": 1
+        }
+
+        response = requests.get(url, headers=headers, params=params, verify=False, timeout=10)
+        data = response.json()
+
+        if data.get("errno") == 0 and data.get("result"):
+            markets = data["result"].get("list", [])
+            if markets:
+                volume24h_str = markets[0].get("volume24h", "0")
+                return float(volume24h_str)
+
+        return None
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch volume24h for market {market_id}: {e}")
+        return None
+
+
+def refine_opportunities_with_volume24h(
+    opportunities: List['OutcomeOpportunity'],
+    top_n: int = 20
+) -> List['OutcomeOpportunity']:
+    """
+    Refine top N opportunities by fetching precise 24h volume and recalculating scores.
+
+    Hybrid Optimization Strategy:
+    1. Initial ranking uses lifetime volume from SDK (fast, 1 API call for all markets)
+    2. For top N results, fetch precise volume24h from raw API (N additional calls)
+    3. Recalculate scores with accurate 24h volume
+    4. Re-rank the top N opportunities
+
+    This approach is 85% faster than fetching volume24h for all 140+ markets upfront.
+
+    Args:
+        opportunities: List of opportunities sorted by score (lifetime volume)
+        top_n: Number of top opportunities to refine (default: 20)
+
+    Returns:
+        Updated list with top N re-ranked by volume24h, rest unchanged
+    """
+    if not opportunities or top_n <= 0:
+        return opportunities
+
+    logger.info(f"🔄 Refining top {top_n} opportunities with precise volume24h...")
+
+    # Split into top N and rest
+    top_opportunities = opportunities[:top_n]
+    rest_opportunities = opportunities[top_n:]
+
+    # Fetch volume24h for each top opportunity and recalculate score
+    refined = []
+    volume24h_cache = {}  # Cache: {market_id: volume24h} (avoid duplicate fetches for YES/NO)
+
+    for opp in top_opportunities:
+        # Fetch volume24h if not already fetched for this market
+        if opp.market_id not in volume24h_cache:
+            volume24h = fetch_market_volume24h(opp.market_id)
+            volume24h_cache[opp.market_id] = volume24h
+        else:
+            volume24h = volume24h_cache[opp.market_id]  # Use cached value
+
+        if volume24h is not None:
+            # Recalculate score with accurate 24h volume
+            # Scoring weights: bias_score 50%, volume 35%, spread 15%
+            bias_score = calculate_bias_score(opp.bid_volume_pct)
+            volume_score = min(math.log10(max(volume24h, 1)) / 5.0, 1.0)
+            spread_score = min(opp.spread_pct / 20.0, 1.0)
+
+            new_score = (bias_score * 0.50) + (volume_score * 0.35) + (spread_score * 0.15)
+            new_score *= 100  # Scale to 0-100
+
+            # Create updated opportunity with new volume and score
+            updated_opp = replace(opp, volume_24h=volume24h, score=new_score)
+            refined.append(updated_opp)
+
+            # Log changes
+            volume_change_pct = ((volume24h - opp.volume_24h) / opp.volume_24h * 100) if opp.volume_24h > 0 else 0
+            logger.debug(
+                f"  Market {opp.market_id}: "
+                f"volume ${opp.volume_24h:,.0f} → ${volume24h:,.0f} ({volume_change_pct:+.1f}%), "
+                f"score {opp.score:.1f} → {new_score:.1f}"
+            )
+        else:
+            # Keep original if fetch failed
+            refined.append(opp)
+
+    # Re-rank the refined top N by new scores
+    refined.sort(key=lambda x: x.score, reverse=True)
+
+    logger.info(f"✅ Refined {len(refined)} opportunities with precise volume24h")
+
+    # Return refined top N + unchanged rest
+    return refined + rest_opportunities
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
 
 @dataclass
 class OutcomeOpportunity:
@@ -456,6 +601,16 @@ def main():
     )
 
     parser.add_argument(
+        '--refine-top-n',
+        type=int,
+        default=None,
+        metavar='N',
+        help='HYBRID OPTIMIZATION: Refine top N results with precise volume24h from raw API. '
+             'Fetches accurate 24h volume for top N opportunities and re-ranks them. '
+             'Example: --refine-top-n 20 (85%% faster than fetching all markets)'
+    )
+
+    parser.add_argument(
         '--no-csv',
         action='store_true',
         help='Skip CSV export'
@@ -486,6 +641,25 @@ def main():
         import traceback
         traceback.print_exc()
         return 1
+
+    # HYBRID OPTIMIZATION: Refine top N with precise volume24h
+    if args.refine_top_n and args.refine_top_n > 0:
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🚀 HYBRID OPTIMIZATION ENABLED")
+        logger.info(f"   Initial ranking: lifetime volume (SDK - fast)")
+        logger.info(f"   Refinement: top {args.refine_top_n} with precise volume24h (raw API)")
+        logger.info("=" * 80)
+        logger.info("")
+
+        try:
+            opportunities = refine_opportunities_with_volume24h(
+                opportunities,
+                top_n=args.refine_top_n
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Volume24h refinement failed: {e}")
+            logger.info("   Continuing with lifetime volume rankings...")
 
     # Get total counts for statistics
     markets = client.get_all_active_markets()
