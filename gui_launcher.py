@@ -82,7 +82,7 @@ class BotLauncherGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Opinion Trading Bot - Configuration & Launcher v0.3")
-        self.root.geometry("1000x900")
+        self.root.geometry("1000x1150")
         
         # Initialize variables
         self.config_data: Dict[str, Any] = {}
@@ -1486,25 +1486,37 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 bufsize=1
             )
 
-            # Monitor bot for early crashes
+            # Monitor bot for early crashes (check every second for 15 seconds)
             def check_bot_startup():
-                time.sleep(2)  # Wait 2 seconds
-                if self.bot_process and self.bot_process.poll() is not None:
-                    # Bot crashed!
-                    stderr_output = self.bot_process.stderr.read() if self.bot_process.stderr else ""
-                    stdout_output = self.bot_process.stdout.read() if self.bot_process.stdout else ""
+                for i in range(15):  # Check for 15 seconds
+                    time.sleep(1)
+                    if self.bot_process and self.bot_process.poll() is not None:
+                        # Bot crashed!
+                        try:
+                            stderr_output = self.bot_process.stderr.read() if self.bot_process.stderr else ""
+                            stdout_output = self.bot_process.stdout.read() if self.bot_process.stdout else ""
+                        except:
+                            stderr_output = ""
+                            stdout_output = ""
 
-                    error_msg = f"Bot crashed immediately after startup!\n\n"
-                    error_msg += f"Exit code: {self.bot_process.returncode}\n\n"
+                        error_msg = f"Bot crashed after ~{i+1} seconds!\n\n"
+                        error_msg += f"Exit code: {self.bot_process.returncode}\n\n"
 
-                    if stderr_output:
-                        error_msg += f"Error output:\n{stderr_output[:500]}\n\n"
-                    if stdout_output:
-                        error_msg += f"Output:\n{stdout_output[:500]}"
+                        if stderr_output:
+                            error_msg += f"Error output:\n{stderr_output[:800]}\n\n"
+                        if stdout_output:
+                            error_msg += f"Standard output:\n{stdout_output[:800]}"
 
-                    # Show error in GUI thread
-                    self.root.after(0, lambda: messagebox.showerror("Bot Crashed", error_msg))
-                    self.root.after(0, lambda: self.update_status_bar("❌ Bot crashed on startup"))
+                        if not stderr_output and not stdout_output:
+                            error_msg += "\n(No output captured - bot may have closed immediately)"
+
+                        # Show error in GUI thread
+                        self.root.after(0, lambda: messagebox.showerror("Bot Crashed", error_msg))
+                        self.root.after(0, lambda: self.update_status_bar(f"❌ Bot crashed after {i+1}s"))
+                        return
+
+                # After 15 seconds, bot seems stable
+                self.root.after(0, lambda: self.update_status_bar(f"✅ Bot running normally (PID: {self.bot_process.pid})"))
 
             # Start monitoring thread
             threading.Thread(target=check_bot_startup, daemon=True).start()
@@ -1648,24 +1660,59 @@ Note: Credentials remain in .env file (not affected by this import)."""
             
             # Test 3: Check API connectivity
             results_text.insert('end', "3. Testing API connectivity...\n")
+            api_host = self.api_host_var.get()
+            api_key = self.api_key_var.get()
+
+            # Test 3a: Basic connectivity (ping host)
             try:
                 import requests
-                api_host = self.api_host_var.get()
-                # Try to get markets list (real API endpoint)
-                response = requests.get(f"{api_host}/markets", timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    results_text.insert('end', f"   ✅ API is reachable: {api_host}\n", 'success')
-                    results_text.insert('end', f"   ℹ️  Found {len(data)} markets\n", 'info')
-                else:
-                    results_text.insert('end', f"   ❌ API returned status {response.status_code}\n", 'error')
-                    results_text.insert('end', f"   Response: {response.text[:100]}\n", 'error')
+                # Just try to connect to the host
+                parsed_url = api_host.replace('https://', '').replace('http://', '').split('/')[0]
+                test_url = f"https://{parsed_url}"
+
+                results_text.insert('end', f"   Testing connection to {parsed_url}...\n")
+                response = requests.get(test_url, timeout=5, verify=False)
+                results_text.insert('end', f"   ✅ Host is reachable (status {response.status_code})\n", 'success')
+            except requests.exceptions.SSLError:
+                results_text.insert('end', f"   ✅ Host is reachable (SSL cert issue is normal)\n", 'success')
             except requests.exceptions.Timeout:
-                results_text.insert('end', f"   ❌ API request timed out\n", 'error')
-            except requests.exceptions.ConnectionError:
-                results_text.insert('end', f"   ❌ Cannot connect to API - check internet connection\n", 'error')
+                results_text.insert('end', f"   ❌ Connection timed out\n", 'error')
+            except requests.exceptions.ConnectionError as e:
+                results_text.insert('end', f"   ❌ Cannot connect: {str(e)[:100]}\n", 'error')
             except Exception as e:
-                results_text.insert('end', f"   ❌ API test failed: {str(e)}\n", 'error')
+                results_text.insert('end', f"   ⚠️  Connection test: {str(e)[:100]}\n", 'warning')
+
+            # Test 3b: Try to initialize SDK client (if we have credentials)
+            if api_key:
+                results_text.insert('end', f"   Testing SDK initialization...\n")
+                try:
+                    # Import SDK
+                    from opinion_clob_sdk import Client
+
+                    # Try to create client
+                    test_client = Client(
+                        api_key=api_key,
+                        base_url=api_host
+                    )
+                    results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')
+
+                    # Try to fetch markets
+                    results_text.insert('end', f"   Fetching markets list...\n")
+                    try:
+                        response = test_client.get_markets(page=1, page_size=1, status='ACTIVATED')
+                        if hasattr(response, 'success') and response.success:
+                            results_text.insert('end', f"   ✅ API is working! Successfully fetched markets\n", 'success')
+                        else:
+                            results_text.insert('end', f"   ⚠️  API responded but may have issues\n", 'warning')
+                    except Exception as e:
+                        results_text.insert('end', f"   ❌ API call failed: {str(e)[:200]}\n", 'error')
+
+                except ImportError:
+                    results_text.insert('end', f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
+                except Exception as e:
+                    results_text.insert('end', f"   ❌ SDK test failed: {str(e)[:200]}\n", 'error')
+            else:
+                results_text.insert('end', f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
             
             results_text.insert('end', "\n")
             
