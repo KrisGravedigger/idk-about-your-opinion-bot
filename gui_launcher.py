@@ -1481,13 +1481,18 @@ Note: Credentials remain in .env file (not affected by this import)."""
             return
         
         try:
+            # Prepare environment with unbuffered output
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'  # Force unbuffered output (immediate logs)
+
             # Launch bot subprocess
             self.bot_process = subprocess.Popen(
                 [sys.executable, "autonomous_bot_main.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                env=env
             )
 
             # Monitor bot for early crashes (check every second for 15 seconds)
@@ -1693,10 +1698,13 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     # Import SDK
                     from opinion_clob_sdk import Client
 
-                    # Try to create client (note: parameter is 'apikey' not 'api_key')
+                    # Try to create client (using correct SDK parameters)
                     test_client = Client(
+                        host=api_host,
                         apikey=api_key,
-                        base_url=api_host
+                        chain_id=56,  # BSC mainnet
+                        private_key=self.private_key_var.get() if self.private_key_var.get() else "0" * 64,
+                        rpc_url=self.rpc_url_var.get()
                     )
                     results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')
 
@@ -1706,15 +1714,25 @@ Note: Credentials remain in .env file (not affected by this import)."""
                         response = test_client.get_markets(page=1, page_size=1, status='ACTIVATED')
                         if hasattr(response, 'success') and response.success:
                             results_text.insert('end', f"   ✅ API is working! Successfully fetched markets\n", 'success')
+                        elif hasattr(response, 'result'):
+                            results_text.insert('end', f"   ✅ API responded with data\n", 'success')
                         else:
-                            results_text.insert('end', f"   ⚠️  API responded but may have issues\n", 'warning')
+                            results_text.insert('end', f"   ⚠️  API responded but format unexpected\n", 'warning')
                     except Exception as e:
-                        results_text.insert('end', f"   ❌ API call failed: {str(e)[:200]}\n", 'error')
+                        error_str = str(e)
+                        if "401" in error_str or "unauthorized" in error_str.lower():
+                            results_text.insert('end', f"   ❌ API key is invalid (401 Unauthorized)\n", 'error')
+                        else:
+                            results_text.insert('end', f"   ❌ API call failed: {error_str[:200]}\n", 'error')
 
                 except ImportError:
                     results_text.insert('end', f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
                 except Exception as e:
-                    results_text.insert('end', f"   ❌ SDK test failed: {str(e)[:200]}\n", 'error')
+                    error_str = str(e)
+                    if "apikey" in error_str.lower():
+                        results_text.insert('end', f"   ❌ Invalid API key format\n", 'error')
+                    else:
+                        results_text.insert('end', f"   ❌ SDK test failed: {error_str[:200]}\n", 'error')
             else:
                 results_text.insert('end', f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
             
