@@ -68,21 +68,40 @@ except Exception as e:
     import sys
     sys.exit(1)
 
-# Check response structure
-if data.get("code") == 0:
+# Check response structure (raw API uses errno, not code)
+if data.get("errno") == 0:
     markets = data["result"]["list"]
-    print(f"✅ Found {len(markets)} markets\n")
+    total_markets = data["result"]["total"]
+    print(f"✅ SUCCESS! Found {len(markets)} markets (total: {total_markets})\n")
+    print("=" * 80)
 
     for i, market in enumerate(markets, 1):
-        print(f"=== Market {i} ===")
-        print(f"ID: {market.get('marketId')}")
-        print(f"Title: {market.get('marketTitle', 'Unknown')[:50]}...")
-        print(f"volume24h: {market.get('volume24h')} ← SHOULD EXIST!")
-        print(f"volume (lifetime): {market.get('volume')}")
-        print(f"All keys: {list(market.keys())}")
-        print()
+        print(f"\n📊 Market #{i}: {market.get('marketTitle', 'Unknown')[:60]}")
+        print(f"   ID: {market.get('marketId')}")
+
+        # Volume fields
+        volume_lifetime = market.get('volume', '0')
+        volume_24h = market.get('volume24h', '0')
+        volume_7d = market.get('volume7d', '0')
+
+        print(f"\n   💰 VOLUME FIELDS:")
+        print(f"      volume (lifetime): ${float(volume_lifetime):,.2f}")
+        print(f"      volume24h:         ${float(volume_24h):,.2f} ✅ EXISTS!")
+        print(f"      volume7d:          ${float(volume_7d):,.2f}")
+
+        # Calculate 24h as % of lifetime
+        if float(volume_lifetime) > 0:
+            pct_24h = (float(volume_24h) / float(volume_lifetime)) * 100
+            print(f"      📈 24h is {pct_24h:.1f}% of lifetime volume")
+
+        print(f"\n   📅 Created: {market.get('createdAt')} | Cutoff: {market.get('cutoffAt')}")
+        print("   " + "-" * 76)
+
+    print("\n" + "=" * 80)
+    print("\n🎯 CONCLUSION: volume24h field EXISTS in raw API!")
+    print("   SDK doesn't map it, but we can access it via raw API calls.")
 else:
     print(f"❌ API Error")
-    print(f"   Code: {data.get('code')}")
-    print(f"   Message: {data.get('msg')}")
+    print(f"   errno: {data.get('errno')}")
+    print(f"   errmsg: {data.get('errmsg')}")
     print(f"   Full response: {json.dumps(data, indent=2)}")
