@@ -145,6 +145,28 @@ OUTCOME_MAX_PROBABILITY = 0.84  # Skip if implied probability > 80%
 OUTCOME_PROBABILITY_METHOD = 'mid_price'
 
 # =============================================================================
+# LIQUIDITY FARMING STRATEGY PARAMETERS
+# =============================================================================
+
+# Enable liquidity farming mode (probability edge + market making)
+# This strategy targets markets with 66-85% probability bias where you have edge
+USE_LIQUIDITY_FARMING = False  # Set True to activate
+
+# When USE_LIQUIDITY_FARMING = True, these parameters override defaults:
+LIQUIDITY_FARMING_CONFIG = {
+    'scoring_profile': 'liquidity_farming',
+    'outcome_min_probability': 0.66,  # Only biased markets (66-85% sweet spot)
+    'outcome_max_probability': 0.85,
+    'min_spread_pct': 0.0,            # No spread requirement (even 1% is OK!)
+    'orderbook_balance_range': None,  # Disable hard filter, use bias_score for ranking
+    'min_hours_until_close': None,    # Timeframe not critical
+}
+
+# Backward compatibility (deprecated - use LIQUIDITY_FARMING instead)
+USE_SPREAD_FARMING = False  # DEPRECATED: Use USE_LIQUIDITY_FARMING
+SPREAD_FARMING_CONFIG = LIQUIDITY_FARMING_CONFIG  # Points to new config
+
+# =============================================================================
 # MARKET FILTERS
 # =============================================================================
 
@@ -336,7 +358,20 @@ def validate_config():
     
     if SAFETY_MARGIN_CENTS < 0.0001 or SAFETY_MARGIN_CENTS > 0.01:
         errors.append(f"SAFETY_MARGIN_CENTS must be 0.0001-0.01, got {SAFETY_MARGIN_CENTS}")
-    
+
+    # Check liquidity farming configuration
+    if USE_LIQUIDITY_FARMING:
+        # Validate liquidity_farming profile exists
+        if 'liquidity_farming' not in SCORING_PROFILES:
+            errors.append("USE_LIQUIDITY_FARMING is True but 'liquidity_farming' profile not found in SCORING_PROFILES")
+
+    # Backward compatibility check
+    if USE_SPREAD_FARMING and not USE_LIQUIDITY_FARMING:
+        warnings.append(
+            "USE_SPREAD_FARMING is deprecated. Please use USE_LIQUIDITY_FARMING instead. "
+            "For now, it will use LIQUIDITY_FARMING_CONFIG automatically."
+        )
+
     return (len(errors) == 0, errors, warnings)
 
 
@@ -374,6 +409,28 @@ SCORING_PROFILES = {
         },
         'bonus_multiplier': 1.2,
         'invert_spread': False,
+    },
+    'spread_farming': {
+        'description': '[DEPRECATED] Use liquidity_farming instead',
+        'weights': {
+            'spread': 0.60,
+            'volume_24h': 0.25,
+            'bias_score': 0.15,
+        },
+        'bonus_multiplier': 1.5,
+        'invert_spread': False,
+        'min_spread_pct': 5.0,
+    },
+    'liquidity_farming': {
+        'description': 'Probability edge + liquidity provision (66-85% biased markets)',
+        'weights': {
+            'bias_score': 0.50,    # Main edge: probability advantage
+            'volume_24h': 0.35,    # Liquidity for market making
+            'spread': 0.15,        # Bonus only
+        },
+        'bonus_multiplier': 1.5,
+        'invert_spread': False,
+        'min_spread_pct': 0.0,     # No minimum spread!
     },
 }
 

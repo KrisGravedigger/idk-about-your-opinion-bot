@@ -213,6 +213,11 @@ def main():
         BONUS_MARKETS_FILE,
         DEFAULT_SCORING_PROFILE,
 
+        # Liquidity Farming
+        USE_LIQUIDITY_FARMING,
+        LIQUIDITY_FARMING_CONFIG,
+        USE_SPREAD_FARMING,  # Backward compatibility
+
         # Telegram
         TELEGRAM_HEARTBEAT_INTERVAL_HOURS
     )
@@ -277,7 +282,44 @@ def main():
         # Logging
         'LOG_FILE': 'opinion_farming_bot.log'
     }
-    
+
+    # =========================================================================
+    # APPLY LIQUIDITY FARMING OVERRIDES
+    # =========================================================================
+    # Support both USE_LIQUIDITY_FARMING and USE_SPREAD_FARMING (backward compat)
+    if USE_LIQUIDITY_FARMING or USE_SPREAD_FARMING:
+        strategy_name = "Liquidity Farming" if USE_LIQUIDITY_FARMING else "Spread Farming (deprecated)"
+        strategy_config = LIQUIDITY_FARMING_CONFIG  # Both point to same config now
+
+        logger.info(f"🎯 {strategy_name} mode ACTIVE - applying overrides...")
+        logger.info(f"   Scoring profile: {strategy_config['scoring_profile']}")
+        logger.info(f"   Probability range: {strategy_config['outcome_min_probability']*100:.0f}%-{strategy_config['outcome_max_probability']*100:.0f}%")
+        logger.info(f"   Min spread: {strategy_config['min_spread_pct']}% (0% = no filter)")
+
+        # Override config with liquidity farming parameters
+        config['SCORING_PROFILE'] = strategy_config['scoring_profile']
+
+        # Override outcome filters
+        # Note: These are module-level imports, so we need to import and patch them
+        import config as config_module
+        config_module.OUTCOME_MIN_PROBABILITY = strategy_config['outcome_min_probability']
+        config_module.OUTCOME_MAX_PROBABILITY = strategy_config['outcome_max_probability']
+
+        # Override orderbook balance range (None = disable hard filter)
+        if strategy_config['orderbook_balance_range'] is not None:
+            config_module.ORDERBOOK_BALANCE_RANGE = strategy_config['orderbook_balance_range']
+        else:
+            config_module.ORDERBOOK_BALANCE_RANGE = None
+
+        # Override min hours until close (None = disable filter)
+        if strategy_config['min_hours_until_close'] is not None:
+            config_module.MIN_HOURS_UNTIL_CLOSE = strategy_config['min_hours_until_close']
+        else:
+            config_module.MIN_HOURS_UNTIL_CLOSE = None
+
+        logger.info("   ✓ Overrides applied")
+        logger.info("")
+
     # Display config summary
     display_config_summary(config)
     
