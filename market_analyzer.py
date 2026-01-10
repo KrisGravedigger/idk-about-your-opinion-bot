@@ -11,11 +11,13 @@ Liquidity Farming Strategy:
     3. SPREAD (bonus): Nice to have, but NOT the primary goal (even 1% is OK!)
 
 Usage:
-    python market_analyzer.py                        # Default: 66-85% probability
+    python market_analyzer.py                        # Default: scan all 140+ markets
+    python market_analyzer.py --limit 50             # Fast: scan only first 50 markets
     python market_analyzer.py --min-prob 0.60        # Custom probability range
     python market_analyzer.py --no-csv               # Skip CSV export
     python market_analyzer.py --top 50               # Show top 50 results
     python market_analyzer.py --refine-top-n 20      # Hybrid: refine top 20 with volume24h
+    python market_analyzer.py --limit 50 --refine-top-n 20  # Fast scan + refinement
 
 Scoring (how opportunities are ranked):
     - Bias score: 50% weight (MAIN edge - orderbook imbalance 60-85% sweet spot)
@@ -26,6 +28,13 @@ Important:
     - Spread is NOT a hard filter anymore (defaults to 0%)
     - Focus is on PROBABILITY EDGE (66-85% biased markets)
     - Even 1-2% spread is profitable with probability edge + market making
+
+Performance (--limit N):
+    Scanning 140+ markets takes ~30-40 minutes (280 orderbook fetches).
+    Use --limit to speed up testing:
+        - --limit 50  → ~10 minutes (100 fetches)
+        - --limit 20  → ~5 minutes (40 fetches)
+    Good for testing filters before full scan.
 
 Hybrid Optimization (--refine-top-n):
     SDK returns lifetime 'volume' but not 'volume24h'. Raw API has volume24h.
@@ -343,7 +352,8 @@ class MarketAnalyzer:
         self,
         min_spread_pct: float = 0.0,
         min_prob: float = 0.66,
-        max_prob: float = 0.85
+        max_prob: float = 0.85,
+        limit: Optional[int] = None
     ) -> List[OutcomeOpportunity]:
         """
         Scan all markets and return filtered opportunities.
@@ -352,6 +362,7 @@ class MarketAnalyzer:
             min_spread_pct: Minimum spread % (default: 0.0 - no filter!)
             min_prob: Minimum outcome probability (default: 0.66 - biased markets only)
             max_prob: Maximum outcome probability (default: 0.85 - sweet spot 66-85%)
+            limit: Limit scan to first N markets (default: None - scan all)
 
         Returns:
             List of OutcomeOpportunity objects
@@ -375,7 +386,14 @@ class MarketAnalyzer:
             logger.warning("No active markets found!")
             return []
 
-        logger.info(f"   Found {len(markets)} active markets")
+        # Apply limit if specified
+        total_available = len(markets)
+        if limit and limit > 0:
+            markets = markets[:limit]
+            logger.info(f"   Found {total_available} active markets (limiting scan to first {len(markets)})")
+        else:
+            logger.info(f"   Found {len(markets)} active markets")
+
         logger.info("")
 
         opportunities = []
@@ -383,10 +401,21 @@ class MarketAnalyzer:
         rejected_spread = 0
         rejected_probability = 0
 
-        # Analyze each market
+        # Analyze each market with improved progress tracking
+        from datetime import datetime
+        start_time = datetime.now()
+
         for i, market in enumerate(markets):
-            if (i + 1) % 50 == 0:
-                logger.info(f"   Progress: {i + 1}/{len(markets)} markets...")
+            # Progress every 10 markets
+            if (i + 1) % 10 == 0 or i == 0:
+                elapsed = (datetime.now() - start_time).total_seconds()
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                remaining = (len(markets) - i - 1) / rate if rate > 0 else 0
+                logger.info(
+                    f"   📊 Progress: {i + 1}/{len(markets)} markets "
+                    f"({(i+1)/len(markets)*100:.0f}%) | "
+                    f"⏱️  {elapsed:.0f}s elapsed, ~{remaining:.0f}s remaining"
+                )
 
             market_id = market.get('market_id')
             yes_token_id = market.get('yes_token_id')
@@ -594,6 +623,15 @@ def main():
     )
 
     parser.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        metavar='N',
+        help='PERFORMANCE: Limit scan to first N markets (for testing/fast scans). '
+             'Example: --limit 50 scans only first 50 markets instead of all 140+'
+    )
+
+    parser.add_argument(
         '--top',
         type=int,
         default=20,
@@ -634,7 +672,8 @@ def main():
         opportunities = analyzer.scan_markets(
             min_spread_pct=args.min_spread,
             min_prob=args.min_prob,
-            max_prob=args.max_prob
+            max_prob=args.max_prob,
+            limit=args.limit
         )
     except Exception as e:
         logger.error(f"❌ Error scanning markets: {e}")
