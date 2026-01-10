@@ -292,7 +292,7 @@ class SellHandler:
 
         elif status in ['timeout', 'deteriorated']:
             logger.warning(f"SELL order {status}: {result.get('reason')}")
-            logger.info("Cancelling and finding new market...")
+            logger.info("Cancelling order and retrying with competitive price...")
 
             # Cancel order if still active
             try:
@@ -301,9 +301,15 @@ class SellHandler:
             except:
                 pass
 
-            # Reset position and go back to scanning
-            self.state_manager.reset_position(self.state)
-            self.state['stage'] = 'SCANNING'
+            # Go back to BUY_FILLED to place new SELL with competitive price
+            self.state['stage'] = 'BUY_FILLED'
+
+            # Clear old SELL data
+            if 'sell_order_id' in position:
+                del position['sell_order_id']
+            if 'sell_price' in position:
+                del position['sell_price']
+
             self.state_manager.save_state(self.state)
 
             return True

@@ -502,9 +502,10 @@ def main():
                     logger.info("   🔍 Checking if SELL order already exists...")
                     existing_sell_order = None
                     try:
+                        # Check for ACTIVE orders (status='1'), not FILLED
                         orders = client.get_my_orders(
                             market_id=market_id,
-                            status='FILLED',
+                            status='1',  # 1 = ACTIVE orders
                             limit=20
                         )
 
@@ -514,7 +515,7 @@ def main():
                             order_amount = float(order.get('order_amount', 0) or 0)
 
                             # Side: 1=BUY, 2=SELL
-                            if order_side == 2 and filled_amount < order_amount:
+                            if order_side == 2:
                                 existing_sell_order = order
                                 logger.info(f"   ✅ Found existing SELL order: {order.get('order_id')[:40]}...")
                                 logger.info(f"      Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
