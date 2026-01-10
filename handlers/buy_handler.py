@@ -38,7 +38,7 @@ class BuyHandler:
         self.bot = bot
         self.client = bot.client
         self.config = bot.config
-        self.state = bot.state
+        # REMOVED: self.state = bot.state (use self.bot.state instead to avoid stale references)
         self.state_manager = bot.state_manager
         self.validator = bot.validator
         self.recovery = bot.recovery
@@ -107,8 +107,8 @@ class BuyHandler:
         logger.info("📋 BUY_PLACED - Transitioning to monitoring")
 
         # Simply transition to monitoring
-        self.state['stage'] = 'BUY_MONITORING'
-        self.state_manager.save_state(self.state)
+        self.bot.state['stage'] = 'BUY_MONITORING'
+        self.state_manager.save_state(self.bot.state)
 
         return True
 
@@ -121,7 +121,7 @@ class BuyHandler:
         """
         logger.info("⏳ BUY_MONITORING - Waiting for fill...")
 
-        position = self.state['current_position']
+        position = self.bot.state['current_position']
         order_id = position['order_id']
         market_id = position['market_id']
 
@@ -143,7 +143,7 @@ class BuyHandler:
                     position['token_id'] = token_result.token_id
                     logger.info(f"   ✅ Also recovered token_id")
 
-                self.state_manager.save_state(self.state)
+                self.state_manager.save_state(self.bot.state)
                 logger.info("✅ order_id recovered and saved to state")
                 logger.info("📍 Continuing with normal BUY monitoring...")
                 logger.info("")
@@ -167,24 +167,24 @@ class BuyHandler:
                     except ValueError as e:
                         logger.error(f"   Failed to calculate avg_fill_price: {e}")
                         logger.info("   Resetting to SCANNING")
-                        self.state_manager.reset_position(self.state)
-                        self.state['stage'] = 'SCANNING'
-                        self.state_manager.save_state(self.state)
+                        self.state_manager.reset_position(self.bot.state)
+                        self.bot.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.bot.state)
                         return True
 
                     position['fill_timestamp'] = get_timestamp()
 
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state_manager.save_state(self.state)
+                    self.bot.state['stage'] = 'BUY_FILLED'
+                    self.state_manager.save_state(self.bot.state)
                     return True
                 else:
                     logger.warning(f"⚠️ No pending order AND no filled position")
                     logger.warning(f"   Order may have been cancelled or doesn't exist")
                     logger.info("   Resetting to SCANNING to find new market")
 
-                self.state_manager.reset_position(self.state)
-                self.state['stage'] = 'SCANNING'
-                self.state_manager.save_state(self.state)
+                self.state_manager.reset_position(self.bot.state)
+                self.bot.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.bot.state)
                 return True
 
         # SELF-HEALING: Verify order is still active before starting monitor
@@ -254,15 +254,15 @@ class BuyHandler:
                     except ValueError as e:
                         logger.error(f"   Failed to calculate avg_fill_price: {e}")
                         logger.info("   Resetting to SCANNING")
-                        self.state_manager.reset_position(self.state)
-                        self.state['stage'] = 'SCANNING'
-                        self.state_manager.save_state(self.state)
+                        self.state_manager.reset_position(self.bot.state)
+                        self.bot.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.bot.state)
                         return True
 
                     position['fill_timestamp'] = get_timestamp()
 
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state_manager.save_state(self.state)
+                    self.bot.state['stage'] = 'BUY_FILLED'
+                    self.state_manager.save_state(self.bot.state)
                     return True
 
                 else:
@@ -280,18 +280,18 @@ class BuyHandler:
                     elif order_status == 'CANCELLED':
                         logger.info(f"   Order was CANCELLED without fill - reset to find new market")
 
-                        self.state_manager.reset_position(self.state)
-                        self.state['stage'] = 'SCANNING'
-                        self.state_manager.save_state(self.state)
+                        self.state_manager.reset_position(self.bot.state)
+                        self.bot.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.bot.state)
                         return True
 
                     else:
                         logger.warning(f"   Order not found in API and no position exists")
                         logger.info(f"   Resetting to SCANNING for new market")
 
-                        self.state_manager.reset_position(self.state)
-                        self.state['stage'] = 'SCANNING'
-                        self.state_manager.save_state(self.state)
+                        self.state_manager.reset_position(self.bot.state)
+                        self.bot.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.bot.state)
                         return True
 
             # Order exists and is active - proceed with normal monitoring
@@ -320,7 +320,7 @@ class BuyHandler:
             timeout_at = datetime.now() + timedelta(hours=timeout_hours)
 
         # Create monitor and start monitoring
-        monitor = BuyMonitor(self.config, self.client, self.state, heartbeat_callback=self.bot._check_and_send_heartbeat)
+        monitor = BuyMonitor(self.config, self.client, self.bot.state, heartbeat_callback=self.bot._check_and_send_heartbeat)
 
         result = monitor.monitor_until_filled(order_id, timeout_at)
 
@@ -403,8 +403,8 @@ class BuyHandler:
                 outcome=outcome
             )
 
-            self.state['stage'] = 'BUY_FILLED'
-            self.state_manager.save_state(self.state)
+            self.bot.state['stage'] = 'BUY_FILLED'
+            self.state_manager.save_state(self.bot.state)
 
             return True
 
@@ -421,9 +421,9 @@ class BuyHandler:
                     pass
 
             # Reset position and go back to scanning
-            self.state_manager.reset_position(self.state)
-            self.state['stage'] = 'SCANNING'
-            self.state_manager.save_state(self.state)
+            self.state_manager.reset_position(self.bot.state)
+            self.bot.state['stage'] = 'SCANNING'
+            self.state_manager.save_state(self.bot.state)
 
             return True
 
@@ -439,7 +439,7 @@ class BuyHandler:
         """
         logger.info("💰 BUY_FILLED - Preparing SELL order...")
 
-        position = self.state['current_position']
+        position = self.bot.state['current_position']
         market_id = position['market_id']
         token_id = position.get('token_id')
         filled_amount = position['filled_amount']
@@ -455,14 +455,14 @@ class BuyHandler:
                 recalculated_price = self._calculate_avg_fill_price(position, filled_amount)
                 position['avg_fill_price'] = recalculated_price
                 position['filled_usdt'] = filled_amount * recalculated_price
-                self.state_manager.save_state(self.state)
+                self.state_manager.save_state(self.bot.state)
                 logger.info(f"   ✅ Corrected avg_fill_price: ${avg_fill_price:.4f} → ${recalculated_price:.4f}")
             except ValueError as e:
                 logger.error(f"   ❌ Could not recalculate avg_fill_price: {e}")
                 logger.info("   Resetting to SCANNING")
-                self.state_manager.reset_position(self.state)
-                self.state['stage'] = 'SCANNING'
-                self.state_manager.save_state(self.state)
+                self.state_manager.reset_position(self.bot.state)
+                self.bot.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.bot.state)
                 return False
 
         # Validate token_id
@@ -474,16 +474,16 @@ class BuyHandler:
             logger.error(f"   Cannot place SELL without valid token_id")
             logger.info(f"   Resetting to SCANNING")
 
-            self.state_manager.reset_position(self.state)
-            self.state['stage'] = 'SCANNING'
-            self.state_manager.save_state(self.state)
+            self.state_manager.reset_position(self.bot.state)
+            self.bot.state['stage'] = 'SCANNING'
+            self.state_manager.save_state(self.bot.state)
             return False
 
         # Update token_id if it was recovered
         if recovered_token_id and recovered_token_id != token_id:
             token_id = recovered_token_id
             position['token_id'] = token_id
-            self.state_manager.save_state(self.state)
+            self.state_manager.save_state(self.bot.state)
             logger.info(f"   💾 State updated with valid token_id")
 
         logger.info(f"✅ token_id validated: {token_id[:20]}...")
@@ -497,9 +497,9 @@ class BuyHandler:
             logger.warning(f"⚠️ Position verification failed: {error_msg}")
             logger.info("   Resetting to SCANNING to find new market")
 
-            self.state_manager.reset_position(self.state)
-            self.state['stage'] = 'SCANNING'
-            self.state_manager.save_state(self.state)
+            self.state_manager.reset_position(self.bot.state)
+            self.bot.state['stage'] = 'SCANNING'
+            self.state_manager.save_state(self.bot.state)
             return True
 
         # Update filled_amount if actual differs from expected
@@ -507,16 +507,16 @@ class BuyHandler:
             logger.info(f"   Updating filled_amount: {filled_amount:.4f} → {actual_tokens:.4f}")
             filled_amount = actual_tokens
             position['filled_amount'] = actual_tokens
-            self.state_manager.save_state(self.state)
+            self.state_manager.save_state(self.bot.state)
 
         # Check if position is dust
         dust_result = self.validator.check_dust_position_by_shares(filled_amount)
 
         if not dust_result.is_valid:
             # Reset and find new market
-            self.state_manager.reset_position(self.state)
-            self.state['stage'] = 'SCANNING'
-            self.state_manager.save_state(self.state)
+            self.state_manager.reset_position(self.bot.state)
+            self.bot.state['stage'] = 'SCANNING'
+            self.state_manager.save_state(self.bot.state)
             return True
 
         # Get fresh orderbook for SELL pricing
@@ -535,9 +535,9 @@ class BuyHandler:
 
             if not value_result.is_valid:
                 # Reset and find new market
-                self.state_manager.reset_position(self.state)
-                self.state['stage'] = 'SCANNING'
-                self.state_manager.save_state(self.state)
+                self.state_manager.reset_position(self.bot.state)
+                self.bot.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.bot.state)
                 return True
 
             # Handle edge case: empty orderbook
@@ -580,7 +580,7 @@ class BuyHandler:
                     old_amount = filled_amount
                     filled_amount = existing_amount
                     position['filled_amount'] = filled_amount
-                    self.state_manager.save_state(self.state)
+                    self.state_manager.save_state(self.bot.state)
 
                     logger.info(f"   📝 Updated SELL amount: {old_amount:.4f} → {filled_amount:.4f} shares")
                 elif existing_amount < filled_amount:
@@ -590,15 +590,15 @@ class BuyHandler:
 
                     filled_amount = existing_amount
                     position['filled_amount'] = filled_amount
-                    self.state_manager.save_state(self.state)
+                    self.state_manager.save_state(self.bot.state)
 
                     # Re-check if still above dust threshold
                     if filled_amount < 5.0:
                         logger.warning("   ⚠️ After adjustment, position is now dust!")
                         logger.info("   Abandoning and resetting to SCANNING")
-                        self.state_manager.reset_position(self.state)
-                        self.state['stage'] = 'SCANNING'
-                        self.state_manager.save_state(self.state)
+                        self.state_manager.reset_position(self.bot.state)
+                        self.bot.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.bot.state)
                         return True
                 else:
                     logger.info(f"   ✅ No dust - amounts match")
@@ -631,8 +631,8 @@ class BuyHandler:
             position['sell_price'] = sell_price
             position['sell_placed_at'] = get_timestamp()
 
-            self.state['stage'] = 'SELL_PLACED'
-            self.state_manager.save_state(self.state)
+            self.bot.state['stage'] = 'SELL_PLACED'
+            self.state_manager.save_state(self.bot.state)
 
             # Send Telegram notification
             self.telegram.send_state_change(

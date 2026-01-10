@@ -36,7 +36,7 @@ class SellHandler:
         self.bot = bot
         self.client = bot.client
         self.config = bot.config
-        self.state = bot.state
+        # REMOVED: self.state = bot.state (use self.bot.state instead to avoid stale references)
         self.state_manager = bot.state_manager
         self.validator = bot.validator
         self.tracker = bot.tracker
@@ -51,8 +51,8 @@ class SellHandler:
         logger.info("📋 SELL_PLACED - Transitioning to monitoring")
 
         # Simply transition to monitoring
-        self.state['stage'] = 'SELL_MONITORING'
-        self.state_manager.save_state(self.state)
+        self.bot.state['stage'] = 'SELL_MONITORING'
+        self.state_manager.save_state(self.bot.state)
 
         return True
 
@@ -66,7 +66,7 @@ class SellHandler:
         """
         logger.info("⏳ SELL_MONITORING - Waiting for fill...")
 
-        position = self.state['current_position']
+        position = self.bot.state['current_position']
         sell_order_id = position['sell_order_id']
         market_id = position['market_id']
 
@@ -126,9 +126,9 @@ class SellHandler:
                     logger.info("💡 Action: Resetting to SCANNING")
 
                     # Reset and find new market
-                    self.state_manager.reset_position(self.state)
-                    self.state['stage'] = 'SCANNING'
-                    self.state_manager.save_state(self.state)
+                    self.state_manager.reset_position(self.bot.state)
+                    self.bot.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.bot.state)
                     return True
 
                 if tokens >= 1.0:  # Still have significant tokens
@@ -144,8 +144,8 @@ class SellHandler:
                     if 'sell_price' in position:
                         del position['sell_price']
 
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state_manager.save_state(self.state)
+                    self.bot.state['stage'] = 'BUY_FILLED'
+                    self.state_manager.save_state(self.bot.state)
                     return True
 
                 else:
@@ -154,15 +154,15 @@ class SellHandler:
                     if order_details and is_fully_filled:
                         logger.info(f"   SELL order completed successfully")
                         logger.info("   Marking as COMPLETED")
-                        self.state['stage'] = 'COMPLETED'
-                        self.state_manager.save_state(self.state)
+                        self.bot.state['stage'] = 'COMPLETED'
+                        self.state_manager.save_state(self.bot.state)
                         return True
                     else:
                         logger.info(f"   Order terminal without completion - resetting to SCANNING")
 
-                        self.state_manager.reset_position(self.state)
-                        self.state['stage'] = 'SCANNING'
-                        self.state_manager.save_state(self.state)
+                        self.state_manager.reset_position(self.bot.state)
+                        self.bot.state['stage'] = 'SCANNING'
+                        self.state_manager.save_state(self.bot.state)
                         return True
 
             # If we reach here, order is NOT terminal - proceed with monitoring
@@ -190,7 +190,7 @@ class SellHandler:
             timeout_at = datetime.now() + timedelta(hours=timeout_hours)
 
         # Create monitor and start monitoring
-        monitor = SellMonitor(self.config, self.client, self.state, heartbeat_callback=self.bot._check_and_send_heartbeat)
+        monitor = SellMonitor(self.config, self.client, self.bot.state, heartbeat_callback=self.bot._check_and_send_heartbeat)
 
         result = monitor.monitor_until_filled(sell_order_id, timeout_at)
 
@@ -238,8 +238,8 @@ class SellHandler:
                 pnl_percent=float(pnl.pnl_percent)
             )
 
-            self.state['stage'] = 'COMPLETED'
-            self.state_manager.save_state(self.state)
+            self.bot.state['stage'] = 'COMPLETED'
+            self.state_manager.save_state(self.bot.state)
 
             return True
 
@@ -248,7 +248,7 @@ class SellHandler:
             logger.info("Retrying SELL order...")
 
             # Go back to BUY_FILLED to place new SELL
-            self.state['stage'] = 'BUY_FILLED'
+            self.bot.state['stage'] = 'BUY_FILLED'
 
             # Clear old SELL data
             if 'sell_order_id' in position:
@@ -256,7 +256,7 @@ class SellHandler:
             if 'sell_price' in position:
                 del position['sell_price']
 
-            self.state_manager.save_state(self.state)
+            self.state_manager.save_state(self.bot.state)
 
             return True
 
@@ -279,14 +279,14 @@ class SellHandler:
             )
 
             # Update statistics (record as loss)
-            stats = self.state['statistics']
+            stats = self.bot.state['statistics']
             stats['losses'] += 1
             stats['consecutive_losses'] += 1
 
             # Reset position
-            self.state_manager.reset_position(self.state)
-            self.state['stage'] = 'SCANNING'
-            self.state_manager.save_state(self.state)
+            self.state_manager.reset_position(self.bot.state)
+            self.bot.state['stage'] = 'SCANNING'
+            self.state_manager.save_state(self.bot.state)
 
             return True
 
@@ -302,7 +302,7 @@ class SellHandler:
                 pass
 
             # Go back to BUY_FILLED to place new SELL with competitive price
-            self.state['stage'] = 'BUY_FILLED'
+            self.bot.state['stage'] = 'BUY_FILLED'
 
             # Clear old SELL data
             if 'sell_order_id' in position:
@@ -310,7 +310,7 @@ class SellHandler:
             if 'sell_price' in position:
                 del position['sell_price']
 
-            self.state_manager.save_state(self.state)
+            self.state_manager.save_state(self.bot.state)
 
             return True
 

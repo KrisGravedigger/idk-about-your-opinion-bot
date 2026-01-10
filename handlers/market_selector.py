@@ -39,7 +39,7 @@ class MarketSelector:
         self.bot = bot
         self.client = bot.client
         self.config = bot.config
-        self.state = bot.state
+        # REMOVED: self.state = bot.state (use self.bot.state instead to avoid stale references)
         self.state_manager = bot.state_manager
         self.scanner = bot.scanner
         self.pricing = bot.pricing
@@ -115,8 +115,8 @@ class MarketSelector:
                 logger.info(f"   💡 Skipping this position - will look for new opportunities")
                 return False
 
-            self.state['stage'] = 'BUY_FILLED'
-            self.state['current_position'] = {
+            self.bot.state['stage'] = 'BUY_FILLED'
+            self.bot.state['current_position'] = {
                 'market_id': market_id,
                 'token_id': token_id,
                 'outcome_side': outcome_side_enum,
@@ -126,7 +126,7 @@ class MarketSelector:
                 'filled_usdt': shares * avg_price,
                 'fill_timestamp': get_timestamp()
             }
-            self.state_manager.save_state(self.state)
+            self.state_manager.save_state(self.bot.state)
             return True
 
         except Exception as e:
@@ -206,8 +206,8 @@ class MarketSelector:
                     logger.info(f"🔄 Recovering to BUY_FILLED stage...")
 
                     # Build minimal position state
-                    self.state['stage'] = 'BUY_FILLED'
-                    self.state['current_position'] = {
+                    self.bot.state['stage'] = 'BUY_FILLED'
+                    self.bot.state['current_position'] = {
                         'market_id': selected_market.market_id,
                         'token_id': selected_market.yes_token_id,
                         'outcome_side': selected_market.outcome_side,
@@ -217,7 +217,7 @@ class MarketSelector:
                         'filled_usdt': shares * buy_price,
                         'fill_timestamp': get_timestamp()
                     }
-                    self.state_manager.save_state(self.state)
+                    self.state_manager.save_state(self.bot.state)
                     return {'recovered': True}
 
             return None
@@ -238,8 +238,8 @@ class MarketSelector:
         logger.info(f"💾 Saving state IMMEDIATELY to prevent order loss...")
 
         # Update state
-        self.state['stage'] = 'BUY_PLACED'
-        self.state['current_position'] = {
+        self.bot.state['stage'] = 'BUY_PLACED'
+        self.bot.state['current_position'] = {
             'market_id': selected_market.market_id,
             'token_id': selected_market.yes_token_id,
             'outcome_side': selected_market.outcome_side,
@@ -253,7 +253,7 @@ class MarketSelector:
         }
 
         # SAVE IMMEDIATELY
-        self.state_manager.save_state(self.state)
+        self.state_manager.save_state(self.bot.state)
 
         logger.info(f"✅ State saved with order_id: {order_id}")
         logger.info(f"📍 Next stage: BUY_PLACED → BUY_MONITORING")
@@ -346,8 +346,8 @@ class MarketSelector:
 
             # Validate orderbook
             if not self.validate_orderbook(best_bid, best_ask):
-                self.state['stage'] = 'SCANNING'
-                self.state_manager.save_state(self.state)
+                self.bot.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.bot.state)
                 return False
 
             spread = best_ask - best_bid
@@ -362,8 +362,8 @@ class MarketSelector:
                 logger.info("Bot will exit - please add funds")
 
                 # Cancel any orphaned orders
-                if 'current_position' in self.state and 'order_id' in self.state['current_position']:
-                    orphaned_order_id = self.state['current_position']['order_id']
+                if 'current_position' in self.bot.state and 'order_id' in self.bot.state['current_position']:
+                    orphaned_order_id = self.bot.state['current_position']['order_id']
                     logger.warning(f"⚠️ Found orphaned order from previous attempt: {orphaned_order_id}")
                     logger.info(f"🧹 Cancelling orphaned order...")
                     try:
@@ -372,15 +372,15 @@ class MarketSelector:
                     except Exception as cancel_err:
                         logger.warning(f"⚠️ Could not cancel orphaned order: {cancel_err}")
 
-                self.state_manager.reset_position(self.state)
-                self.state['stage'] = 'IDLE'
-                self.state_manager.save_state(self.state)
+                self.state_manager.reset_position(self.bot.state)
+                self.bot.state['stage'] = 'IDLE'
+                self.state_manager.save_state(self.bot.state)
                 return False
             except PositionTooSmallError as e:
                 logger.error(f"Position too small: {e}")
                 logger.info("Adjust CAPITAL settings in config")
-                self.state['stage'] = 'IDLE'
-                self.state_manager.save_state(self.state)
+                self.bot.state['stage'] = 'IDLE'
+                self.state_manager.save_state(self.bot.state)
                 return False
 
             logger.info(f"   Position size: {format_usdt(position_size)}")
