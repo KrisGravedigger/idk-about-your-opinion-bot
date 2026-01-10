@@ -38,7 +38,7 @@ headers = {
     "apikey": API_KEY
 }
 params = {
-    "status": 2,  # ACTIVATED
+    "status": "activated",  # Must be string: 'activated' or 'resolved'
     "sortBy": 5,  # Sort by volume24h (based on docs)
     "limit": 5,
     "page": 1
