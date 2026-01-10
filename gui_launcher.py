@@ -554,23 +554,37 @@ class BotLauncherGUI:
         ToolTip(improvement_frame.winfo_children()[-1], "Price improvement for WIDE spread markets.\n\nDefault: 0.30\nExample: 0.30 = improve by $0.30")
         
         # === Precision Section ===
-        precision_frame = ttk.LabelFrame(scrollable_frame, text="Precision & Safety", padding=10)
+        precision_frame = ttk.LabelFrame(scrollable_frame, text="Precision & Safety (Advanced)", padding=10)
         precision_frame.pack(fill='x', padx=10, pady=5)
-        
-        ttk.Label(precision_frame, text="Safety Margin (cents):").grid(row=0, column=0, sticky='w', pady=5)
+
+        # Lock checkbox
+        self.enable_precision_edit_var = tk.BooleanVar(value=False)
+        cb_precision = ttk.Checkbutton(
+            precision_frame,
+            text="⚠️ Enable editing (Advanced users only)",
+            variable=self.enable_precision_edit_var,
+            command=self.on_precision_toggle
+        )
+        cb_precision.grid(row=0, column=0, columnspan=3, sticky='w', pady=5)
+        ToolTip(cb_precision, "⚠️ WARNING: Don't change these values unless you know what you're doing!\n\nThese settings control critical calculation precision.\nIncorrect values can cause rounding errors or trading failures.")
+
+        ttk.Label(precision_frame, text="Safety Margin (cents):").grid(row=1, column=0, sticky='w', pady=5)
         self.safety_margin_var = tk.DoubleVar(value=0.001)
-        ttk.Entry(precision_frame, textvariable=self.safety_margin_var, width=10).grid(row=0, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(precision_frame.winfo_children()[-1], "Safety margin for price calculations.\n\nDefault: 0.001 ($0.001)\nPrevents rounding errors")
-        
-        ttk.Label(precision_frame, text="Price Decimals:").grid(row=1, column=0, sticky='w', pady=5)
+        self.safety_margin_entry = ttk.Entry(precision_frame, textvariable=self.safety_margin_var, width=10, state='disabled')
+        self.safety_margin_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
+        ToolTip(self.safety_margin_entry, "Safety margin for price calculations.\n\nDefault: 0.001 ($0.001)\nPrevents rounding errors")
+
+        ttk.Label(precision_frame, text="Price Decimals:").grid(row=2, column=0, sticky='w', pady=5)
         self.price_decimals_var = tk.IntVar(value=3)
-        ttk.Spinbox(precision_frame, from_=1, to=6, textvariable=self.price_decimals_var, width=10).grid(row=1, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(precision_frame.winfo_children()[-1], "Decimal places for prices.\n\nDefault: 3\nExample: 3 = $0.500")
-        
-        ttk.Label(precision_frame, text="Amount Decimals:").grid(row=2, column=0, sticky='w', pady=5)
+        self.price_decimals_spinbox = ttk.Spinbox(precision_frame, from_=1, to=6, textvariable=self.price_decimals_var, width=10, state='disabled')
+        self.price_decimals_spinbox.grid(row=2, column=1, sticky='w', pady=5, padx=5)
+        ToolTip(self.price_decimals_spinbox, "Decimal places for prices.\n\nDefault: 3\nExample: 3 = $0.500")
+
+        ttk.Label(precision_frame, text="Amount Decimals:").grid(row=3, column=0, sticky='w', pady=5)
         self.amount_decimals_var = tk.IntVar(value=2)
-        ttk.Spinbox(precision_frame, from_=0, to=6, textvariable=self.amount_decimals_var, width=10).grid(row=2, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(precision_frame.winfo_children()[-1], "Decimal places for amounts.\n\nDefault: 2\nExample: 2 = 100.25 shares")
+        self.amount_decimals_spinbox = ttk.Spinbox(precision_frame, from_=0, to=6, textvariable=self.amount_decimals_var, width=10, state='disabled')
+        self.amount_decimals_spinbox.grid(row=3, column=1, sticky='w', pady=5, padx=5)
+        ToolTip(self.amount_decimals_spinbox, "Decimal places for amounts.\n\nDefault: 2\nExample: 2 = 100.25 shares")
         
         return frame
         
@@ -593,20 +607,25 @@ class BotLauncherGUI:
         cb_stoploss.pack(anchor='w', pady=5)
         ToolTip(cb_stoploss, "Enable automatic stop-loss when position loses value.\n\nDefault: Enabled (recommended)\nDisable only for testing")
         
-        ttk.Label(stoploss_frame, text="Stop-Loss Trigger (%):").pack(anchor='w', pady=5)
+        # Stop-Loss Trigger with slider and label on right
+        sl_container = ttk.Frame(stoploss_frame)
+        sl_container.pack(fill='x', pady=5)
+
+        ttk.Label(sl_container, text="Stop-Loss Trigger (%):").pack(side='left', padx=(0, 10))
+
         self.stop_loss_trigger_var = tk.DoubleVar(value=-10.0)
         self.stop_loss_scale = ttk.Scale(
-            stoploss_frame,
+            sl_container,
             from_=-50, to=0,
             variable=self.stop_loss_trigger_var,
             orient='horizontal',
-            length=300,
+            length=250,
             command=self.update_stop_loss_label
         )
-        self.stop_loss_scale.pack(fill='x', pady=5)
-        
-        self.stop_loss_label = ttk.Label(stoploss_frame, text="-10.0%")
-        self.stop_loss_label.pack(anchor='w', pady=5)
+        self.stop_loss_scale.pack(side='left', fill='x', expand=True)
+
+        self.stop_loss_label = ttk.Label(sl_container, text="-10.0%", width=8)
+        self.stop_loss_label.pack(side='left', padx=(10, 0))
         ToolTip(self.stop_loss_scale, "Trigger stop-loss when position loses this %.\n\nDefault: -10%\nExample: -10 = sell if position down 10%\nRecommended: -5% to -15%")
         
         ttk.Label(stoploss_frame, text="Stop-Loss Aggressive Offset:").pack(anchor='w', pady=5)
@@ -627,35 +646,47 @@ class BotLauncherGUI:
         cb_liquidity.pack(anchor='w', pady=5)
         ToolTip(cb_liquidity, "Cancel orders if liquidity drops significantly.\n\nDefault: Enabled\nProtects against illiquid markets")
         
-        ttk.Label(liquidity_frame, text="Bid Drop Threshold (%):").pack(anchor='w', pady=5)
+        # Bid Drop Threshold with slider and label on right
+        bid_container = ttk.Frame(liquidity_frame)
+        bid_container.pack(fill='x', pady=5)
+
+        ttk.Label(bid_container, text="Bid Drop Threshold (%):").pack(side='left', padx=(0, 10))
+
         self.liquidity_bid_drop_var = tk.DoubleVar(value=25.0)
-        ttk.Scale(
-            liquidity_frame,
+        bid_scale = ttk.Scale(
+            bid_container,
             from_=0, to=100,
             variable=self.liquidity_bid_drop_var,
             orient='horizontal',
-            length=300
-        ).pack(fill='x', pady=5)
-        
-        liq_bid_label = ttk.Label(liquidity_frame, text="25%")
-        liq_bid_label.pack(anchor='w', pady=5)
+            length=250
+        )
+        bid_scale.pack(side='left', fill='x', expand=True)
+
+        liq_bid_label = ttk.Label(bid_container, text="25%", width=8)
+        liq_bid_label.pack(side='left', padx=(10, 0))
         self.liquidity_bid_drop_var.trace_add('write', lambda *args: liq_bid_label.config(text=f"{self.liquidity_bid_drop_var.get():.0f}%"))
-        ToolTip(liquidity_frame.winfo_children()[-2], "Cancel if bid liquidity drops by this %.\n\nDefault: 25%\nHigher = more tolerant of liquidity changes")
+        ToolTip(bid_scale, "Cancel if bid liquidity drops by this %.\n\nDefault: 25%\nHigher = more tolerant of liquidity changes")
         
-        ttk.Label(liquidity_frame, text="Spread Threshold (%):").pack(anchor='w', pady=5)
+        # Spread Threshold with slider and label on right
+        spread_container = ttk.Frame(liquidity_frame)
+        spread_container.pack(fill='x', pady=5)
+
+        ttk.Label(spread_container, text="Spread Threshold (%):").pack(side='left', padx=(0, 10))
+
         self.liquidity_spread_var = tk.DoubleVar(value=15.0)
-        ttk.Scale(
-            liquidity_frame,
+        spread_scale = ttk.Scale(
+            spread_container,
             from_=0, to=100,
             variable=self.liquidity_spread_var,
             orient='horizontal',
-            length=300
-        ).pack(fill='x', pady=5)
-        
-        liq_spread_label = ttk.Label(liquidity_frame, text="15%")
-        liq_spread_label.pack(anchor='w', pady=5)
+            length=250
+        )
+        spread_scale.pack(side='left', fill='x', expand=True)
+
+        liq_spread_label = ttk.Label(spread_container, text="15%", width=8)
+        liq_spread_label.pack(side='left', padx=(10, 0))
         self.liquidity_spread_var.trace_add('write', lambda *args: liq_spread_label.config(text=f"{self.liquidity_spread_var.get():.0f}%"))
-        ToolTip(liquidity_frame.winfo_children()[-2], "Cancel if spread increases by this %.\n\nDefault: 15%\nHigher = more tolerant of spread widening")
+        ToolTip(spread_scale, "Cancel if spread increases by this %.\n\nDefault: 15%\nHigher = more tolerant of spread widening")
         
         # === Order Timeouts Section ===
         timeout_frame = ttk.LabelFrame(scrollable_frame, text="Order Timeouts", padding=10)
@@ -682,7 +713,15 @@ class BotLauncherGUI:
         enabled = self.enable_stop_loss_var.get()
         state = 'normal' if enabled else 'disabled'
         self.stop_loss_scale.config(state=state)
-        
+
+    def on_precision_toggle(self):
+        """Handle precision settings toggle."""
+        enabled = self.enable_precision_edit_var.get()
+        state = 'normal' if enabled else 'disabled'
+        self.safety_margin_entry.config(state=state)
+        self.price_decimals_spinbox.config(state=state)
+        self.amount_decimals_spinbox.config(state=state)
+
     def create_monitoring_tab(self) -> ttk.Frame:
         """Create Monitoring & Alerts tab."""
         frame = ttk.Frame(self.notebook)
@@ -712,18 +751,34 @@ class BotLauncherGUI:
         # === Alerts Section ===
         alerts_frame = ttk.LabelFrame(scrollable_frame, text="Alert Notifications", padding=10)
         alerts_frame.pack(fill='x', padx=10, pady=5)
-        
+
         self.alert_order_filled_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(alerts_frame, text="Alert on Order Filled", variable=self.alert_order_filled_var).pack(anchor='w', pady=2)
-        
+
         self.alert_position_closed_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(alerts_frame, text="Alert on Position Closed", variable=self.alert_position_closed_var).pack(anchor='w', pady=2)
-        
+
         self.alert_error_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(alerts_frame, text="Alert on Error", variable=self.alert_error_var).pack(anchor='w', pady=2)
-        
+
         self.alert_insufficient_balance_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(alerts_frame, text="Alert on Insufficient Balance", variable=self.alert_insufficient_balance_var).pack(anchor='w', pady=2)
+
+        # Telegram Heartbeat
+        heartbeat_container = ttk.Frame(alerts_frame)
+        heartbeat_container.pack(fill='x', pady=5)
+
+        self.enable_telegram_heartbeat_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            heartbeat_container,
+            text="Telegram Heartbeat every",
+            variable=self.enable_telegram_heartbeat_var
+        ).pack(side='left')
+
+        self.telegram_heartbeat_var = tk.DoubleVar(value=1.0)
+        ttk.Entry(heartbeat_container, textvariable=self.telegram_heartbeat_var, width=8).pack(side='left', padx=5)
+        ttk.Label(heartbeat_container, text="hours").pack(side='left')
+        ToolTip(heartbeat_container, "Send 'I'm alive' message periodically.\n\nDefault: 1.0 hour\nUncheck to disable heartbeat")
         
         # === Intervals Section ===
         intervals_frame = ttk.LabelFrame(scrollable_frame, text="Scan Intervals", padding=10)
@@ -738,12 +793,7 @@ class BotLauncherGUI:
         self.fill_check_interval_var = tk.DoubleVar(value=9.0)
         ttk.Entry(intervals_frame, textvariable=self.fill_check_interval_var, width=10).grid(row=1, column=1, sticky='w', pady=5, padx=5)
         ToolTip(intervals_frame.winfo_children()[-1], "How often to check if orders are filled.\n\nDefault: 9 seconds\nShorter = faster response, more API calls")
-        
-        ttk.Label(intervals_frame, text="Telegram Heartbeat (hours):").grid(row=2, column=0, sticky='w', pady=5)
-        self.telegram_heartbeat_var = tk.DoubleVar(value=1.0)
-        ttk.Entry(intervals_frame, textvariable=self.telegram_heartbeat_var, width=10).grid(row=2, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(intervals_frame.winfo_children()[-1], "Send 'I'm alive' message every X hours.\n\nDefault: 1.0 hour\nSet to 0 to disable heartbeat")
-        
+
         return frame
         
     def browse_log_file(self):
@@ -795,11 +845,23 @@ class BotLauncherGUI:
         self.multi_sig_var = tk.StringVar(value="")
         ttk.Entry(api_frame, textvariable=self.multi_sig_var, width=40).grid(row=2, column=1, sticky='w', pady=5, padx=5)
         ToolTip(api_frame.winfo_children()[-1], "Multi-signature wallet address.\n\nLeave empty for READ-ONLY mode (no trading)\nRequired for live trading")
-        
-        ttk.Label(api_frame, text="API Host:").grid(row=3, column=0, sticky='w', pady=5)
+
+        # API Host with lock
+        self.enable_api_host_edit_var = tk.BooleanVar(value=False)
+        cb_api_host = ttk.Checkbutton(
+            api_frame,
+            text="⚠️ Edit API Host (Advanced)",
+            variable=self.enable_api_host_edit_var,
+            command=self.on_api_host_toggle
+        )
+        cb_api_host.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
+        ToolTip(cb_api_host, "⚠️ WARNING: Don't change unless instructed!\n\nDefault API host works for everyone.\nChanging this may break connectivity.")
+
+        ttk.Label(api_frame, text="API Host:").grid(row=4, column=0, sticky='w', pady=5)
         self.api_host_var = tk.StringVar(value="https://proxy.opinion.trade:8443")
-        ttk.Entry(api_frame, textvariable=self.api_host_var, width=40).grid(row=3, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(api_frame.winfo_children()[-1], "Opinion.trade API endpoint.\n\nDefault: https://proxy.opinion.trade:8443\nDon't change unless instructed")
+        self.api_host_entry = ttk.Entry(api_frame, textvariable=self.api_host_var, width=40, state='disabled')
+        self.api_host_entry.grid(row=4, column=1, sticky='w', pady=5, padx=5)
+        ToolTip(self.api_host_entry, "Opinion.trade API endpoint.\n\nDefault: https://proxy.opinion.trade:8443\nDon't change unless instructed")
         
         # === Telegram Section ===
         telegram_frame = ttk.LabelFrame(scrollable_frame, text="Telegram Notifications", padding=10)
@@ -821,16 +883,28 @@ class BotLauncherGUI:
         ttk.Button(telegram_frame, text="Test Telegram", command=self.test_telegram).grid(row=2, column=1, sticky='w', pady=5)
         
         # === Blockchain Section ===
-        blockchain_frame = ttk.LabelFrame(scrollable_frame, text="Blockchain RPC", padding=10)
+        blockchain_frame = ttk.LabelFrame(scrollable_frame, text="Blockchain RPC (Advanced)", padding=10)
         blockchain_frame.pack(fill='x', padx=10, pady=5)
-        
-        ttk.Label(blockchain_frame, text="RPC URL:").grid(row=0, column=0, sticky='w', pady=5)
+
+        # RPC URL with lock
+        self.enable_rpc_edit_var = tk.BooleanVar(value=False)
+        cb_rpc = ttk.Checkbutton(
+            blockchain_frame,
+            text="⚠️ Edit RPC URL (Advanced)",
+            variable=self.enable_rpc_edit_var,
+            command=self.on_rpc_toggle
+        )
+        cb_rpc.grid(row=0, column=0, columnspan=3, sticky='w', pady=5)
+        ToolTip(cb_rpc, "⚠️ WARNING: Don't change unless you need custom RPC!\n\nDefault BSC RPC works for everyone.\nOnly change if using private RPC node.")
+
+        ttk.Label(blockchain_frame, text="RPC URL:").grid(row=1, column=0, sticky='w', pady=5)
         self.rpc_url_var = tk.StringVar(value="https://bsc-dataseed.binance.org")
-        ttk.Entry(blockchain_frame, textvariable=self.rpc_url_var, width=40).grid(row=0, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(blockchain_frame.winfo_children()[-1], "BSC RPC endpoint.\n\nDefault: https://bsc-dataseed.binance.org\nUsed for blockchain interactions")
-        
-        ttk.Label(blockchain_frame, text="Chain ID:").grid(row=1, column=0, sticky='w', pady=5)
-        ttk.Label(blockchain_frame, text="56 (BSC Mainnet)", foreground="gray").grid(row=1, column=1, sticky='w', pady=5, padx=5)
+        self.rpc_url_entry = ttk.Entry(blockchain_frame, textvariable=self.rpc_url_var, width=40, state='disabled')
+        self.rpc_url_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
+        ToolTip(self.rpc_url_entry, "BSC RPC endpoint.\n\nDefault: https://bsc-dataseed.binance.org\nUsed for blockchain interactions")
+
+        ttk.Label(blockchain_frame, text="Chain ID:").grid(row=2, column=0, sticky='w', pady=5)
+        ttk.Label(blockchain_frame, text="56 (BSC Mainnet)", foreground="gray").grid(row=2, column=1, sticky='w', pady=5, padx=5)
         
         return frame
         
@@ -854,7 +928,19 @@ class BotLauncherGUI:
             self.telegram_token_entry.config(show="")
         else:
             self.telegram_token_entry.config(show="*")
-        
+
+    def on_api_host_toggle(self):
+        """Handle API host edit toggle."""
+        enabled = self.enable_api_host_edit_var.get()
+        state = 'normal' if enabled else 'disabled'
+        self.api_host_entry.config(state=state)
+
+    def on_rpc_toggle(self):
+        """Handle RPC URL edit toggle."""
+        enabled = self.enable_rpc_edit_var.get()
+        state = 'normal' if enabled else 'disabled'
+        self.rpc_url_entry.config(state=state)
+
     def setup_launcher_section(self):
         """Create bot launcher controls."""
         launcher_frame = ttk.LabelFrame(self.root, text="Bot Control", padding=10)
@@ -937,7 +1023,6 @@ class BotLauncherGUI:
         ttk.Button(row1, text="💾 Save Configuration", command=self.save_configuration, width=20).pack(side='left', padx=2)
         ttk.Button(row1, text="📤 Export", command=self.export_configuration, width=15).pack(side='left', padx=2)
         ttk.Button(row1, text="📥 Import", command=self.import_configuration, width=15).pack(side='left', padx=2)
-        ttk.Button(row1, text="↩ Revert", command=self.revert_changes, width=15).pack(side='left', padx=2)
         
         # Row 2: Advanced actions
         row2 = ttk.Frame(action_frame)
@@ -1114,10 +1199,22 @@ class BotLauncherGUI:
         
         # Handle None values for hours
         min_hours = self.min_hours_var.get().strip()
-        data['min_hours_until_close'] = float(min_hours) if min_hours else None
-        
+        if min_hours and min_hours.lower() != 'none':
+            try:
+                data['min_hours_until_close'] = float(min_hours)
+            except ValueError:
+                data['min_hours_until_close'] = None
+        else:
+            data['min_hours_until_close'] = None
+
         max_hours = self.max_hours_var.get().strip()
-        data['max_hours_until_close'] = float(max_hours) if max_hours else None
+        if max_hours and max_hours.lower() != 'none':
+            try:
+                data['max_hours_until_close'] = float(max_hours)
+            except ValueError:
+                data['max_hours_until_close'] = None
+        else:
+            data['max_hours_until_close'] = None
         
         # Trading tab
         data['spread_threshold_1'] = self.spread_threshold_1_var.get()
@@ -1326,12 +1423,6 @@ Note: Credentials remain in .env file (not affected by this import)."""
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import from config.py:\n\n{str(e)}")
-            
-    def revert_changes(self):
-        """Revert to last saved configuration."""
-        if messagebox.askyesno("Revert Changes", "Discard all unsaved changes and reload last saved configuration?"):
-            self.load_configuration()
-            self.update_status_bar("↩ Reverted to last saved configuration")
             
     def new_configuration(self):
         """Create new configuration from defaults."""
