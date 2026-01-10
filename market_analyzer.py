@@ -6,9 +6,10 @@ Market Analyzer - Liquidity Farming Strategy Scout
 Scans Opinion.trade markets for optimal liquidity farming opportunities.
 
 Liquidity Farming Strategy:
-    1. PROBABILITY EDGE (main): Target 66-85% biased markets where you have statistical advantage
-    2. MARKET MAKING (secondary): Provide liquidity and earn from volume over time
-    3. SPREAD (bonus): Nice to have, but NOT the primary goal (even 1% is OK!)
+    1. PROBABILITY EDGE: Target 66-85% biased markets (orderbook imbalance)
+    2. HIGH VOLUME: Better liquidity for market making
+    3. CLOSING SOON: Faster capital turnover, less risk
+    4. SPREAD: Bonus only (even 1% is OK!)
 
 Usage:
     # 🚀 FAST MODE (recommended) - Use top markets by volume24h
@@ -24,8 +25,9 @@ Usage:
     python market_analyzer.py --top-volume 40 --top 50
 
 Scoring (how opportunities are ranked):
-    - Bias score: 50% weight (MAIN edge - orderbook imbalance 60-85% sweet spot)
-    - Volume: 35% weight (liquidity for market making)
+    - Bias score: 35% weight (orderbook imbalance 60-85% sweet spot)
+    - Volume: 25% weight (liquidity for market making)
+    - Time to close: 25% weight (closing soon = faster turnover)
     - Spread: 15% weight (bonus only - NOT a requirement!)
 
 Important:
@@ -280,12 +282,15 @@ def refine_opportunities_with_volume24h(
 
         if volume24h is not None:
             # Recalculate score with accurate 24h volume
-            # Scoring weights: bias_score 50%, volume 35%, spread 15%
+            # NEW WEIGHTS: bias_score 35%, volume 25%, time_to_close 25%, spread 15%
             bias_score = calculate_bias_score(opp.bid_volume_pct)
             volume_score = min(math.log10(max(volume24h, 1)) / 5.0, 1.0)
             spread_score = min(opp.spread_pct / 20.0, 1.0)
 
-            new_score = (bias_score * 0.50) + (volume_score * 0.35) + (spread_score * 0.15)
+            # Time score: markets closing soon = higher score
+            time_score = calculate_time_score(opp.hours_to_close)
+
+            new_score = (bias_score * 0.35) + (volume_score * 0.25) + (time_score * 0.25) + (spread_score * 0.15)
             new_score *= 100  # Scale to 0-100
 
             # Create updated opportunity with new volume and score
@@ -310,6 +315,35 @@ def refine_opportunities_with_volume24h(
 
     # Return refined top N + unchanged rest
     return refined + rest_opportunities
+
+
+def calculate_time_score(hours_to_close: Optional[float]) -> float:
+    """
+    Calculate time-to-close score.
+
+    Markets closing soon = higher score (faster capital turnover, less risk).
+
+    Sweet spot: 1-30 days (24-720 hours)
+    - 24h or less: 1.0 (closing very soon - best!)
+    - 24-720h (1-30 days): linear decay
+    - > 720h (> 30 days): 0.0 (too far away)
+
+    Args:
+        hours_to_close: Hours until market closes (None if no cutoff)
+
+    Returns:
+        Score from 0.0 to 1.0
+    """
+    if hours_to_close is None or hours_to_close < 0:
+        return 0.0  # No cutoff or expired = worst score
+
+    if hours_to_close <= 24:
+        return 1.0  # Closing within 24h = maximum score
+    elif hours_to_close <= 720:  # 30 days
+        # Linear decay: 24h = 1.0, 720h = 0.0
+        return 1.0 - ((hours_to_close - 24) / (720 - 24))
+    else:
+        return 0.0  # Too far away
 
 
 # =============================================================================
@@ -444,12 +478,15 @@ class MarketAnalyzer:
         # Spread score (normalized to 0-1, 20% = 1.0)
         spread_score = min(spread_pct / 20.0, 1.0)
 
-        # Weighted combination (matches liquidity_farming profile)
-        score = (bias_score * 0.50) + (volume_score * 0.35) + (spread_score * 0.15)
-        score *= 100  # Scale to 0-100 for easier reading
-
         # Hours until close
         hours_to_close = self.calculate_hours_until_close(market.get('cutoff_at'))
+
+        # Time score: markets closing soon = higher score (faster capital turnover)
+        time_score = calculate_time_score(hours_to_close)
+
+        # Weighted combination - NEW WEIGHTS: bias 35%, volume 25%, time 25%, spread 15%
+        score = (bias_score * 0.35) + (volume_score * 0.25) + (time_score * 0.25) + (spread_score * 0.15)
+        score *= 100  # Scale to 0-100 for easier reading
 
         return OutcomeOpportunity(
             market_id=market.get('market_id'),
@@ -491,10 +528,11 @@ class MarketAnalyzer:
         """
         logger.info("🔍 Scanning Opinion.trade markets for liquidity farming opportunities...")
         logger.info("")
-        logger.info("📊 STRATEGY:")
-        logger.info(f"   1. PROBABILITY EDGE (50% weight): Target {min_prob*100:.0f}-{max_prob*100:.0f}% biased markets")
-        logger.info(f"   2. MARKET MAKING (35% weight): Orderbook imbalance 60-85% sweet spot")
-        logger.info(f"   3. SPREAD BONUS (15% weight): Any spread is OK (min: {min_spread_pct}%)")
+        logger.info("📊 SCORING WEIGHTS:")
+        logger.info(f"   1. PROBABILITY EDGE (35%): Orderbook imbalance 60-85% sweet spot")
+        logger.info(f"   2. VOLUME (25%): Higher volume = better liquidity")
+        logger.info(f"   3. TIME TO CLOSE (25%): Closing soon = faster capital turnover")
+        logger.info(f"   4. SPREAD (15%): Bonus only, any spread OK (min: {min_spread_pct}%)")
         logger.info("")
         logger.info("📊 FILTERS:")
         logger.info(f"   - Probability: {min_prob*100:.0f}-{max_prob*100:.0f}% (main filter)")
@@ -615,9 +653,9 @@ class MarketAnalyzer:
         print()
         print(f"📈 TOP {len(top_opps)} OPPORTUNITIES:")
         print()
-        print("┌──────┬────────┬────────┬────────┬─────────┬────────┬──────────┬────────┐")
-        print("│ Rank │ Mkt ID │ Outcme │ Spread │  Prob   │  Bias  │  Volume  │  Score │")
-        print("├──────┼────────┼────────┼────────┼─────────┼────────┼──────────┼────────┤")
+        print("┌──────┬────────┬────────┬────────┬─────────┬────────┬──────────┬──────────┬────────┐")
+        print("│ Rank │ Mkt ID │ Outcme │ Spread │  Prob   │  Bias  │  Volume  │  Closes  │  Score │")
+        print("├──────┼────────┼────────┼────────┼─────────┼────────┼──────────┼──────────┼────────┤")
 
         for i, opp in enumerate(top_opps, 1):
             # Format volume with K/M suffix for readability
@@ -629,9 +667,21 @@ class MarketAnalyzer:
             else:
                 vol_str = f"${vol:.0f}"
 
-            print(f"│ {i:4} │ {opp.market_id:6} │ {opp.outcome:6} │ {opp.spread_pct:5.1f}% │ {opp.probability*100:6.1f}% │ {opp.bid_volume_pct:5.1f}% │ {vol_str:>8} │ {opp.score:6.1f} │")
+            # Format time to close
+            if opp.hours_to_close is not None:
+                if opp.hours_to_close < 24:
+                    time_str = f"{opp.hours_to_close:.0f}h"
+                elif opp.hours_to_close < 720:  # < 30 days
+                    days = opp.hours_to_close / 24
+                    time_str = f"{days:.0f}d"
+                else:
+                    time_str = ">30d"
+            else:
+                time_str = "N/A"
 
-        print("└──────┴────────┴────────┴────────┴─────────┴────────┴──────────┴────────┘")
+            print(f"│ {i:4} │ {opp.market_id:6} │ {opp.outcome:6} │ {opp.spread_pct:5.1f}% │ {opp.probability*100:6.1f}% │ {opp.bid_volume_pct:5.1f}% │ {vol_str:>8} │ {time_str:>8} │ {opp.score:6.1f} │")
+
+        print("└──────┴────────┴────────┴────────┴─────────┴────────┴──────────┴──────────┴────────┘")
         print()
 
         # Show first opportunity details
