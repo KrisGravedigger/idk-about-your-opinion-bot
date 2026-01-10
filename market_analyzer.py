@@ -96,7 +96,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def fetch_top_markets_by_volume24h(limit: int = 50) -> List[Dict]:
     """
-    Fetch top N markets sorted by volume24h using raw API.
+    Fetch top N markets sorted by volume24h using raw API with pagination.
 
     PERFORMANCE OPTIMIZATION:
     Instead of fetching ALL 140 markets and filtering later, this directly
@@ -117,45 +117,72 @@ def fetch_top_markets_by_volume24h(limit: int = 50) -> List[Dict]:
     try:
         url = "https://proxy.opinion.trade:8443/openapi/market"
         headers = {"apikey": API_KEY}
-        params = {
-            "status": "activated",
-            "sortBy": 5,  # Sort by volume24h
-            "order": "desc",
-            "limit": limit,
-            "page": 1
-        }
 
         logger.info(f"🚀 FAST MODE: Fetching top {limit} markets by volume24h from raw API...")
 
-        response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
-        data = response.json()
+        all_markets = []
+        page = 1
+        per_page = 50  # Request 50 per page (API may have max limit)
 
-        if data.get("errno") == 0 and data.get("result"):
+        while len(all_markets) < limit:
+            params = {
+                "status": "activated",
+                "sortBy": 5,  # Sort by volume24h
+                "order": "desc",
+                "limit": per_page,
+                "page": page
+            }
+
+            logger.debug(f"   Fetching page {page} (limit: {per_page})...")
+
+            response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
+            data = response.json()
+
+            if data.get("errno") != 0 or not data.get("result"):
+                logger.error(f"❌ Raw API error on page {page}: {data.get('errmsg')}")
+                break
+
             markets = data["result"].get("list", [])
+            total_available = data["result"].get("total", 0)
 
-            # Convert raw API format to SDK-compatible format
-            sdk_format_markets = []
-            for m in markets:
-                sdk_market = {
-                    'market_id': m.get('marketId'),
-                    'market_title': m.get('marketTitle'),
-                    'yes_token_id': m.get('yesTokenId'),
-                    'no_token_id': m.get('noTokenId'),
-                    'cutoff_at': m.get('cutoffAt'),
-                    'volume': m.get('volume'),  # Lifetime
-                    'volume24h': m.get('volume24h'),  # 24h - this is why we use raw API!
-                    'volume7d': m.get('volume7d'),  # Bonus: 7d volume
-                    'status': m.get('status'),
-                    'quote_token': m.get('quoteToken'),
-                    'chain_id': m.get('chainId'),
-                }
-                sdk_format_markets.append(sdk_market)
+            if not markets:
+                logger.debug(f"   No more markets on page {page}")
+                break
 
-            logger.info(f"✅ Fetched {len(sdk_format_markets)} top markets (sorted by volume24h)")
-            return sdk_format_markets
-        else:
-            logger.error(f"❌ Raw API error: {data.get('errmsg')}")
-            return []
+            logger.debug(f"   Page {page}: got {len(markets)} markets (total available: {total_available})")
+
+            # Add markets to our collection
+            all_markets.extend(markets)
+
+            # Stop if we have enough or no more pages
+            if len(all_markets) >= limit or len(markets) < per_page:
+                break
+
+            page += 1
+
+        # Trim to exact limit
+        all_markets = all_markets[:limit]
+
+        # Convert raw API format to SDK-compatible format
+        sdk_format_markets = []
+        for m in all_markets:
+            sdk_market = {
+                'market_id': m.get('marketId'),
+                'market_title': m.get('marketTitle'),
+                'yes_token_id': m.get('yesTokenId'),
+                'no_token_id': m.get('noTokenId'),
+                'cutoff_at': m.get('cutoffAt'),
+                'volume': m.get('volume'),  # Lifetime
+                'volume24h': m.get('volume24h'),  # 24h - this is why we use raw API!
+                'volume7d': m.get('volume7d'),  # Bonus: 7d volume
+                'status': m.get('status'),
+                'quote_token': m.get('quoteToken'),
+                'chain_id': m.get('chainId'),
+            }
+            sdk_format_markets.append(sdk_market)
+
+        logger.info(f"✅ Fetched {len(sdk_format_markets)} top markets (sorted by volume24h) across {page} page(s)")
+        return sdk_format_markets
 
     except Exception as e:
         logger.error(f"❌ Failed to fetch top markets: {e}")
