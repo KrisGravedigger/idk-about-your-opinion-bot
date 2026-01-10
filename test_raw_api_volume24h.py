@@ -5,9 +5,33 @@ Test script to verify volume24h field from raw API
 
 import requests
 import json
+import os
+import sys
 
-# Your API key from .env
-API_KEY = "your_api_key_here"  # Replace with actual key
+# Try to load API key from .env file manually (without python-dotenv dependency)
+def load_env_file():
+    """Manually parse .env file if it exists"""
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    if key.strip() == 'API_KEY':
+                        return value.strip().strip('"').strip("'")
+    return None
+
+# Load API key from .env file or environment
+API_KEY = load_env_file() or os.getenv("API_KEY")
+
+if not API_KEY:
+    print("❌ Error: API_KEY not found!")
+    print("Please either:")
+    print("  1. Create a .env file with API_KEY=your_key")
+    print("  2. Export API_KEY environment variable")
+    print("  3. Edit this script and set API_KEY directly")
+    sys.exit(1)
 
 url = "https://proxy.opinion.trade:8443/openapi/market"
 headers = {
