@@ -45,10 +45,30 @@ params = {
 }
 
 print("🔍 Testing raw API endpoint for volume24h...\n")
+print(f"🌐 URL: {url}")
+print(f"📝 Params: {params}")
+print(f"🔑 API Key: {API_KEY[:10]}..." if len(API_KEY) > 10 else f"🔑 API Key: {API_KEY}")
+print()
 
 response = requests.get(url, headers=headers, params=params, verify=False)
-data = response.json()
 
+print(f"📡 HTTP Status: {response.status_code}")
+print()
+
+# Try to parse JSON
+try:
+    data = response.json()
+    print("📦 Raw Response:")
+    print(json.dumps(data, indent=2)[:500])  # First 500 chars
+    print()
+except Exception as e:
+    print(f"❌ Failed to parse JSON: {e}")
+    print(f"📄 Raw text response:")
+    print(response.text[:500])
+    import sys
+    sys.exit(1)
+
+# Check response structure
 if data.get("code") == 0:
     markets = data["result"]["list"]
     print(f"✅ Found {len(markets)} markets\n")
@@ -62,4 +82,7 @@ if data.get("code") == 0:
         print(f"All keys: {list(market.keys())}")
         print()
 else:
-    print(f"❌ API error: {data.get('msg')}")
+    print(f"❌ API Error")
+    print(f"   Code: {data.get('code')}")
+    print(f"   Message: {data.get('msg')}")
+    print(f"   Full response: {json.dumps(data, indent=2)}")
