@@ -122,7 +122,7 @@ def fetch_top_markets_by_volume24h(limit: int = 50) -> List[Dict]:
 
         all_markets = []
         page = 1
-        per_page = 50  # Request 50 per page (API may have max limit)
+        per_page = 10  # API max limit seems to be ~10 per page
 
         while len(all_markets) < limit:
             params = {
@@ -133,7 +133,7 @@ def fetch_top_markets_by_volume24h(limit: int = 50) -> List[Dict]:
                 "page": page
             }
 
-            logger.debug(f"   Fetching page {page} (limit: {per_page})...")
+            logger.debug(f"   Fetching page {page} (requesting {per_page} markets)...")
 
             response = requests.get(url, headers=headers, params=params, verify=False, timeout=30)
             data = response.json()
@@ -145,20 +145,28 @@ def fetch_top_markets_by_volume24h(limit: int = 50) -> List[Dict]:
             markets = data["result"].get("list", [])
             total_available = data["result"].get("total", 0)
 
+            # If no markets returned, we've reached the end
             if not markets:
                 logger.debug(f"   No more markets on page {page}")
                 break
 
-            logger.debug(f"   Page {page}: got {len(markets)} markets (total available: {total_available})")
+            logger.debug(f"   Page {page}: got {len(markets)} markets")
 
             # Add markets to our collection
             all_markets.extend(markets)
 
-            # Stop if we have enough or no more pages
-            if len(all_markets) >= limit or len(markets) < per_page:
+            # Stop if we've fetched all available markets
+            if len(all_markets) >= total_available:
+                logger.debug(f"   Reached total available markets ({total_available})")
                 break
 
+            # Continue to next page
             page += 1
+
+            # Safety: max 20 pages to prevent infinite loop
+            if page > 20:
+                logger.warning(f"⚠️  Reached max page limit (20), stopping at {len(all_markets)} markets")
+                break
 
         # Trim to exact limit
         all_markets = all_markets[:limit]
