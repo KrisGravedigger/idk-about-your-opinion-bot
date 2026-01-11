@@ -404,6 +404,55 @@ def main():
     # 2. Bot was killed after place_buy() but before state update
     # 3. Manual trading was done outside bot
     
+    # PRIORITY: Check for pending BUY/SELL orders FIRST (before checking positions)
+    # Pending orders may have 0 shares if not filled yet, so won't show in positions
+    if not has_open_position:
+        try:
+            logger.info("📋 Checking for pending orders (BUY/SELL)...")
+            # OFFICIAL MAPPING: status=1 is PENDING (UI "Pending")
+            # This includes orders with $0 filled that show as "Pending" in UI
+            pending_orders = client.get_my_orders(market_id=0, status='PENDING', limit=20)
+
+            logger.info(f"   Found {len(pending_orders)} pending order(s)")
+
+            buy_order = next((o for o in pending_orders if o.get('side') == 1), None)
+            if buy_order:
+                market_id = buy_order.get('market_id')
+                order_id = buy_order.get('order_id')
+                order_status = buy_order.get('status')
+                filled_amount = float(buy_order.get('filled_amount', 0) or 0)
+                order_amount = float(buy_order.get('order_amount', 0) or 0)
+
+                logger.warning("=" * 70)
+                logger.warning("⚠️  PENDING BUY ORDER FOUND!")
+                logger.warning(f"   Market: #{market_id}")
+                logger.warning(f"   Order: {order_id[:40] if order_id else 'unknown'}...")
+                logger.warning(f"   Status: {order_status} (1=pending, 2=finished)")
+                logger.warning(f"   Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
+                logger.warning("=" * 70)
+                logger.info("🔄 Recovering to BUY_MONITORING...")
+
+                # Minimal recovery - just set stage to BUY_PLACED and let BUY_MONITORING handle the rest
+                bot.state['stage'] = 'BUY_PLACED'
+                bot.state['current_position'] = {
+                    'market_id': market_id,
+                    'order_id': order_id,
+                    'side': 'BUY',
+                    'price': float(buy_order.get('price', 0) or 0),
+                    'amount_usdt': order_amount,
+                    'placed_at': get_timestamp(),
+                    'token_id': '',  # Will be recovered in BUY_MONITORING
+                    'market_title': f"Market #{market_id}",  # Will be recovered in BUY_MONITORING
+                    'outcome_side': 'YES'
+                }
+                bot.state_manager.save_state(bot.state)
+                logger.info("✅ Recovered to BUY_PLACED - will monitor order")
+                logger.info("")
+                has_open_position = True
+        except Exception as e:
+            logger.warning(f"⚠️ Error checking pending orders: {e}")
+            logger.exception(e)
+
     if not has_open_position:
         logger.info("🔍 Checking API for orphaned positions...")
 

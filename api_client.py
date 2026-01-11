@@ -634,21 +634,29 @@ class OpinionClient:
             order_id: The order ID
             
         Returns:
-            Status string (e.g., 'PENDING', 'FILLED', 'CANCELLED') or None
-            
+            Status string (e.g., 'PENDING', 'FINISHED', 'CANCELLED') or None
+
         Note:
-            API returns status as numeric enum:
-            0 = PENDING
-            1 = FILLED
-            2 = PARTIALLY_FILLED
+            API returns status as numeric enum (per Opinion.trade documentation):
+            1 = PENDING (UI "Pending")
+            2 = FINISHED (UI "Filled")
             3 = CANCELLED
+            4 = EXPIRED
+            5 = FAILED
         """
         # Status code to string mapping
+        # OFFICIAL MAPPING from Opinion.trade documentation:
+        # status=1: PENDING (UI "Pending")
+        # status=2: FINISHED (UI "Filled")
+        # status=3: CANCELLED
+        # status=4: EXPIRED
+        # status=5: FAILED
         STATUS_MAP = {
-            0: 'PENDING',
-            1: 'FILLED',
-            2: 'PARTIALLY_FILLED',
-            3: 'CANCELLED'
+            1: 'PENDING',      # UI "Pending"
+            2: 'FINISHED',     # UI "Filled"
+            3: 'CANCELLED',
+            4: 'EXPIRED',
+            5: 'FAILED'
         }
         
         order = self.get_order(order_id)
@@ -691,13 +699,22 @@ class OpinionClient:
         limit: int = 20
     ) -> list[dict]:
         # Map our status strings to API status codes (as STRINGS!)
-        # SDK expects string representation of numbers: "0", "1", "2", "3"
+        # SDK expects string representation of numbers: "1", "2", "3", etc.
+        #
+        # OFFICIAL MAPPING from Opinion.trade documentation:
+        # status=1: PENDING (UI "Pending")
+        # status=2: FINISHED/FILLED (UI "Filled")
+        # status=3: CANCELLED
+        # status=4: EXPIRED
+        # status=5: FAILED
         STATUS_CODE_MAP = {
-            'PENDING': "0",
-            'OPEN': "0",
-            'FILLED': "1",
-            'PARTIALLY_FILLED': "2",
-            'CANCELLED': "3"
+            'PENDING': "1",      # UI "Pending" = API status 1
+            'FINISHED': "2",     # UI "Filled" = API status 2
+            'FILLED': "2",       # Alias for FINISHED
+            'CANCELLED': "3",
+            'CANCELED': "3",     # US spelling
+            'EXPIRED': "4",
+            'FAILED': "5"
         }
 
         # Convert status to API format (string number or empty string)
@@ -754,11 +771,18 @@ class OpinionClient:
                 # Convert numeric status to string for consistency
                 status_code = order_dict.get('status')
                 if status_code is not None:
+                    # OFFICIAL MAPPING from Opinion.trade documentation:
+                    # status=1: PENDING (UI "Pending")
+                    # status=2: FINISHED (UI "Filled")
+                    # status=3: CANCELLED
+                    # status=4: EXPIRED
+                    # status=5: FAILED
                     STATUS_MAP = {
-                        0: 'PENDING',
-                        1: 'FILLED',
-                        2: 'PARTIALLY_FILLED',
-                        3: 'CANCELLED'
+                        1: 'PENDING',
+                        2: 'FINISHED',
+                        3: 'CANCELLED',
+                        4: 'EXPIRED',
+                        5: 'FAILED'
                     }
                     order_dict['status_str'] = STATUS_MAP.get(status_code, f'UNKNOWN({status_code})')
                 
@@ -841,53 +865,62 @@ class OpinionClient:
             logger.error(f"Error fetching balances: {e}")
             return None
     
-    def get_usdt_balance(self) -> float:
+    def get_usdt_balance(self, include_frozen: bool = False) -> float:
         """
-        Get available USDT balance.
-        
+        Get USDT balance.
+
+        Args:
+            include_frozen: If True, returns total (available + frozen). If False, returns only available.
+
         Returns:
             USDT balance as float in USDT
         """
         balances = self.get_balances()
-        
+
         if not balances or 'tokens' not in balances:
             logger.debug("No balance data returned from get_balances()")
             return 0.0
-        
+
         # USDT token address on BSC
         USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955'.lower()
-        
+
         tokens = balances['tokens']
-        
+
         if USDT_ADDRESS not in tokens:
             logger.debug(f"USDT token not found. Available tokens: {list(tokens.keys())}")
             return 0.0
-        
+
         usdt_data = tokens[USDT_ADDRESS]
         available_balance_str = usdt_data.get('available', '0')
+        frozen_balance_str = usdt_data.get('frozen', '0')
         decimals = usdt_data.get('decimals', 18)
-        
-        try:
-            # Convert string to float
-            balance_raw = float(available_balance_str)
-            
-            # SMART DETECTION: Check if value is already in USDT or in wei
-            # If balance_raw < 1000, it's likely already in USDT (not smallest unit)
-            # Example: '11' = 11 USDT (not 0.000000000000000011 USDT)
-            if balance_raw < 1000:
-                # Likely already in USDT
-                balance_usdt = balance_raw
-                logger.debug(f"Balance appears to be in USDT already: {balance_usdt:.2f} USDT")
-            else:
-                # Large number - probably in smallest unit (wei)
-                balance_usdt = balance_raw / (10 ** decimals)
-                logger.debug(f"Converted from wei ({balance_raw}) to {balance_usdt:.6f} USDT")
-            
-            return balance_usdt
-            
-        except (ValueError, TypeError) as e:
-            logger.error(f"Error converting USDT balance '{available_balance_str}': {e}")
-            return 0.0
+
+        def convert_to_usdt(balance_str: str) -> float:
+            """Helper to convert balance string to USDT float."""
+            try:
+                balance_raw = float(balance_str)
+
+                # SMART DETECTION: Check if value is already in USDT or in wei
+                # If balance_raw < 1000, it's likely already in USDT (not smallest unit)
+                if balance_raw < 1000:
+                    return balance_raw
+                else:
+                    # Large number - probably in smallest unit (wei)
+                    return balance_raw / (10 ** decimals)
+            except (ValueError, TypeError):
+                return 0.0
+
+        available = convert_to_usdt(available_balance_str)
+        frozen = convert_to_usdt(frozen_balance_str) if include_frozen else 0.0
+
+        total = available + frozen
+
+        if include_frozen and frozen > 0:
+            logger.debug(f"USDT balance: available={available:.2f}, frozen={frozen:.2f}, total={total:.2f}")
+        else:
+            logger.debug(f"USDT available balance: {available:.2f}")
+
+        return total
     
     def get_token_balance(self, token_id: str) -> float:
         """
