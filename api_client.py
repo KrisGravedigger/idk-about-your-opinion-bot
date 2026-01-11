@@ -634,26 +634,29 @@ class OpinionClient:
             order_id: The order ID
             
         Returns:
-            Status string (e.g., 'PENDING', 'FILLED', 'CANCELLED') or None
-            
+            Status string (e.g., 'PENDING', 'FINISHED', 'CANCELLED') or None
+
         Note:
-            API returns status as numeric enum:
-            0 = PENDING
-            1 = FILLED
-            2 = PARTIALLY_FILLED
+            API returns status as numeric enum (per Opinion.trade documentation):
+            1 = PENDING (UI "Pending")
+            2 = FINISHED (UI "Filled")
             3 = CANCELLED
+            4 = EXPIRED
+            5 = FAILED
         """
         # Status code to string mapping
-        # IMPORTANT: API status values are counter-intuitive!
-        # 0 = New order (before matching)
-        # 1 = ACTIVE (in orderbook, may be $0 filled but active in UI as "Pending")
-        # 2 = FINISHED (fully filled/completed)
-        # 3 = CANCELLED
+        # OFFICIAL MAPPING from Opinion.trade documentation:
+        # status=1: PENDING (UI "Pending")
+        # status=2: FINISHED (UI "Filled")
+        # status=3: CANCELLED
+        # status=4: EXPIRED
+        # status=5: FAILED
         STATUS_MAP = {
-            0: 'PENDING',      # New order
-            1: 'ACTIVE',       # Active in orderbook (NOT fully filled!)
-            2: 'FINISHED',     # Fully completed
-            3: 'CANCELLED'
+            1: 'PENDING',      # UI "Pending"
+            2: 'FINISHED',     # UI "Filled"
+            3: 'CANCELLED',
+            4: 'EXPIRED',
+            5: 'FAILED'
         }
         
         order = self.get_order(order_id)
@@ -696,20 +699,22 @@ class OpinionClient:
         limit: int = 20
     ) -> list[dict]:
         # Map our status strings to API status codes (as STRINGS!)
-        # SDK expects string representation of numbers: "0", "1", "2", "3"
-        # IMPORTANT: API status mapping is counter-intuitive!
-        # status=0: New order (before matching)
-        # status=1: ACTIVE (in orderbook, partially filled OR $0 filled but active)
-        # status=2: FINISHED (fully filled/completed)
+        # SDK expects string representation of numbers: "1", "2", "3", etc.
+        #
+        # OFFICIAL MAPPING from Opinion.trade documentation:
+        # status=1: PENDING (UI "Pending")
+        # status=2: FINISHED/FILLED (UI "Filled")
         # status=3: CANCELLED
+        # status=4: EXPIRED
+        # status=5: FAILED
         STATUS_CODE_MAP = {
-            'PENDING': "0",  # New order before matching
-            'OPEN': "0",     # Alias for PENDING
-            'ACTIVE': "1",   # Active in orderbook (may be $0 filled!)
-            'PARTIALLY_FILLED': "1",  # Also status=1
-            'FILLED': "2",   # Fully completed
-            'FINISHED': "2", # Alias for FILLED
-            'CANCELLED': "3"
+            'PENDING': "1",      # UI "Pending" = API status 1
+            'FINISHED': "2",     # UI "Filled" = API status 2
+            'FILLED': "2",       # Alias for FINISHED
+            'CANCELLED': "3",
+            'CANCELED': "3",     # US spelling
+            'EXPIRED': "4",
+            'FAILED': "5"
         }
 
         # Convert status to API format (string number or empty string)
@@ -766,16 +771,18 @@ class OpinionClient:
                 # Convert numeric status to string for consistency
                 status_code = order_dict.get('status')
                 if status_code is not None:
-                    # IMPORTANT: API status values are counter-intuitive!
-                    # 0 = New order (before matching)
-                    # 1 = ACTIVE (in orderbook, may be $0 filled but active)
-                    # 2 = FINISHED (fully filled/completed)
-                    # 3 = CANCELLED
+                    # OFFICIAL MAPPING from Opinion.trade documentation:
+                    # status=1: PENDING (UI "Pending")
+                    # status=2: FINISHED (UI "Filled")
+                    # status=3: CANCELLED
+                    # status=4: EXPIRED
+                    # status=5: FAILED
                     STATUS_MAP = {
-                        0: 'PENDING',
-                        1: 'ACTIVE',
+                        1: 'PENDING',
                         2: 'FINISHED',
-                        3: 'CANCELLED'
+                        3: 'CANCELLED',
+                        4: 'EXPIRED',
+                        5: 'FAILED'
                     }
                     order_dict['status_str'] = STATUS_MAP.get(status_code, f'UNKNOWN({status_code})')
                 

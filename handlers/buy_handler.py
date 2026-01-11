@@ -193,12 +193,13 @@ class BuyHandler:
             order_status = self.client.get_order_status(order_id)
 
             # If order doesn't exist or is in terminal state (can't be monitored)
-            terminal_statuses = ['CANCELLED', 'FILLED']
+            # OFFICIAL STATUS NAMES: 'PENDING', 'FINISHED', 'CANCELLED', 'EXPIRED', 'FAILED'
+            terminal_statuses = ['CANCELLED', 'FINISHED', 'EXPIRED', 'FAILED']
 
             if order_status is None or order_status in terminal_statuses:
                 if order_status == 'CANCELLED':
                     logger.warning(f"⚠️ BUY order is CANCELLED")
-                elif order_status == 'FILLED':
+                elif order_status == 'FINISHED':
                     logger.info(f"✅ BUY order already completed")
                 else:
                     logger.warning("⚠️ BUY order not found in API")
@@ -238,7 +239,7 @@ class BuyHandler:
                     outcome_side = position.get('outcome_side', 'YES')
                     logger.info(f"✅ Found position with {tokens:.4f} {outcome_side} tokens")
 
-                    if order_status in ['FILLED', 'PARTIALLY_FILLED']:
+                    if order_status == 'FINISHED':
                         logger.info(f"   Order was {order_status} - switching to BUY_FILLED")
                     else:
                         logger.info(f"   Order was {order_status or 'not found'} but position exists")
@@ -269,8 +270,8 @@ class BuyHandler:
                     logger.warning(f"⚠️ No significant position found (only {tokens:.4f} tokens)")
 
                     # CRITICAL: This may be API timing delay!
-                    if order_status == 'FILLED':
-                        # Check if order has been FILLED for too long to be just API lag
+                    if order_status == 'FINISHED':
+                        # Check if order has been FINISHED for too long to be just API lag
                         # If placed_at exists, calculate time since placement
                         placed_at_str = position.get('placed_at')
                         is_stale = False
@@ -298,7 +299,7 @@ class BuyHandler:
                             self.state_manager.save_state(self.bot.state)
                             return True
                         else:
-                            logger.info(f"   Order status='FILLED' but position not visible yet")
+                            logger.info(f"   Order status='FINISHED' but position not visible yet")
                             logger.info(f"   This is likely API timing delay (position update lag)")
                             logger.info(f"   🔄 RETRYING: Will check again in next monitoring cycle")
                             logger.info(f"   Bot will proceed to normal monitoring which includes retry logic")

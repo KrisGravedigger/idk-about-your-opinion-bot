@@ -408,21 +408,14 @@ def main():
     # Pending orders may have 0 shares if not filled yet, so won't show in positions
     if not has_open_position:
         try:
-            logger.info("📋 Checking for active orders (BUY/SELL)...")
-            # CRITICAL: Don't filter by status! API status mapping is confusing:
-            # status=0: New order (before matching)
-            # status=1: ACTIVE (in orderbook, may have $0 filled but shows as "Pending" in UI)
-            # status=2: FINISHED (fully filled)
-            # status=3: CANCELLED
-            # We want both 0 and 1, so get ALL orders and filter out finished/cancelled
-            all_orders = client.get_my_orders(market_id=0, status='', limit=20)
+            logger.info("📋 Checking for pending orders (BUY/SELL)...")
+            # OFFICIAL MAPPING: status=1 is PENDING (UI "Pending")
+            # This includes orders with $0 filled that show as "Pending" in UI
+            pending_orders = client.get_my_orders(market_id=0, status='PENDING', limit=20)
 
-            # Filter for active orders (not finished, not cancelled)
-            active_orders = [o for o in all_orders if o.get('status') in [0, 1]]
+            logger.info(f"   Found {len(pending_orders)} pending order(s)")
 
-            logger.info(f"   Found {len(active_orders)} active order(s)")
-
-            buy_order = next((o for o in active_orders if o.get('side') == 1), None)
+            buy_order = next((o for o in pending_orders if o.get('side') == 1), None)
             if buy_order:
                 market_id = buy_order.get('market_id')
                 order_id = buy_order.get('order_id')
@@ -431,10 +424,10 @@ def main():
                 order_amount = float(buy_order.get('order_amount', 0) or 0)
 
                 logger.warning("=" * 70)
-                logger.warning("⚠️  ACTIVE BUY ORDER FOUND!")
+                logger.warning("⚠️  PENDING BUY ORDER FOUND!")
                 logger.warning(f"   Market: #{market_id}")
                 logger.warning(f"   Order: {order_id[:40] if order_id else 'unknown'}...")
-                logger.warning(f"   Status: {order_status} (0=new, 1=active, 2=finished)")
+                logger.warning(f"   Status: {order_status} (1=pending, 2=finished)")
                 logger.warning(f"   Filled: ${filled_amount:.2f} / ${order_amount:.2f}")
                 logger.warning("=" * 70)
                 logger.info("🔄 Recovering to BUY_MONITORING...")
@@ -457,7 +450,7 @@ def main():
                 logger.info("")
                 has_open_position = True
         except Exception as e:
-            logger.warning(f"⚠️ Error checking active orders: {e}")
+            logger.warning(f"⚠️ Error checking pending orders: {e}")
             logger.exception(e)
 
     if not has_open_position:
