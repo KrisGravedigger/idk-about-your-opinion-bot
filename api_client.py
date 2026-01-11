@@ -644,10 +644,15 @@ class OpinionClient:
             3 = CANCELLED
         """
         # Status code to string mapping
+        # IMPORTANT: API status values are counter-intuitive!
+        # 0 = New order (before matching)
+        # 1 = ACTIVE (in orderbook, may be $0 filled but active in UI as "Pending")
+        # 2 = FINISHED (fully filled/completed)
+        # 3 = CANCELLED
         STATUS_MAP = {
-            0: 'PENDING',
-            1: 'FILLED',
-            2: 'PARTIALLY_FILLED',
+            0: 'PENDING',      # New order
+            1: 'ACTIVE',       # Active in orderbook (NOT fully filled!)
+            2: 'FINISHED',     # Fully completed
             3: 'CANCELLED'
         }
         
@@ -692,11 +697,18 @@ class OpinionClient:
     ) -> list[dict]:
         # Map our status strings to API status codes (as STRINGS!)
         # SDK expects string representation of numbers: "0", "1", "2", "3"
+        # IMPORTANT: API status mapping is counter-intuitive!
+        # status=0: New order (before matching)
+        # status=1: ACTIVE (in orderbook, partially filled OR $0 filled but active)
+        # status=2: FINISHED (fully filled/completed)
+        # status=3: CANCELLED
         STATUS_CODE_MAP = {
-            'PENDING': "0",
-            'OPEN': "0",
-            'FILLED': "1",
-            'PARTIALLY_FILLED': "2",
+            'PENDING': "0",  # New order before matching
+            'OPEN': "0",     # Alias for PENDING
+            'ACTIVE': "1",   # Active in orderbook (may be $0 filled!)
+            'PARTIALLY_FILLED': "1",  # Also status=1
+            'FILLED': "2",   # Fully completed
+            'FINISHED': "2", # Alias for FILLED
             'CANCELLED': "3"
         }
 
@@ -754,10 +766,15 @@ class OpinionClient:
                 # Convert numeric status to string for consistency
                 status_code = order_dict.get('status')
                 if status_code is not None:
+                    # IMPORTANT: API status values are counter-intuitive!
+                    # 0 = New order (before matching)
+                    # 1 = ACTIVE (in orderbook, may be $0 filled but active)
+                    # 2 = FINISHED (fully filled/completed)
+                    # 3 = CANCELLED
                     STATUS_MAP = {
                         0: 'PENDING',
-                        1: 'FILLED',
-                        2: 'PARTIALLY_FILLED',
+                        1: 'ACTIVE',
+                        2: 'FINISHED',
                         3: 'CANCELLED'
                     }
                     order_dict['status_str'] = STATUS_MAP.get(status_code, f'UNKNOWN({status_code})')
