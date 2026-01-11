@@ -86,23 +86,37 @@ class BotLauncherGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Opinion Trading Bot - Configuration & Launcher v0.3")
-        self.root.geometry("1000x1150")
-        
+        self.root.geometry("1400x900")  # Wider for two-column layout
+
         # Initialize variables
         self.config_data: Dict[str, Any] = {}
         self.bot_process: Optional[subprocess.Popen] = None
         self.config_changed: bool = False
         self.bot_start_time: float = 0
-        
+
         # Scoring weights (for custom profile)
         self.scoring_weights = {}
-        
+
         # Setup GUI components
         self.setup_menu()
-        self.setup_tabs()
-        self.setup_launcher_section()
-        self.setup_action_buttons()
-        self.setup_status_bar()
+
+        # Create main two-column layout
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill='both', expand=True)
+
+        # Left column: Configuration tabs and action buttons
+        self.left_column = ttk.Frame(main_container)
+        self.left_column.pack(side='left', fill='both', expand=True, padx=(10, 5), pady=10)
+
+        # Right column: Bot launcher and log viewer
+        self.right_column = ttk.Frame(main_container)
+        self.right_column.pack(side='right', fill='both', expand=True, padx=(5, 10), pady=10)
+
+        # Setup components in columns
+        self.setup_tabs()  # Goes into left column
+        self.setup_action_buttons()  # Goes into left column
+        self.setup_launcher_section()  # Goes into right column
+        self.setup_status_bar()  # Goes at bottom of root
         
         # Load initial configuration
         self.load_configuration()
@@ -157,7 +171,7 @@ class BotLauncherGUI:
         
     def setup_tabs(self):
         """Create 6 configuration tabs."""
-        self.notebook = ttk.Notebook(self.root)
+        self.notebook = ttk.Notebook(self.left_column)
         
         # Tab 1: Capital Management
         self.tab1 = self.create_capital_tab()
@@ -947,7 +961,7 @@ class BotLauncherGUI:
 
     def setup_launcher_section(self):
         """Create bot launcher controls."""
-        launcher_frame = ttk.LabelFrame(self.root, text="Bot Control", padding=10)
+        launcher_frame = ttk.LabelFrame(self.right_column, text="Bot Control & Output", padding=10)
         
         # Buttons row
         button_frame = ttk.Frame(launcher_frame)
@@ -1043,12 +1057,12 @@ class BotLauncherGUI:
         self.log_viewer.tag_config('error', foreground='#f48771')
         self.log_viewer.tag_config('success', foreground='#b5cea8')
 
-        launcher_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        launcher_frame.pack(fill='both', expand=True)
         
     def setup_action_buttons(self):
         """Create action buttons section."""
-        action_frame = ttk.Frame(self.root)
-        action_frame.pack(fill='x', padx=10, pady=5)
+        action_frame = ttk.Frame(self.left_column)
+        action_frame.pack(fill='x', padx=5, pady=5)
         
         # Row 1: Main actions
         row1 = ttk.Frame(action_frame)
@@ -1539,30 +1553,62 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     # Don't crash the thread on read errors
                     pass
         else:
-            # Windows: simple blocking readline (with PYTHONUNBUFFERED this should work)
+            # Windows: Use threads to read both stdout and stderr
+            import queue
+            output_queue = queue.Queue()
+
+            def read_stream(stream, stream_name):
+                """Read from a stream and put lines in queue."""
+                try:
+                    for line in iter(stream.readline, ''):
+                        if line:
+                            output_queue.put(line)
+                except Exception:
+                    pass
+
+            # Start reader threads for both streams
+            stdout_thread = threading.Thread(target=read_stream, args=(self.bot_process.stdout, 'stdout'), daemon=True)
+            stderr_thread = threading.Thread(target=read_stream, args=(self.bot_process.stderr, 'stderr'), daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+
+            # Read from queue while process is running
             while is_process_running():
                 try:
-                    # Read from stdout
-                    line = self.bot_process.stdout.readline()
-                    if line:
-                        timestamp = datetime.now().strftime("%H:%M:%S")
-                        self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+                    # Try to get line from queue with timeout
+                    line = output_queue.get(timeout=0.1)
 
-                        # Color code based on content
-                        line_lower = line.lower()
-                        if 'error' in line_lower or 'exception' in line_lower or 'traceback' in line_lower:
-                            self.append_to_log_viewer(line, 'error')
-                        elif 'warning' in line_lower or 'warn' in line_lower:
-                            self.append_to_log_viewer(line, 'warning')
-                        elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
-                            self.append_to_log_viewer(line, 'success')
-                        elif 'info' in line_lower or '📊' in line or '🔍' in line:
-                            self.append_to_log_viewer(line, 'info')
-                        else:
-                            self.append_to_log_viewer(line)
-                except Exception as e:
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+
+                    # Color code based on content
+                    line_lower = line.lower()
+                    if 'error' in line_lower or 'exception' in line_lower or 'traceback' in line_lower:
+                        self.append_to_log_viewer(line, 'error')
+                    elif 'warning' in line_lower or 'warn' in line_lower:
+                        self.append_to_log_viewer(line, 'warning')
+                    elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
+                        self.append_to_log_viewer(line, 'success')
+                    elif 'info' in line_lower or '📊' in line or '🔍' in line:
+                        self.append_to_log_viewer(line, 'info')
+                    else:
+                        self.append_to_log_viewer(line)
+                except queue.Empty:
+                    # No output available, continue waiting
+                    pass
+                except Exception:
                     # Process might have ended
                     pass
+
+            # Drain remaining output from queue
+            while not output_queue.empty():
+                try:
+                    line = output_queue.get_nowait()
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+                    self.append_to_log_viewer(line)
+                except queue.Empty:
+                    break
 
         # Process ended - add final message
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1858,12 +1904,18 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     results_text.insert('end', f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
                 except Exception as e:
                     error_str = str(e)
+                    # Show full error for debugging
+                    results_text.insert('end', f"   ❌ SDK initialization failed:\n", 'error')
+                    results_text.insert('end', f"      {error_str[:300]}\n", 'error')
+
+                    # Add hints based on error type
                     if "apikey" in error_str.lower():
-                        results_text.insert('end', f"   ❌ Invalid API key format\n", 'error')
+                        results_text.insert('end', f"      💡 Hint: Check API key format\n", 'warning')
                     elif "normalize" in error_str.lower() or "0x" in error_str:
-                        results_text.insert('end', f"   ❌ Invalid private key or RPC URL format\n", 'error')
-                    else:
-                        results_text.insert('end', f"   ❌ SDK test failed: {error_str[:200]}\n", 'error')
+                        results_text.insert('end', f"      💡 Hint: Private key must start with '0x'\n", 'warning')
+                        results_text.insert('end', f"      💡 Hint: RPC URL format: https://... or wss://...\n", 'warning')
+                    elif "private" in error_str.lower():
+                        results_text.insert('end', f"      💡 Hint: Check private key format (must be 66 chars: 0x + 64 hex digits)\n", 'warning')
             elif api_key:
                 # Have API key but missing other credentials
                 missing = []
