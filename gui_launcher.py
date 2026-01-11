@@ -1794,32 +1794,41 @@ Note: Credentials remain in .env file (not affected by this import)."""
         # Results text area
         results_text = scrolledtext.ScrolledText(test_window, wrap=tk.WORD, font=("Consolas", 9))
         results_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
+
+        # Helper to safely write to widget (prevents crash if window closed during test)
+        def safe_write(text, tag=None):
+            """Safely write to results_text widget, handling window closure."""
+            try:
+                if results_text.winfo_exists():
+                    results_text.insert('end', text, tag) if tag else results_text.insert('end', text)
+            except:
+                pass  # Widget destroyed - silently ignore
+
         def run_tests():
-            results_text.insert('end', "🔧 Testing Configuration...\n")
-            results_text.insert('end', "=" * 60 + "\n\n")
+            safe_write( "🔧 Testing Configuration...\n")
+            safe_write( "=" * 60 + "\n\n")
             
             # Test 1: Validate configuration
-            results_text.insert('end', "1. Validating configuration...\n")
+            safe_write( "1. Validating configuration...\n")
             config_data = self.collect_form_data()
             is_valid, errors, warnings = validate_full_config(config_data)
             
             if is_valid:
-                results_text.insert('end', "   ✅ Configuration is valid\n", 'success')
+                safe_write( "   ✅ Configuration is valid\n", 'success')
             else:
-                results_text.insert('end', "   ❌ Configuration has errors:\n", 'error')
+                safe_write( "   ❌ Configuration has errors:\n", 'error')
                 for err in errors:
-                    results_text.insert('end', f"      • {err}\n", 'error')
+                    safe_write( f"      • {err}\n", 'error')
             
             if warnings:
-                results_text.insert('end', "   ⚠️  Warnings:\n", 'warning')
+                safe_write( "   ⚠️  Warnings:\n", 'warning')
                 for warn in warnings:
-                    results_text.insert('end', f"      • {warn}\n", 'warning')
+                    safe_write( f"      • {warn}\n", 'warning')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Test 2: Validate credentials
-            results_text.insert('end', "2. Validating credentials...\n")
+            safe_write( "2. Validating credentials...\n")
             is_valid, errors, warnings = validate_credentials(
                 self.api_key_var.get(),
                 self.private_key_var.get(),
@@ -1827,20 +1836,20 @@ Note: Credentials remain in .env file (not affected by this import)."""
             )
             
             if is_valid:
-                results_text.insert('end', "   ✅ Credentials are valid\n", 'success')
+                safe_write( "   ✅ Credentials are valid\n", 'success')
             else:
-                results_text.insert('end', "   ❌ Credentials have errors:\n", 'error')
+                safe_write( "   ❌ Credentials have errors:\n", 'error')
                 for err in errors:
-                    results_text.insert('end', f"      • {err}\n", 'error')
+                    safe_write( f"      • {err}\n", 'error')
             
             if warnings:
                 for warn in warnings:
-                    results_text.insert('end', f"   ⚠️  {warn}\n", 'warning')
+                    safe_write( f"   ⚠️  {warn}\n", 'warning')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Test 3: Check API connectivity
-            results_text.insert('end', "3. Testing API connectivity...\n")
+            safe_write( "3. Testing API connectivity...\n")
             api_host = self.api_host_var.get()
             api_key = self.api_key_var.get()
 
@@ -1851,42 +1860,42 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 parsed_url = api_host.replace('https://', '').replace('http://', '').split('/')[0]
                 test_url = f"https://{parsed_url}"
 
-                results_text.insert('end', f"   Testing connection to {parsed_url}...\n")
+                safe_write( f"   Testing connection to {parsed_url}...\n")
                 response = requests.get(test_url, timeout=5, verify=False)
-                results_text.insert('end', f"   ✅ Host is reachable (status {response.status_code})\n", 'success')
+                safe_write( f"   ✅ Host is reachable (status {response.status_code})\n", 'success')
             except requests.exceptions.SSLError:
-                results_text.insert('end', f"   ✅ Host is reachable (SSL cert issue is normal)\n", 'success')
+                safe_write( f"   ✅ Host is reachable (SSL cert issue is normal)\n", 'success')
             except requests.exceptions.Timeout:
-                results_text.insert('end', f"   ❌ Connection timed out\n", 'error')
+                safe_write( f"   ❌ Connection timed out\n", 'error')
             except requests.exceptions.ConnectionError as e:
-                results_text.insert('end', f"   ❌ Cannot connect: {str(e)[:100]}\n", 'error')
+                safe_write( f"   ❌ Cannot connect: {str(e)[:100]}\n", 'error')
             except Exception as e:
-                results_text.insert('end', f"   ⚠️  Connection test: {str(e)[:100]}\n", 'warning')
+                safe_write( f"   ⚠️  Connection test: {str(e)[:100]}\n", 'warning')
 
             # Test 3b: Try to initialize SDK client (if we have credentials)
             private_key = self.private_key_var.get().strip()
             rpc_url = self.rpc_url_var.get().strip()
 
             # Debug output
-            results_text.insert('end', f"   Debug - API key length: {len(api_key) if api_key else 0}\n")
-            results_text.insert('end', f"   Debug - Private key length: {len(private_key) if private_key else 0}\n")
-            results_text.insert('end', f"   Debug - RPC URL: {rpc_url[:50] if rpc_url else '(empty)'}...\n")
+            safe_write( f"   Debug - API key length: {len(api_key) if api_key else 0}\n")
+            safe_write( f"   Debug - Private key length: {len(private_key) if private_key else 0}\n")
+            safe_write( f"   Debug - RPC URL: {rpc_url[:50] if rpc_url else '(empty)'}...\n")
 
             if api_key and private_key and rpc_url:
-                results_text.insert('end', f"   Testing SDK initialization...\n")
+                safe_write( f"   Testing SDK initialization...\n")
                 try:
                     # Import SDK
                     from opinion_clob_sdk import Client
 
                     # Debug: show what we're passing
                     multi_sig = self.multi_sig_var.get().strip()
-                    results_text.insert('end', f"   Creating client with:\n")
-                    results_text.insert('end', f"      host={api_host}\n")
-                    results_text.insert('end', f"      apikey={api_key[:10]}...\n")
-                    results_text.insert('end', f"      private_key={private_key[:10]}... (len={len(private_key)})\n")
-                    results_text.insert('end', f"      rpc_url={rpc_url}\n")
+                    safe_write( f"   Creating client with:\n")
+                    safe_write( f"      host={api_host}\n")
+                    safe_write( f"      apikey={api_key[:10]}...\n")
+                    safe_write( f"      private_key={private_key[:10]}... (len={len(private_key)})\n")
+                    safe_write( f"      rpc_url={rpc_url}\n")
                     if multi_sig:
-                        results_text.insert('end', f"      multi_sig_addr={multi_sig}\n")
+                        safe_write( f"      multi_sig_addr={multi_sig}\n")
 
                     # Build client parameters
                     client_params = {
@@ -1902,42 +1911,42 @@ Note: Credentials remain in .env file (not affected by this import)."""
 
                     # Try to create client
                     test_client = Client(**client_params)
-                    results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')
+                    safe_write( f"   ✅ SDK client initialized successfully\n", 'success')
 
                     # Try to fetch markets
-                    results_text.insert('end', f"   Fetching markets list...\n")
+                    safe_write( f"   Fetching markets list...\n")
                     try:
                         from opinion_clob_sdk import TopicStatusFilter
                         response = test_client.get_markets(page=1, limit=1, status=TopicStatusFilter.ACTIVATED)
                         if hasattr(response, 'success') and response.success:
-                            results_text.insert('end', f"   ✅ API is working! Successfully fetched markets\n", 'success')
+                            safe_write( f"   ✅ API is working! Successfully fetched markets\n", 'success')
                         elif hasattr(response, 'result'):
-                            results_text.insert('end', f"   ✅ API responded with data\n", 'success')
+                            safe_write( f"   ✅ API responded with data\n", 'success')
                         else:
-                            results_text.insert('end', f"   ⚠️  API responded but format unexpected\n", 'warning')
+                            safe_write( f"   ⚠️  API responded but format unexpected\n", 'warning')
                     except Exception as e:
                         error_str = str(e)
                         if "401" in error_str or "unauthorized" in error_str.lower():
-                            results_text.insert('end', f"   ❌ API key is invalid (401 Unauthorized)\n", 'error')
+                            safe_write( f"   ❌ API key is invalid (401 Unauthorized)\n", 'error')
                         else:
-                            results_text.insert('end', f"   ❌ API call failed: {error_str[:200]}\n", 'error')
+                            safe_write( f"   ❌ API call failed: {error_str[:200]}\n", 'error')
 
                 except ImportError:
-                    results_text.insert('end', f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
+                    safe_write( f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
                 except Exception as e:
                     error_str = str(e)
                     # Show full error for debugging
-                    results_text.insert('end', f"   ❌ SDK initialization failed:\n", 'error')
-                    results_text.insert('end', f"      {error_str[:300]}\n", 'error')
+                    safe_write( f"   ❌ SDK initialization failed:\n", 'error')
+                    safe_write( f"      {error_str[:300]}\n", 'error')
 
                     # Add hints based on error type
                     if "apikey" in error_str.lower():
-                        results_text.insert('end', f"      💡 Hint: Check API key format\n", 'warning')
+                        safe_write( f"      💡 Hint: Check API key format\n", 'warning')
                     elif "normalize" in error_str.lower() or "0x" in error_str:
-                        results_text.insert('end', f"      💡 Hint: Private key must start with '0x'\n", 'warning')
-                        results_text.insert('end', f"      💡 Hint: RPC URL format: https://... or wss://...\n", 'warning')
+                        safe_write( f"      💡 Hint: Private key must start with '0x'\n", 'warning')
+                        safe_write( f"      💡 Hint: RPC URL format: https://... or wss://...\n", 'warning')
                     elif "private" in error_str.lower():
-                        results_text.insert('end', f"      💡 Hint: Check private key format (must be 66 chars: 0x + 64 hex digits)\n", 'warning')
+                        safe_write( f"      💡 Hint: Check private key format (must be 66 chars: 0x + 64 hex digits)\n", 'warning')
             elif api_key:
                 # Have API key but missing other credentials
                 missing = []
@@ -1945,37 +1954,37 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     missing.append("Private Key")
                 if not rpc_url:
                     missing.append("RPC URL")
-                results_text.insert('end', f"   ℹ️  Skipping SDK test - missing: {', '.join(missing)}\n", 'info')
+                safe_write( f"   ℹ️  Skipping SDK test - missing: {', '.join(missing)}\n", 'info')
             else:
-                results_text.insert('end', f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
+                safe_write( f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Test 4: Check file paths
-            results_text.insert('end', "4. Checking file paths...\n")
+            safe_write( "4. Checking file paths...\n")
             log_file = Path(self.log_file_var.get())
-            results_text.insert('end', f"   Log file: {log_file}\n")
+            safe_write( f"   Log file: {log_file}\n")
             
             if log_file.exists():
-                results_text.insert('end', f"   ✅ Log file exists ({log_file.stat().st_size} bytes)\n", 'success')
+                safe_write( f"   ✅ Log file exists ({log_file.stat().st_size} bytes)\n", 'success')
             else:
-                results_text.insert('end', f"   ℹ️  Log file will be created on first run\n", 'info')
+                safe_write( f"   ℹ️  Log file will be created on first run\n", 'info')
             
             bonus_file = self.bonus_file_var.get()
             if bonus_file:
                 if Path(bonus_file).exists():
-                    results_text.insert('end', f"   ✅ Bonus markets file exists: {bonus_file}\n", 'success')
+                    safe_write( f"   ✅ Bonus markets file exists: {bonus_file}\n", 'success')
                 else:
-                    results_text.insert('end', f"   ⚠️  Bonus markets file not found: {bonus_file}\n", 'warning')
+                    safe_write( f"   ⚠️  Bonus markets file not found: {bonus_file}\n", 'warning')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Summary
-            results_text.insert('end', "=" * 60 + "\n")
-            results_text.insert('end', "🎯 Test Complete\n\n")
+            safe_write( "=" * 60 + "\n")
+            safe_write( "🎯 Test Complete\n\n")
             
             if is_valid:
-                results_text.insert('end', "✅ Configuration is ready for use!\n", 'success')
+                safe_write( "✅ Configuration is ready for use!\n", 'success')
             else:
                 results_text.insert('end', "❌ Fix errors before starting bot\n", 'error')
         
