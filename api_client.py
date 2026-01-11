@@ -841,53 +841,62 @@ class OpinionClient:
             logger.error(f"Error fetching balances: {e}")
             return None
     
-    def get_usdt_balance(self) -> float:
+    def get_usdt_balance(self, include_frozen: bool = False) -> float:
         """
-        Get available USDT balance.
-        
+        Get USDT balance.
+
+        Args:
+            include_frozen: If True, returns total (available + frozen). If False, returns only available.
+
         Returns:
             USDT balance as float in USDT
         """
         balances = self.get_balances()
-        
+
         if not balances or 'tokens' not in balances:
             logger.debug("No balance data returned from get_balances()")
             return 0.0
-        
+
         # USDT token address on BSC
         USDT_ADDRESS = '0x55d398326f99059ff775485246999027b3197955'.lower()
-        
+
         tokens = balances['tokens']
-        
+
         if USDT_ADDRESS not in tokens:
             logger.debug(f"USDT token not found. Available tokens: {list(tokens.keys())}")
             return 0.0
-        
+
         usdt_data = tokens[USDT_ADDRESS]
         available_balance_str = usdt_data.get('available', '0')
+        frozen_balance_str = usdt_data.get('frozen', '0')
         decimals = usdt_data.get('decimals', 18)
-        
-        try:
-            # Convert string to float
-            balance_raw = float(available_balance_str)
-            
-            # SMART DETECTION: Check if value is already in USDT or in wei
-            # If balance_raw < 1000, it's likely already in USDT (not smallest unit)
-            # Example: '11' = 11 USDT (not 0.000000000000000011 USDT)
-            if balance_raw < 1000:
-                # Likely already in USDT
-                balance_usdt = balance_raw
-                logger.debug(f"Balance appears to be in USDT already: {balance_usdt:.2f} USDT")
-            else:
-                # Large number - probably in smallest unit (wei)
-                balance_usdt = balance_raw / (10 ** decimals)
-                logger.debug(f"Converted from wei ({balance_raw}) to {balance_usdt:.6f} USDT")
-            
-            return balance_usdt
-            
-        except (ValueError, TypeError) as e:
-            logger.error(f"Error converting USDT balance '{available_balance_str}': {e}")
-            return 0.0
+
+        def convert_to_usdt(balance_str: str) -> float:
+            """Helper to convert balance string to USDT float."""
+            try:
+                balance_raw = float(balance_str)
+
+                # SMART DETECTION: Check if value is already in USDT or in wei
+                # If balance_raw < 1000, it's likely already in USDT (not smallest unit)
+                if balance_raw < 1000:
+                    return balance_raw
+                else:
+                    # Large number - probably in smallest unit (wei)
+                    return balance_raw / (10 ** decimals)
+            except (ValueError, TypeError):
+                return 0.0
+
+        available = convert_to_usdt(available_balance_str)
+        frozen = convert_to_usdt(frozen_balance_str) if include_frozen else 0.0
+
+        total = available + frozen
+
+        if include_frozen and frozen > 0:
+            logger.debug(f"USDT balance: available={available:.2f}, frozen={frozen:.2f}, total={total:.2f}")
+        else:
+            logger.debug(f"USDT available balance: {available:.2f}")
+
+        return total
     
     def get_token_balance(self, token_id: str) -> float:
         """

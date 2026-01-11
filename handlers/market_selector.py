@@ -308,6 +308,44 @@ class MarketSelector:
         if self.check_for_orphaned_position():
             return True
 
+        # CRITICAL: Check capital BEFORE scanning (scanning takes ~80 seconds)
+        # This prevents wasting time when there's insufficient balance
+        try:
+            logger.info("💰 Checking available capital before scanning...")
+
+            # Check both available and frozen balance
+            available_balance = self.client.get_usdt_balance(include_frozen=False)
+            total_balance = self.client.get_usdt_balance(include_frozen=True)
+            frozen_balance = total_balance - available_balance
+
+            logger.info(f"   Available: ${available_balance:.2f}")
+            if frozen_balance > 1.0:
+                logger.info(f"   Frozen: ${frozen_balance:.2f} (locked in orders)")
+                logger.info(f"   Total: ${total_balance:.2f}")
+
+            # Try to get position size (this will check minimum requirements)
+            try:
+                position_size = self.capital_manager.get_position_size()
+                logger.info(f"   ✅ Sufficient capital: ${available_balance:.2f} → position size ${position_size:.2f}")
+            except InsufficientCapitalError as e:
+                logger.error(f"❌ Insufficient capital: {e}")
+
+                if frozen_balance > 1.0:
+                    logger.warning(f"⚠️  ${frozen_balance:.2f} is frozen in pending orders")
+                    logger.info("   Bot will wait for orders to complete or cancel them manually")
+                else:
+                    logger.info("   Bot will wait - please add funds or adjust CAPITAL settings")
+
+                # Transition to IDLE and wait
+                self.state_manager.reset_position(self.bot.state)
+                self.bot.state['stage'] = 'IDLE'
+                self.state_manager.save_state(self.bot.state)
+                return False
+
+        except Exception as e:
+            logger.error(f"Error checking capital: {e}")
+            # Continue with scanning anyway (better to try than to get stuck)
+
         try:
             # Load bonus markets if configured
             bonus_file = self.config.get('BONUS_MARKETS_FILE')
