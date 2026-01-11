@@ -1867,11 +1867,23 @@ Note: Credentials remain in .env file (not affected by this import)."""
             private_key = self.private_key_var.get().strip()
             rpc_url = self.rpc_url_var.get().strip()
 
+            # Debug output
+            results_text.insert('end', f"   Debug - API key length: {len(api_key) if api_key else 0}\n")
+            results_text.insert('end', f"   Debug - Private key length: {len(private_key) if private_key else 0}\n")
+            results_text.insert('end', f"   Debug - RPC URL: {rpc_url[:50] if rpc_url else '(empty)'}...\n")
+
             if api_key and private_key and rpc_url:
                 results_text.insert('end', f"   Testing SDK initialization...\n")
                 try:
                     # Import SDK
                     from opinion_clob_sdk import Client
+
+                    # Debug: show what we're passing
+                    results_text.insert('end', f"   Creating client with:\n")
+                    results_text.insert('end', f"      host={api_host}\n")
+                    results_text.insert('end', f"      apikey={api_key[:10]}...\n")
+                    results_text.insert('end', f"      private_key={private_key[:10]}... (len={len(private_key)})\n")
+                    results_text.insert('end', f"      rpc_url={rpc_url}\n")
 
                     # Try to create client (using correct SDK parameters)
                     test_client = Client(

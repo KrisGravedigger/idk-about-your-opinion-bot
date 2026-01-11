@@ -27,7 +27,7 @@ class ColoredFormatter(logging.Formatter):
     Custom formatter that adds colors to console output.
     Makes it easier to spot warnings and errors in terminal.
     """
-    
+
     # ANSI color codes
     COLORS = {
         'DEBUG': '\033[36m',     # Cyan
@@ -37,7 +37,7 @@ class ColoredFormatter(logging.Formatter):
         'CRITICAL': '\033[35m',  # Magenta
         'RESET': '\033[0m'       # Reset
     }
-    
+
     # Emoji indicators for quick visual scanning
     INDICATORS = {
         'DEBUG': '🔍',
@@ -46,18 +46,23 @@ class ColoredFormatter(logging.Formatter):
         'ERROR': '❌',
         'CRITICAL': '🚨'
     }
-    
+
     def format(self, record):
         # Add color and indicator based on log level
         color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         reset = self.COLORS['RESET']
         indicator = self.INDICATORS.get(record.levelname, '')
-        
+
         # Format the message
         record.levelname = f"{color}{record.levelname}{reset}"
         record.msg = f"{indicator} {record.msg}"
-        
-        return super().format(record)
+
+        result = super().format(record)
+
+        # Force flush stdout after each log (critical for GUI subprocess capture)
+        sys.stdout.flush()
+
+        return result
 
 
 def setup_logger(name: str) -> logging.Logger:
@@ -91,7 +96,10 @@ def setup_logger(name: str) -> logging.Logger:
     # Outputs to terminal with colors and emojis
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)  # Console shows INFO and above
-    
+
+    # Force unbuffered output (important for GUI subprocess capture)
+    console_handler.stream.reconfigure(line_buffering=True) if hasattr(console_handler.stream, 'reconfigure') else None
+
     console_format = ColoredFormatter(
         fmt='%(asctime)s │ %(levelname)-17s │ %(message)s',
         datefmt='%H:%M:%S'
