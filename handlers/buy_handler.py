@@ -270,12 +270,40 @@ class BuyHandler:
 
                     # CRITICAL: This may be API timing delay!
                     if order_status == 'FILLED':
-                        logger.info(f"   Order status='FILLED' but position not visible yet")
-                        logger.info(f"   This is likely API timing delay (position update lag)")
-                        logger.info(f"   🔄 RETRYING: Will check again in next monitoring cycle")
-                        logger.info(f"   Bot will proceed to normal monitoring which includes retry logic")
-                        logger.info(f"✅ Order is active (timing issue) - proceeding to monitor")
-                        # Fall through to normal monitoring code below
+                        # Check if order has been FILLED for too long to be just API lag
+                        # If placed_at exists, calculate time since placement
+                        placed_at_str = position.get('placed_at')
+                        is_stale = False
+
+                        if placed_at_str:
+                            try:
+                                placed_at = datetime.fromisoformat(placed_at_str.replace('Z', '+00:00'))
+                                time_since_placement = datetime.now() - placed_at
+
+                                # If order was placed more than 5 minutes ago and still dust, it's not API lag
+                                if time_since_placement.total_seconds() > 300:  # 5 minutes
+                                    is_stale = True
+                                    logger.warning(f"   Order was placed {time_since_placement.total_seconds()/60:.1f} minutes ago")
+                                    logger.warning(f"   Position is still dust after {time_since_placement.total_seconds()/60:.1f} minutes")
+                                    logger.warning(f"   This is NOT API timing delay - position was likely already sold")
+                            except Exception as e:
+                                logger.debug(f"Could not parse placed_at: {e}")
+
+                        if is_stale:
+                            logger.warning(f"   Dust position after extended time indicates completed trade")
+                            logger.info(f"   Resetting to SCANNING to find new market")
+
+                            self.state_manager.reset_position(self.bot.state)
+                            self.bot.state['stage'] = 'SCANNING'
+                            self.state_manager.save_state(self.bot.state)
+                            return True
+                        else:
+                            logger.info(f"   Order status='FILLED' but position not visible yet")
+                            logger.info(f"   This is likely API timing delay (position update lag)")
+                            logger.info(f"   🔄 RETRYING: Will check again in next monitoring cycle")
+                            logger.info(f"   Bot will proceed to normal monitoring which includes retry logic")
+                            logger.info(f"✅ Order is active (timing issue) - proceeding to monitor")
+                            # Fall through to normal monitoring code below
 
                     elif order_status == 'CANCELLED':
                         logger.info(f"   Order was CANCELLED without fill - reset to find new market")
