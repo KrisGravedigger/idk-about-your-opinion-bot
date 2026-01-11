@@ -158,18 +158,24 @@ class AutonomousBot:
         # Display current P&L statistics at startup
         self.pnl_stats.display_summary(logger)
 
+        logger.debug("After display_summary - preparing to send Telegram notification...")
+
         # Send Telegram notification: Bot started
         try:
+            logger.debug("Fetching balance for Telegram notification...")
             balance = self.client.get_usdt_balance()
+            logger.debug(f"Balance fetched: ${balance:.2f}")
         except Exception as e:
             logger.warning(f"Could not fetch balance for Telegram notification: {e}")
             balance = 0.0
 
+        logger.debug("Sending bot_start notification to Telegram...")
         self.telegram.send_bot_start(
             stats=self.pnl_stats.get_summary(),
             config=self.config,
             balance=balance
         )
+        logger.debug("Telegram notification sent (async)")
 
         try:
             # Send initial heartbeat to verify current state (async to avoid blocking)
@@ -180,10 +186,12 @@ class AutonomousBot:
             import threading
             heartbeat_thread = threading.Thread(target=self._send_heartbeat_now, daemon=True)
             heartbeat_thread.start()
+            logger.debug("Initial heartbeat thread started")
             # Don't wait for it - let it finish in background
         except Exception as e:
             logger.warning(f"Could not send initial heartbeat: {e}")
 
+        logger.debug("Preparing to start main loop...")
         try:
             # State already loaded in __init__
             # But reload here to catch any changes made in autonomous_bot_main.py

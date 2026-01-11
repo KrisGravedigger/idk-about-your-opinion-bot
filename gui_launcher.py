@@ -1669,14 +1669,14 @@ Note: Credentials remain in .env file (not affected by this import)."""
             env['PYTHONIOENCODING'] = 'utf-8'  # Ensure UTF-8 encoding for emojis
 
             # Launch bot subprocess
-            # NOTE: On Windows, bufsize=1 with text=True doesn't work well for line buffering
-            # Use bufsize=0 (unbuffered) for immediate output
+            # NOTE: On Windows, use line buffering (bufsize=1) with text=True for proper line-by-line reading
+            # Python -u flag disables internal buffering
             self.bot_process = subprocess.Popen(
                 [sys.executable, "-u", "autonomous_bot_main.py"],  # -u flag for unbuffered Python
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=0,  # Unbuffered for immediate output
+                bufsize=1,  # Line buffering for text mode (required on Windows)
                 env=env,
                 encoding='utf-8',  # Explicit UTF-8 encoding
                 errors='replace'  # Replace invalid characters instead of crashing
