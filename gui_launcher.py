@@ -1666,15 +1666,20 @@ Note: Credentials remain in .env file (not affected by this import)."""
             # Prepare environment with unbuffered output
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'  # Force unbuffered output (immediate logs)
+            env['PYTHONIOENCODING'] = 'utf-8'  # Ensure UTF-8 encoding for emojis
 
             # Launch bot subprocess
+            # NOTE: On Windows, bufsize=1 with text=True doesn't work well for line buffering
+            # Use bufsize=0 (unbuffered) for immediate output
             self.bot_process = subprocess.Popen(
-                [sys.executable, "autonomous_bot_main.py"],
+                [sys.executable, "-u", "autonomous_bot_main.py"],  # -u flag for unbuffered Python
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1,
-                env=env
+                bufsize=0,  # Unbuffered for immediate output
+                env=env,
+                encoding='utf-8',  # Explicit UTF-8 encoding
+                errors='replace'  # Replace invalid characters instead of crashing
             )
 
             # Monitor bot for early crashes (check every second for 15 seconds)

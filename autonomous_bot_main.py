@@ -744,12 +744,12 @@ def main():
         try:
             balance = client.get_usdt_balance()
             logger.info(f"💰 Current balance: ${balance:.2f} USDT")
-            
-            if balance < MIN_BALANCE_TO_CONTINUE_USDT:
-                logger.error(f"⚠️  Balance (${balance:.2f}) is below minimum (${MIN_BALANCE_TO_CONTINUE_USDT:.2f})")
+
+            if balance < config.MIN_BALANCE_TO_CONTINUE_USDT:
+                logger.error(f"⚠️  Balance (${balance:.2f}) is below minimum (${config.MIN_BALANCE_TO_CONTINUE_USDT:.2f})")
                 logger.error("   Please add funds before running bot")
                 return 1
-            
+
             logger.info("   Balance sufficient ✓")
             logger.info("")
         except Exception as e:
