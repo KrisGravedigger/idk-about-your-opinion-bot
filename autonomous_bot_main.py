@@ -73,13 +73,8 @@ from api_client import create_client
 from core.autonomous_bot import AutonomousBot
 from utils import clear_state, get_timestamp
 
-# Import validate_config if it exists
-try:
-    from config import validate_config
-except ImportError:
-    # Fallback if validate_config doesn't exist
-    def validate_config():
-        return True
+# Import config validator
+from config_validator import validate_full_config, validate_credentials
 
 # Initialize logger
 logger = setup_logger(__name__)
@@ -193,117 +188,123 @@ def main():
     # VALIDATE CONFIGURATION
     # =========================================================================
     logger.info("🔧 Validating configuration...")
-    
-    # Import full config
-    from config import (
+
+    # Build config dict from config_loader (merges config.py + bot_config.json + .env)
+    # This allows GUI changes to take effect
+    config_dict = {
         # Capital Management
-        CAPITAL_MODE,
-        CAPITAL_AMOUNT_USDT,
-        CAPITAL_PERCENTAGE,
-        MIN_BALANCE_TO_CONTINUE_USDT,
-        MIN_POSITION_SIZE_USDT,
-        MIN_POSITION_FOR_POINTS_USDT,
-        WARN_IF_BELOW_POINTS_THRESHOLD,
+        'capital_mode': config.CAPITAL_MODE,
+        'capital_amount_usdt': config.CAPITAL_AMOUNT_USDT,
+        'capital_percentage': config.CAPITAL_PERCENTAGE,
+        'min_balance_to_continue_usdt': config.MIN_BALANCE_TO_CONTINUE_USDT,
+        'min_position_size_usdt': config.MIN_POSITION_SIZE_USDT,
+        'min_position_for_points_usdt': config.MIN_POSITION_FOR_POINTS_USDT,
+        'warn_if_below_points_threshold': config.WARN_IF_BELOW_POINTS_THRESHOLD,
 
         # Pricing
-        SAFETY_MARGIN_CENTS,
+        'safety_margin_cents': config.SAFETY_MARGIN_CENTS,
 
         # Monitoring
-        FILL_CHECK_INTERVAL_SECONDS,
-        BUY_ORDER_TIMEOUT_HOURS,
-        SELL_ORDER_TIMEOUT_HOURS,
+        'fill_check_interval_seconds': config.FILL_CHECK_INTERVAL_SECONDS,
+        'buy_order_timeout_hours': config.BUY_ORDER_TIMEOUT_HOURS,
+        'sell_order_timeout_hours': config.SELL_ORDER_TIMEOUT_HOURS,
 
         # Liquidity
-        LIQUIDITY_AUTO_CANCEL,
-        LIQUIDITY_BID_DROP_THRESHOLD,
-        LIQUIDITY_SPREAD_THRESHOLD,
+        'liquidity_auto_cancel': config.LIQUIDITY_AUTO_CANCEL,
+        'liquidity_bid_drop_threshold': config.LIQUIDITY_BID_DROP_THRESHOLD,
+        'liquidity_spread_threshold': config.LIQUIDITY_SPREAD_THRESHOLD,
 
         # Stop-loss
-        ENABLE_STOP_LOSS,
-        STOP_LOSS_TRIGGER_PERCENT,
-        STOP_LOSS_AGGRESSIVE_OFFSET,
+        'enable_stop_loss': config.ENABLE_STOP_LOSS,
+        'stop_loss_trigger_percent': config.STOP_LOSS_TRIGGER_PERCENT,
+        'stop_loss_aggressive_offset': config.STOP_LOSS_AGGRESSIVE_OFFSET,
 
         # Bot config
-        BONUS_MARKETS_FILE,
-        DEFAULT_SCORING_PROFILE,
-
-        # Liquidity Farming
-        USE_LIQUIDITY_FARMING,
-        LIQUIDITY_FARMING_CONFIG,
-        USE_SPREAD_FARMING,  # Backward compatibility
+        'bonus_markets_file': config.BONUS_MARKETS_FILE,
+        'scoring_profile': config.DEFAULT_SCORING_PROFILE,
+        'cycle_delay_seconds': 10,
+        'max_cycles': args.max_cycles,
 
         # Telegram
-        TELEGRAM_HEARTBEAT_INTERVAL_HOURS
-    )
-    
-    is_valid, errors, warnings = validate_config()
-    
+        'telegram_heartbeat_interval_hours': config.TELEGRAM_HEARTBEAT_INTERVAL_HOURS,
+
+        # Logging
+        'log_file': config.LOG_FILE,
+
+        # API Credentials (for validation)
+        'api_key': config.API_KEY,
+        'private_key': config.PRIVATE_KEY,
+        'multi_sig_address': config.MULTI_SIG_ADDRESS if hasattr(config, 'MULTI_SIG_ADDRESS') else '',
+        'rpc_url': config.RPC_URL,
+    }
+
+    # Validate configuration
+    is_valid, errors, warnings = validate_full_config(config_dict)
+
     if not is_valid:
         logger.error("Configuration errors found:")
         for error in errors:
             logger.error(f"   - {error}")
         return 1
-    
+
     # Show warnings if any
     if warnings:
         logger.warning("Configuration warnings:")
         for warning in warnings:
             logger.warning(f"   ⚠️ {warning}")
-    
+
     logger.info("   Configuration valid ✓")
     logger.info("")
-    
-    # =========================================================================
-    # BUILD CONFIG DICT
-    # =========================================================================
-    config = {
+
+    # Build uppercase config dict for bot (legacy compatibility)
+    config_dict = {
         # Capital Management
-        'CAPITAL_MODE': CAPITAL_MODE,
-        'CAPITAL_AMOUNT_USDT': CAPITAL_AMOUNT_USDT,
-        'CAPITAL_PERCENTAGE': CAPITAL_PERCENTAGE,
-        'MIN_BALANCE_TO_CONTINUE_USDT': MIN_BALANCE_TO_CONTINUE_USDT,
-        'MIN_POSITION_SIZE_USDT': MIN_POSITION_SIZE_USDT,
-        'MIN_POSITION_FOR_POINTS_USDT': MIN_POSITION_FOR_POINTS_USDT,
-        'WARN_IF_BELOW_POINTS_THRESHOLD': WARN_IF_BELOW_POINTS_THRESHOLD,
+        'CAPITAL_MODE': config.CAPITAL_MODE,
+        'CAPITAL_AMOUNT_USDT': config.CAPITAL_AMOUNT_USDT,
+        'CAPITAL_PERCENTAGE': config.CAPITAL_PERCENTAGE,
+        'MIN_BALANCE_TO_CONTINUE_USDT': config.MIN_BALANCE_TO_CONTINUE_USDT,
+        'MIN_POSITION_SIZE_USDT': config.MIN_POSITION_SIZE_USDT,
+        'MIN_POSITION_FOR_POINTS_USDT': config.MIN_POSITION_FOR_POINTS_USDT,
+        'WARN_IF_BELOW_POINTS_THRESHOLD': config.WARN_IF_BELOW_POINTS_THRESHOLD,
 
         # Pricing
-        'SAFETY_MARGIN_CENTS': SAFETY_MARGIN_CENTS,
+        'SAFETY_MARGIN_CENTS': config.SAFETY_MARGIN_CENTS,
 
         # Monitoring
-        'FILL_CHECK_INTERVAL_SECONDS': FILL_CHECK_INTERVAL_SECONDS,
-        'BUY_ORDER_TIMEOUT_HOURS': BUY_ORDER_TIMEOUT_HOURS,
-        'SELL_ORDER_TIMEOUT_HOURS': SELL_ORDER_TIMEOUT_HOURS,
+        'FILL_CHECK_INTERVAL_SECONDS': config.FILL_CHECK_INTERVAL_SECONDS,
+        'BUY_ORDER_TIMEOUT_HOURS': config.BUY_ORDER_TIMEOUT_HOURS,
+        'SELL_ORDER_TIMEOUT_HOURS': config.SELL_ORDER_TIMEOUT_HOURS,
 
         # Liquidity
-        'LIQUIDITY_AUTO_CANCEL': LIQUIDITY_AUTO_CANCEL,
-        'LIQUIDITY_BID_DROP_THRESHOLD': LIQUIDITY_BID_DROP_THRESHOLD,
-        'LIQUIDITY_SPREAD_THRESHOLD': LIQUIDITY_SPREAD_THRESHOLD,
+        'LIQUIDITY_AUTO_CANCEL': config.LIQUIDITY_AUTO_CANCEL,
+        'LIQUIDITY_BID_DROP_THRESHOLD': config.LIQUIDITY_BID_DROP_THRESHOLD,
+        'LIQUIDITY_SPREAD_THRESHOLD': config.LIQUIDITY_SPREAD_THRESHOLD,
 
         # Stop-loss
-        'ENABLE_STOP_LOSS': ENABLE_STOP_LOSS,
-        'STOP_LOSS_TRIGGER_PERCENT': STOP_LOSS_TRIGGER_PERCENT,
-        'STOP_LOSS_AGGRESSIVE_OFFSET': STOP_LOSS_AGGRESSIVE_OFFSET,
+        'ENABLE_STOP_LOSS': config.ENABLE_STOP_LOSS,
+        'STOP_LOSS_TRIGGER_PERCENT': config.STOP_LOSS_TRIGGER_PERCENT,
+        'STOP_LOSS_AGGRESSIVE_OFFSET': config.STOP_LOSS_AGGRESSIVE_OFFSET,
 
         # Bot config
-        'BONUS_MARKETS_FILE': BONUS_MARKETS_FILE,
-        'SCORING_PROFILE': DEFAULT_SCORING_PROFILE,
+        'BONUS_MARKETS_FILE': config.BONUS_MARKETS_FILE,
+        'SCORING_PROFILE': config.DEFAULT_SCORING_PROFILE,
         'CYCLE_DELAY_SECONDS': 10,
         'MAX_CYCLES': args.max_cycles,
 
         # Telegram
-        'TELEGRAM_HEARTBEAT_INTERVAL_HOURS': TELEGRAM_HEARTBEAT_INTERVAL_HOURS,
+        'TELEGRAM_HEARTBEAT_INTERVAL_HOURS': config.TELEGRAM_HEARTBEAT_INTERVAL_HOURS,
 
         # Logging
-        'LOG_FILE': 'opinion_farming_bot.log'
+        'LOG_FILE': config.LOG_FILE
     }
 
     # =========================================================================
     # APPLY LIQUIDITY FARMING OVERRIDES
     # =========================================================================
     # Support both USE_LIQUIDITY_FARMING and USE_SPREAD_FARMING (backward compat)
-    if USE_LIQUIDITY_FARMING or USE_SPREAD_FARMING:
-        strategy_name = "Liquidity Farming" if USE_LIQUIDITY_FARMING else "Spread Farming (deprecated)"
-        strategy_config = LIQUIDITY_FARMING_CONFIG  # Both point to same config now
+    if config.USE_LIQUIDITY_FARMING or config.USE_SPREAD_FARMING:
+        strategy_name = "Liquidity Farming" if config.USE_LIQUIDITY_FARMING else "Spread Farming (deprecated)"
+        strategy_config = config.LIQUIDITY_FARMING_CONFIG  # Both point to same config now
 
         logger.info(f"🎯 {strategy_name} mode ACTIVE - applying overrides...")
         logger.info(f"   Scoring profile: {strategy_config['scoring_profile']}")
@@ -311,10 +312,9 @@ def main():
         logger.info(f"   Min spread: {strategy_config['min_spread_pct']}% (0% = no filter)")
 
         # Override config with liquidity farming parameters
-        config['SCORING_PROFILE'] = strategy_config['scoring_profile']
+        config_dict['SCORING_PROFILE'] = strategy_config['scoring_profile']
 
-        # Override outcome filters
-        # Note: config is now from config_loader, can set attributes directly
+        # Override outcome filters in config_loader (for other modules)
         config.OUTCOME_MIN_PROBABILITY = strategy_config['outcome_min_probability']
         config.OUTCOME_MAX_PROBABILITY = strategy_config['outcome_max_probability']
 
@@ -334,7 +334,7 @@ def main():
         logger.info("")
 
     # Display config summary
-    display_config_summary(config)
+    display_config_summary(config_dict)
     
     # =========================================================================
     # HANDLE --reset-state
@@ -744,12 +744,12 @@ def main():
         try:
             balance = client.get_usdt_balance()
             logger.info(f"💰 Current balance: ${balance:.2f} USDT")
-            
-            if balance < MIN_BALANCE_TO_CONTINUE_USDT:
-                logger.error(f"⚠️  Balance (${balance:.2f}) is below minimum (${MIN_BALANCE_TO_CONTINUE_USDT:.2f})")
+
+            if balance < config.MIN_BALANCE_TO_CONTINUE_USDT:
+                logger.error(f"⚠️  Balance (${balance:.2f}) is below minimum (${config.MIN_BALANCE_TO_CONTINUE_USDT:.2f})")
                 logger.error("   Please add funds before running bot")
                 return 1
-            
+
             logger.info("   Balance sufficient ✓")
             logger.info("")
         except Exception as e:

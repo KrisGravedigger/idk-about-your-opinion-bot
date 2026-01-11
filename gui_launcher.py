@@ -40,6 +40,11 @@ from config_validator import (
     validate_url, validate_telegram_token, validate_telegram_chat_id,
     validate_full_config, validate_credentials
 )
+from gui_helpers import (
+    toggle_field_visibility, toggle_widget_state,
+    show_validation_errors, show_validation_warnings,
+    validate_and_warn, load_json_file, save_json_file
+)
 
 # Disable SSL warnings (Opinion.trade uses self-signed cert)
 import urllib3
@@ -728,17 +733,14 @@ class BotLauncherGUI:
         
     def on_stop_loss_toggle(self):
         """Handle stop-loss toggle."""
-        enabled = self.enable_stop_loss_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.stop_loss_scale.config(state=state)
+        toggle_widget_state(self.enable_stop_loss_var, self.stop_loss_scale)
 
     def on_precision_toggle(self):
         """Handle precision settings toggle."""
-        enabled = self.enable_precision_edit_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.safety_margin_entry.config(state=state)
-        self.price_decimals_spinbox.config(state=state)
-        self.amount_decimals_spinbox.config(state=state)
+        toggle_widget_state(self.enable_precision_edit_var,
+                           self.safety_margin_entry,
+                           self.price_decimals_spinbox,
+                           self.amount_decimals_spinbox)
 
     def create_monitoring_tab(self) -> ttk.Frame:
         """Create Monitoring & Alerts tab."""
@@ -928,36 +930,23 @@ class BotLauncherGUI:
         
     def toggle_api_key_visibility(self):
         """Toggle API key visibility."""
-        if self.api_key_show_var.get():
-            self.api_key_entry.config(show="")
-        else:
-            self.api_key_entry.config(show="*")
-            
+        toggle_field_visibility(self.api_key_show_var, self.api_key_entry)
+
     def toggle_private_key_visibility(self):
         """Toggle private key visibility."""
-        if self.private_key_show_var.get():
-            self.private_key_entry.config(show="")
-        else:
-            self.private_key_entry.config(show="*")
-            
+        toggle_field_visibility(self.private_key_show_var, self.private_key_entry)
+
     def toggle_telegram_token_visibility(self):
         """Toggle Telegram token visibility."""
-        if self.telegram_token_show_var.get():
-            self.telegram_token_entry.config(show="")
-        else:
-            self.telegram_token_entry.config(show="*")
+        toggle_field_visibility(self.telegram_token_show_var, self.telegram_token_entry)
 
     def on_api_host_toggle(self):
         """Handle API host edit toggle."""
-        enabled = self.enable_api_host_edit_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.api_host_entry.config(state=state)
+        toggle_widget_state(self.enable_api_host_edit_var, self.api_host_entry)
 
     def on_rpc_toggle(self):
         """Handle RPC URL edit toggle."""
-        enabled = self.enable_rpc_edit_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.rpc_url_entry.config(state=state)
+        toggle_widget_state(self.enable_rpc_edit_var, self.rpc_url_entry)
 
     def setup_launcher_section(self):
         """Create bot launcher controls."""
@@ -1099,10 +1088,9 @@ class BotLauncherGUI:
         """Load configuration from bot_config.json or defaults from config.py."""
         try:
             config_file = Path("bot_config.json")
-            
+
             if config_file.exists():
-                with open(config_file, 'r') as f:
-                    self.config_data = json.load(f)
+                self.config_data = load_json_file(config_file)
                 self.update_status_bar("✅ Loaded configuration from bot_config.json")
             else:
                 # Load defaults from config.py
@@ -1309,20 +1297,9 @@ class BotLauncherGUI:
             config_data = self.collect_form_data()
             
             # Validate configuration
-            is_valid, errors, warnings = validate_full_config(config_data)
-            
-            if not is_valid:
-                error_msg = "Configuration validation failed:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
-                self.update_status_bar("❌ Validation failed - configuration not saved")
+            if not validate_and_warn(config_data, validate_full_config, "Save configuration"):
+                self.update_status_bar("❌ Validation failed or cancelled - configuration not saved")
                 return
-            
-            if warnings:
-                warning_msg = "Configuration has warnings:\n\n" + "\n".join(f"• {warn}" for warn in warnings)
-                warning_msg += "\n\nDo you want to save anyway?"
-                if not messagebox.askyesno("Configuration Warnings", warning_msg):
-                    self.update_status_bar("ℹ️ Save cancelled by user")
-                    return
             
             # Save bot configuration to JSON
             save_config_to_json(config_data, "bot_config.json")
@@ -1364,11 +1341,7 @@ class BotLauncherGUI:
             
             # Collect and validate
             config_data = self.collect_form_data()
-            is_valid, errors, warnings = validate_full_config(config_data)
-            
-            if not is_valid:
-                error_msg = "Cannot export invalid configuration:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
+            if not validate_and_warn(config_data, validate_full_config, "Export"):
                 return
             
             # Save (credentials are NOT included - handled by save_config_to_json)
@@ -1393,27 +1366,19 @@ class BotLauncherGUI:
                 return
             
             # Load and validate
-            with open(filename, 'r') as f:
-                imported_data = json.load(f)
-            
-            is_valid, errors, warnings = validate_full_config(imported_data)
-            
-            if not is_valid:
-                error_msg = "Imported configuration is invalid:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
+            imported_data = load_json_file(Path(filename))
+
+            if not validate_and_warn(imported_data, validate_full_config, "Import"):
                 return
             
             # Update config_data and populate form
             self.config_data = imported_data
             self.populate_form_fields()
             self.config_changed = True
-            
-            msg = f"Configuration imported from:\n{filename}\n\n"
-            if warnings:
-                msg += "Warnings:\n" + "\n".join(f"• {warn}" for warn in warnings) + "\n\n"
-            msg += "Click 'Save Configuration' to apply changes."
-            
-            messagebox.showinfo("Import Successful", msg)
+
+            messagebox.showinfo("Import Successful",
+                              f"Configuration imported from:\n{filename}\n\n"
+                              "Click 'Save Configuration' to apply changes.")
             self.update_status_bar(f"✅ Imported configuration from {Path(filename).name} (not saved yet)")
             
         except json.JSONDecodeError as e:
@@ -1442,11 +1407,7 @@ Do you want to proceed?"""
             config_data = self.extract_config_from_module(config_py)
             
             # Validate
-            is_valid, errors, warnings = validate_full_config(config_data)
-            
-            if not is_valid:
-                error_msg = "config.py contains invalid values:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
+            if not validate_and_warn(config_data, validate_full_config, "Import"):
                 return
             
             # Save to bot_config.json
@@ -1507,33 +1468,31 @@ Note: Credentials remain in .env file (not affected by this import)."""
         self.root.after(0, _append)
 
     def read_bot_output(self):
-        """Background thread that reads bot stdout/stderr and displays in log viewer."""
-        try:
-            import select
-            has_select = True
-        except ImportError:
-            # Windows doesn't have select for pipes
-            has_select = False
-
+        """Background thread that reads bot output from temp files and displays in log viewer."""
         def is_process_running():
             return self.bot_process and self.bot_process.poll() is None
 
         # Add startup message
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
-        self.append_to_log_viewer("Bot started. Waiting for output...\n", 'info')
+        self.append_to_log_viewer("Bot started. Reading from log files...\n", 'info')
 
-        if has_select:
-            # Unix-like: use select for non-blocking reads
-            import select
-            while is_process_running():
-                try:
-                    # Check if data is available (timeout 0.1s)
-                    readable, _, _ = select.select([self.bot_process.stdout, self.bot_process.stderr], [], [], 0.1)
+        # Open files for reading (bot has them open for writing)
+        # Use 'tail -f' style reading - read what's available, wait for more
+        stdout_pos = 0
+        stderr_pos = 0
 
-                    for stream in readable:
-                        line = stream.readline()
-                        if line:
+        import time
+        while is_process_running() or stdout_pos < os.path.getsize(self.bot_stdout_path):
+            try:
+                # Read new content from stdout file
+                with open(self.bot_stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                    f.seek(stdout_pos)
+                    new_lines = f.readlines()
+                    stdout_pos = f.tell()
+
+                    for line in new_lines:
+                        if line.strip():  # Skip empty lines
                             timestamp = datetime.now().strftime("%H:%M:%S")
                             self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
 
@@ -1545,80 +1504,57 @@ Note: Credentials remain in .env file (not affected by this import)."""
                                 self.append_to_log_viewer(line, 'warning')
                             elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
                                 self.append_to_log_viewer(line, 'success')
-                            elif 'info' in line_lower or '📊' in line or '🔍' in line:
+                            elif 'info' in line_lower or '📊' in line or '🔍' in line or '📝' in line:
                                 self.append_to_log_viewer(line, 'info')
                             else:
                                 self.append_to_log_viewer(line)
-                except Exception as e:
-                    # Don't crash the thread on read errors
-                    pass
-        else:
-            # Windows: Use threads to read both stdout and stderr
-            import queue
-            output_queue = queue.Queue()
 
-            def read_stream(stream, stream_name):
-                """Read from a stream and put lines in queue."""
-                try:
-                    for line in iter(stream.readline, ''):
-                        if line:
-                            output_queue.put(line)
-                except Exception:
-                    pass
+                # Read new content from stderr file
+                with open(self.bot_stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                    f.seek(stderr_pos)
+                    new_lines = f.readlines()
+                    stderr_pos = f.tell()
 
-            # Start reader threads for both streams
-            stdout_thread = threading.Thread(target=read_stream, args=(self.bot_process.stdout, 'stdout'), daemon=True)
-            stderr_thread = threading.Thread(target=read_stream, args=(self.bot_process.stderr, 'stderr'), daemon=True)
-            stdout_thread.start()
-            stderr_thread.start()
+                    for line in new_lines:
+                        if line.strip():
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+                            self.append_to_log_viewer(line, 'error')  # stderr is always error
 
-            # Read from queue while process is running
-            while is_process_running():
-                try:
-                    # Try to get line from queue with timeout
-                    line = output_queue.get(timeout=0.1)
+                # Sleep briefly to avoid busy-waiting
+                time.sleep(0.1)
 
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+            except Exception as e:
+                # Log error but don't crash thread
+                print(f"Error reading bot output: {e}")
+                time.sleep(0.5)
 
-                    # Color code based on content
-                    line_lower = line.lower()
-                    if 'error' in line_lower or 'exception' in line_lower or 'traceback' in line_lower:
-                        self.append_to_log_viewer(line, 'error')
-                    elif 'warning' in line_lower or 'warn' in line_lower:
-                        self.append_to_log_viewer(line, 'warning')
-                    elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
-                        self.append_to_log_viewer(line, 'success')
-                    elif 'info' in line_lower or '📊' in line or '🔍' in line:
-                        self.append_to_log_viewer(line, 'info')
-                    else:
-                        self.append_to_log_viewer(line)
-                except queue.Empty:
-                    # No output available, continue waiting
-                    pass
-                except Exception:
-                    # Process might have ended
-                    pass
+        # Process finished - read any remaining output
+        try:
+            with open(self.bot_stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                f.seek(stdout_pos)
+                remaining = f.read()
+                if remaining.strip():
+                    for line in remaining.split('\n'):
+                        if line.strip():
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] {line}\n")
 
-            # Drain remaining output from queue
-            while not output_queue.empty():
-                try:
-                    line = output_queue.get_nowait()
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
-                    self.append_to_log_viewer(line)
-                except queue.Empty:
-                    break
+            with open(self.bot_stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                f.seek(stderr_pos)
+                remaining = f.read()
+                if remaining.strip():
+                    for line in remaining.split('\n'):
+                        if line.strip():
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] {line}\n", 'error')
+        except:
+            pass
 
-        # Process ended - add final message
+        # Add completion message
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.append_to_log_viewer(f"\n[{timestamp}] ", 'timestamp')
-        if self.bot_process and self.bot_process.returncode == 0:
-            self.append_to_log_viewer("Bot stopped gracefully.\n", 'success')
-        elif self.bot_process:
-            self.append_to_log_viewer(f"Bot exited with code {self.bot_process.returncode}\n", 'error')
-        else:
-            self.append_to_log_viewer("Bot process ended.\n", 'info')
+        self.append_to_log_viewer("Bot process ended.\n", 'info')
 
     def start_bot(self):
         """Launch bot as subprocess."""
@@ -1634,29 +1570,18 @@ Note: Credentials remain in .env file (not affected by this import)."""
         
         # Validate configuration
         config_data = self.collect_form_data()
-        is_valid, errors, warnings = validate_full_config(config_data)
-        
-        if not is_valid:
-            error_msg = "Cannot start bot with invalid configuration:\n\n" + "\n".join(f"• {err}" for err in errors)
-            messagebox.showerror("Invalid Configuration", error_msg)
+        if not validate_and_warn(config_data, validate_full_config, "Start bot"):
             return
-        
-        if warnings:
-            warning_msg = "Configuration warnings:\n\n" + "\n".join(f"• {warn}" for warn in warnings)
-            warning_msg += "\n\nStart bot anyway?"
-            if not messagebox.askyesno("Configuration Warnings", warning_msg):
-                return
-        
+
         # Validate credentials
-        is_valid, errors, warnings = validate_credentials(
-            self.api_key_var.get(),
-            self.private_key_var.get(),
-            self.multi_sig_var.get()
-        )
-        
-        if not is_valid:
-            error_msg = "Cannot start bot with invalid credentials:\n\n" + "\n".join(f"• {err}" for err in errors)
-            messagebox.showerror("Invalid Credentials", error_msg)
+        def validate_creds_wrapper(data):
+            return validate_credentials(
+                self.api_key_var.get(),
+                self.private_key_var.get(),
+                self.multi_sig_var.get()
+            )
+
+        if not validate_and_warn({}, validate_creds_wrapper, "Start bot"):
             return
         
         try:
@@ -1666,14 +1591,26 @@ Note: Credentials remain in .env file (not affected by this import)."""
             # Prepare environment with unbuffered output
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'  # Force unbuffered output (immediate logs)
+            env['PYTHONIOENCODING'] = 'utf-8'  # Ensure UTF-8 encoding for emojis
 
-            # Launch bot subprocess
+            # Create temporary log file for subprocess stdout/stderr
+            # This prevents subprocess.PIPE deadlock (pipe buffer fills up and blocks process)
+            import tempfile
+            self.bot_stdout_file = tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8',
+                                                                 delete=False, suffix='_stdout.log')
+            self.bot_stderr_file = tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8',
+                                                                 delete=False, suffix='_stderr.log')
+
+            # Store file paths for reading
+            self.bot_stdout_path = self.bot_stdout_file.name
+            self.bot_stderr_path = self.bot_stderr_file.name
+
+            # Launch bot subprocess with stdout/stderr redirected to files
+            # This prevents deadlock - no pipe buffer to fill up!
             self.bot_process = subprocess.Popen(
-                [sys.executable, "autonomous_bot_main.py"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
+                [sys.executable, "-u", "autonomous_bot_main.py"],  # -u flag for unbuffered Python
+                stdout=self.bot_stdout_file,
+                stderr=self.bot_stderr_file,
                 env=env
             )
 
@@ -1794,32 +1731,41 @@ Note: Credentials remain in .env file (not affected by this import)."""
         # Results text area
         results_text = scrolledtext.ScrolledText(test_window, wrap=tk.WORD, font=("Consolas", 9))
         results_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
+
+        # Helper to safely write to widget (prevents crash if window closed during test)
+        def safe_write(text, tag=None):
+            """Safely write to results_text widget, handling window closure."""
+            try:
+                if results_text.winfo_exists():
+                    results_text.insert('end', text, tag) if tag else results_text.insert('end', text)
+            except:
+                pass  # Widget destroyed - silently ignore
+
         def run_tests():
-            results_text.insert('end', "🔧 Testing Configuration...\n")
-            results_text.insert('end', "=" * 60 + "\n\n")
+            safe_write( "🔧 Testing Configuration...\n")
+            safe_write( "=" * 60 + "\n\n")
             
             # Test 1: Validate configuration
-            results_text.insert('end', "1. Validating configuration...\n")
+            safe_write( "1. Validating configuration...\n")
             config_data = self.collect_form_data()
             is_valid, errors, warnings = validate_full_config(config_data)
             
             if is_valid:
-                results_text.insert('end', "   ✅ Configuration is valid\n", 'success')
+                safe_write( "   ✅ Configuration is valid\n", 'success')
             else:
-                results_text.insert('end', "   ❌ Configuration has errors:\n", 'error')
+                safe_write( "   ❌ Configuration has errors:\n", 'error')
                 for err in errors:
-                    results_text.insert('end', f"      • {err}\n", 'error')
+                    safe_write( f"      • {err}\n", 'error')
             
             if warnings:
-                results_text.insert('end', "   ⚠️  Warnings:\n", 'warning')
+                safe_write( "   ⚠️  Warnings:\n", 'warning')
                 for warn in warnings:
-                    results_text.insert('end', f"      • {warn}\n", 'warning')
+                    safe_write( f"      • {warn}\n", 'warning')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Test 2: Validate credentials
-            results_text.insert('end', "2. Validating credentials...\n")
+            safe_write( "2. Validating credentials...\n")
             is_valid, errors, warnings = validate_credentials(
                 self.api_key_var.get(),
                 self.private_key_var.get(),
@@ -1827,20 +1773,20 @@ Note: Credentials remain in .env file (not affected by this import)."""
             )
             
             if is_valid:
-                results_text.insert('end', "   ✅ Credentials are valid\n", 'success')
+                safe_write( "   ✅ Credentials are valid\n", 'success')
             else:
-                results_text.insert('end', "   ❌ Credentials have errors:\n", 'error')
+                safe_write( "   ❌ Credentials have errors:\n", 'error')
                 for err in errors:
-                    results_text.insert('end', f"      • {err}\n", 'error')
+                    safe_write( f"      • {err}\n", 'error')
             
             if warnings:
                 for warn in warnings:
-                    results_text.insert('end', f"   ⚠️  {warn}\n", 'warning')
+                    safe_write( f"   ⚠️  {warn}\n", 'warning')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Test 3: Check API connectivity
-            results_text.insert('end', "3. Testing API connectivity...\n")
+            safe_write( "3. Testing API connectivity...\n")
             api_host = self.api_host_var.get()
             api_key = self.api_key_var.get()
 
@@ -1851,42 +1797,42 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 parsed_url = api_host.replace('https://', '').replace('http://', '').split('/')[0]
                 test_url = f"https://{parsed_url}"
 
-                results_text.insert('end', f"   Testing connection to {parsed_url}...\n")
+                safe_write( f"   Testing connection to {parsed_url}...\n")
                 response = requests.get(test_url, timeout=5, verify=False)
-                results_text.insert('end', f"   ✅ Host is reachable (status {response.status_code})\n", 'success')
+                safe_write( f"   ✅ Host is reachable (status {response.status_code})\n", 'success')
             except requests.exceptions.SSLError:
-                results_text.insert('end', f"   ✅ Host is reachable (SSL cert issue is normal)\n", 'success')
+                safe_write( f"   ✅ Host is reachable (SSL cert issue is normal)\n", 'success')
             except requests.exceptions.Timeout:
-                results_text.insert('end', f"   ❌ Connection timed out\n", 'error')
+                safe_write( f"   ❌ Connection timed out\n", 'error')
             except requests.exceptions.ConnectionError as e:
-                results_text.insert('end', f"   ❌ Cannot connect: {str(e)[:100]}\n", 'error')
+                safe_write( f"   ❌ Cannot connect: {str(e)[:100]}\n", 'error')
             except Exception as e:
-                results_text.insert('end', f"   ⚠️  Connection test: {str(e)[:100]}\n", 'warning')
+                safe_write( f"   ⚠️  Connection test: {str(e)[:100]}\n", 'warning')
 
             # Test 3b: Try to initialize SDK client (if we have credentials)
             private_key = self.private_key_var.get().strip()
             rpc_url = self.rpc_url_var.get().strip()
 
             # Debug output
-            results_text.insert('end', f"   Debug - API key length: {len(api_key) if api_key else 0}\n")
-            results_text.insert('end', f"   Debug - Private key length: {len(private_key) if private_key else 0}\n")
-            results_text.insert('end', f"   Debug - RPC URL: {rpc_url[:50] if rpc_url else '(empty)'}...\n")
+            safe_write( f"   Debug - API key length: {len(api_key) if api_key else 0}\n")
+            safe_write( f"   Debug - Private key length: {len(private_key) if private_key else 0}\n")
+            safe_write( f"   Debug - RPC URL: {rpc_url[:50] if rpc_url else '(empty)'}...\n")
 
             if api_key and private_key and rpc_url:
-                results_text.insert('end', f"   Testing SDK initialization...\n")
+                safe_write( f"   Testing SDK initialization...\n")
                 try:
                     # Import SDK
                     from opinion_clob_sdk import Client
 
                     # Debug: show what we're passing
                     multi_sig = self.multi_sig_var.get().strip()
-                    results_text.insert('end', f"   Creating client with:\n")
-                    results_text.insert('end', f"      host={api_host}\n")
-                    results_text.insert('end', f"      apikey={api_key[:10]}...\n")
-                    results_text.insert('end', f"      private_key={private_key[:10]}... (len={len(private_key)})\n")
-                    results_text.insert('end', f"      rpc_url={rpc_url}\n")
+                    safe_write( f"   Creating client with:\n")
+                    safe_write( f"      host={api_host}\n")
+                    safe_write( f"      apikey={api_key[:10]}...\n")
+                    safe_write( f"      private_key={private_key[:10]}... (len={len(private_key)})\n")
+                    safe_write( f"      rpc_url={rpc_url}\n")
                     if multi_sig:
-                        results_text.insert('end', f"      multi_sig_addr={multi_sig}\n")
+                        safe_write( f"      multi_sig_addr={multi_sig}\n")
 
                     # Build client parameters
                     client_params = {
@@ -1902,41 +1848,42 @@ Note: Credentials remain in .env file (not affected by this import)."""
 
                     # Try to create client
                     test_client = Client(**client_params)
-                    results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')
+                    safe_write( f"   ✅ SDK client initialized successfully\n", 'success')
 
                     # Try to fetch markets
-                    results_text.insert('end', f"   Fetching markets list...\n")
+                    safe_write( f"   Fetching markets list...\n")
                     try:
-                        response = test_client.get_markets(page=1, page_size=1, status='ACTIVATED')
+                        from opinion_clob_sdk import TopicStatusFilter
+                        response = test_client.get_markets(page=1, limit=1, status=TopicStatusFilter.ACTIVATED)
                         if hasattr(response, 'success') and response.success:
-                            results_text.insert('end', f"   ✅ API is working! Successfully fetched markets\n", 'success')
+                            safe_write( f"   ✅ API is working! Successfully fetched markets\n", 'success')
                         elif hasattr(response, 'result'):
-                            results_text.insert('end', f"   ✅ API responded with data\n", 'success')
+                            safe_write( f"   ✅ API responded with data\n", 'success')
                         else:
-                            results_text.insert('end', f"   ⚠️  API responded but format unexpected\n", 'warning')
+                            safe_write( f"   ⚠️  API responded but format unexpected\n", 'warning')
                     except Exception as e:
                         error_str = str(e)
                         if "401" in error_str or "unauthorized" in error_str.lower():
-                            results_text.insert('end', f"   ❌ API key is invalid (401 Unauthorized)\n", 'error')
+                            safe_write( f"   ❌ API key is invalid (401 Unauthorized)\n", 'error')
                         else:
-                            results_text.insert('end', f"   ❌ API call failed: {error_str[:200]}\n", 'error')
+                            safe_write( f"   ❌ API call failed: {error_str[:200]}\n", 'error')
 
                 except ImportError:
-                    results_text.insert('end', f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
+                    safe_write( f"   ⚠️  opinion_clob_sdk not installed - cannot test API fully\n", 'warning')
                 except Exception as e:
                     error_str = str(e)
                     # Show full error for debugging
-                    results_text.insert('end', f"   ❌ SDK initialization failed:\n", 'error')
-                    results_text.insert('end', f"      {error_str[:300]}\n", 'error')
+                    safe_write( f"   ❌ SDK initialization failed:\n", 'error')
+                    safe_write( f"      {error_str[:300]}\n", 'error')
 
                     # Add hints based on error type
                     if "apikey" in error_str.lower():
-                        results_text.insert('end', f"      💡 Hint: Check API key format\n", 'warning')
+                        safe_write( f"      💡 Hint: Check API key format\n", 'warning')
                     elif "normalize" in error_str.lower() or "0x" in error_str:
-                        results_text.insert('end', f"      💡 Hint: Private key must start with '0x'\n", 'warning')
-                        results_text.insert('end', f"      💡 Hint: RPC URL format: https://... or wss://...\n", 'warning')
+                        safe_write( f"      💡 Hint: Private key must start with '0x'\n", 'warning')
+                        safe_write( f"      💡 Hint: RPC URL format: https://... or wss://...\n", 'warning')
                     elif "private" in error_str.lower():
-                        results_text.insert('end', f"      💡 Hint: Check private key format (must be 66 chars: 0x + 64 hex digits)\n", 'warning')
+                        safe_write( f"      💡 Hint: Check private key format (must be 66 chars: 0x + 64 hex digits)\n", 'warning')
             elif api_key:
                 # Have API key but missing other credentials
                 missing = []
@@ -1944,37 +1891,37 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     missing.append("Private Key")
                 if not rpc_url:
                     missing.append("RPC URL")
-                results_text.insert('end', f"   ℹ️  Skipping SDK test - missing: {', '.join(missing)}\n", 'info')
+                safe_write( f"   ℹ️  Skipping SDK test - missing: {', '.join(missing)}\n", 'info')
             else:
-                results_text.insert('end', f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
+                safe_write( f"   ℹ️  No API key provided - skipping SDK test\n", 'info')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Test 4: Check file paths
-            results_text.insert('end', "4. Checking file paths...\n")
+            safe_write( "4. Checking file paths...\n")
             log_file = Path(self.log_file_var.get())
-            results_text.insert('end', f"   Log file: {log_file}\n")
+            safe_write( f"   Log file: {log_file}\n")
             
             if log_file.exists():
-                results_text.insert('end', f"   ✅ Log file exists ({log_file.stat().st_size} bytes)\n", 'success')
+                safe_write( f"   ✅ Log file exists ({log_file.stat().st_size} bytes)\n", 'success')
             else:
-                results_text.insert('end', f"   ℹ️  Log file will be created on first run\n", 'info')
+                safe_write( f"   ℹ️  Log file will be created on first run\n", 'info')
             
             bonus_file = self.bonus_file_var.get()
             if bonus_file:
                 if Path(bonus_file).exists():
-                    results_text.insert('end', f"   ✅ Bonus markets file exists: {bonus_file}\n", 'success')
+                    safe_write( f"   ✅ Bonus markets file exists: {bonus_file}\n", 'success')
                 else:
-                    results_text.insert('end', f"   ⚠️  Bonus markets file not found: {bonus_file}\n", 'warning')
+                    safe_write( f"   ⚠️  Bonus markets file not found: {bonus_file}\n", 'warning')
             
-            results_text.insert('end', "\n")
+            safe_write( "\n")
             
             # Summary
-            results_text.insert('end', "=" * 60 + "\n")
-            results_text.insert('end', "🎯 Test Complete\n\n")
+            safe_write( "=" * 60 + "\n")
+            safe_write( "🎯 Test Complete\n\n")
             
             if is_valid:
-                results_text.insert('end', "✅ Configuration is ready for use!\n", 'success')
+                safe_write( "✅ Configuration is ready for use!\n", 'success')
             else:
                 results_text.insert('end', "❌ Fix errors before starting bot\n", 'error')
         
@@ -2120,29 +2067,22 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 messagebox.showerror("Profile Not Found", f"Profile file not found: {profile_name}")
                 return
             
-            with open(profile_path, 'r') as f:
-                profile_data = json.load(f)
-            
+            profile_data = load_json_file(profile_path)
+
             # Validate
-            is_valid, errors, warnings = validate_full_config(profile_data)
-            
-            if not is_valid:
-                error_msg = f"Profile '{profile_name}' is invalid:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Invalid Profile", error_msg)
+            if not validate_and_warn(profile_data, validate_full_config, "Load profile"):
                 return
-            
+
             # Load profile
             self.config_data = profile_data
             self.populate_form_fields()
             self.config_changed = True
-            
+
             msg = f"Loaded profile: {profile_name}\n\n"
             if 'profile_description' in profile_data:
                 msg += f"Description: {profile_data['profile_description']}\n\n"
-            if warnings:
-                msg += "Warnings:\n" + "\n".join(f"• {warn}" for warn in warnings) + "\n\n"
             msg += "Remember to Save Configuration to apply changes."
-            
+
             messagebox.showinfo("Profile Loaded", msg)
             self.update_status_bar(f"✅ Loaded profile: {profile_name} (not saved yet)")
             

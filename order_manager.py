@@ -20,14 +20,14 @@ import time
 from typing import Optional
 from decimal import Decimal
 
-from config import (
-    FILL_CHECK_INTERVAL_SECONDS,
-    ORDER_MONITOR_INTERVAL_SECONDS,
-    CAPITAL_MODE,
-    CAPITAL_AMOUNT_USDT,
-    CAPITAL_PERCENTAGE
-)
+from config_loader import config
 from logger_config import setup_logger
+
+FILL_CHECK_INTERVAL_SECONDS = config.FILL_CHECK_INTERVAL_SECONDS
+ORDER_MONITOR_INTERVAL_SECONDS = config.ORDER_MONITOR_INTERVAL_SECONDS
+CAPITAL_MODE = config.CAPITAL_MODE
+CAPITAL_AMOUNT_USDT = config.CAPITAL_AMOUNT_USDT
+CAPITAL_PERCENTAGE = config.CAPITAL_PERCENTAGE
 from utils import (
     round_price,
     format_price,

@@ -18,17 +18,17 @@ Higher score = more attractive market (wider spread, potential bonus points)
 from typing import Optional, Union
 from dataclasses import dataclass
 
-from config import (
-    BONUS_MARKETS_FILE,
-    BONUS_MULTIPLIER,
-    MIN_ORDERBOOK_ORDERS,
-    MIN_HOURS_UNTIL_CLOSE,
-    MAX_HOURS_UNTIL_CLOSE,
-    ORDERBOOK_BALANCE_RANGE,
-    get_scoring_profile,
-    DEFAULT_SCORING_PROFILE
-)
+from config_loader import config
+from config import get_scoring_profile  # Keep function import
 from logger_config import setup_logger, log_section_header
+
+BONUS_MARKETS_FILE = config.BONUS_MARKETS_FILE
+BONUS_MULTIPLIER = config.BONUS_MULTIPLIER
+MIN_ORDERBOOK_ORDERS = config.MIN_ORDERBOOK_ORDERS
+MIN_HOURS_UNTIL_CLOSE = config.MIN_HOURS_UNTIL_CLOSE
+MAX_HOURS_UNTIL_CLOSE = config.MAX_HOURS_UNTIL_CLOSE
+ORDERBOOK_BALANCE_RANGE = config.ORDERBOOK_BALANCE_RANGE
+DEFAULT_SCORING_PROFILE = config.DEFAULT_SCORING_PROFILE
 from utils import (
     safe_float,
     format_price,

@@ -18,12 +18,12 @@ from decimal import Decimal
 import math
 
 from logger_config import setup_logger
-from config import (
-    MIN_ORDER_VALUE_USDT,
-    MIN_SELLABLE_SHARES,
-    DUST_THRESHOLD,
-    MANUAL_SALE_THRESHOLD_PERCENT
-)
+from config_loader import config
+
+MIN_ORDER_VALUE_USDT = config.MIN_ORDER_VALUE_USDT
+MIN_SELLABLE_SHARES = config.MIN_SELLABLE_SHARES
+DUST_THRESHOLD = config.DUST_THRESHOLD
+MANUAL_SALE_THRESHOLD_PERCENT = config.MANUAL_SALE_THRESHOLD_PERCENT
 
 logger = setup_logger(__name__)
 
