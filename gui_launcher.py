@@ -1507,33 +1507,31 @@ Note: Credentials remain in .env file (not affected by this import)."""
         self.root.after(0, _append)
 
     def read_bot_output(self):
-        """Background thread that reads bot stdout/stderr and displays in log viewer."""
-        try:
-            import select
-            has_select = True
-        except ImportError:
-            # Windows doesn't have select for pipes
-            has_select = False
-
+        """Background thread that reads bot output from temp files and displays in log viewer."""
         def is_process_running():
             return self.bot_process and self.bot_process.poll() is None
 
         # Add startup message
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
-        self.append_to_log_viewer("Bot started. Waiting for output...\n", 'info')
+        self.append_to_log_viewer("Bot started. Reading from log files...\n", 'info')
 
-        if has_select:
-            # Unix-like: use select for non-blocking reads
-            import select
-            while is_process_running():
-                try:
-                    # Check if data is available (timeout 0.1s)
-                    readable, _, _ = select.select([self.bot_process.stdout, self.bot_process.stderr], [], [], 0.1)
+        # Open files for reading (bot has them open for writing)
+        # Use 'tail -f' style reading - read what's available, wait for more
+        stdout_pos = 0
+        stderr_pos = 0
 
-                    for stream in readable:
-                        line = stream.readline()
-                        if line:
+        import time
+        while is_process_running() or stdout_pos < os.path.getsize(self.bot_stdout_path):
+            try:
+                # Read new content from stdout file
+                with open(self.bot_stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                    f.seek(stdout_pos)
+                    new_lines = f.readlines()
+                    stdout_pos = f.tell()
+
+                    for line in new_lines:
+                        if line.strip():  # Skip empty lines
                             timestamp = datetime.now().strftime("%H:%M:%S")
                             self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
 
@@ -1545,80 +1543,57 @@ Note: Credentials remain in .env file (not affected by this import)."""
                                 self.append_to_log_viewer(line, 'warning')
                             elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
                                 self.append_to_log_viewer(line, 'success')
-                            elif 'info' in line_lower or '📊' in line or '🔍' in line:
+                            elif 'info' in line_lower or '📊' in line or '🔍' in line or '📝' in line:
                                 self.append_to_log_viewer(line, 'info')
                             else:
                                 self.append_to_log_viewer(line)
-                except Exception as e:
-                    # Don't crash the thread on read errors
-                    pass
-        else:
-            # Windows: Use threads to read both stdout and stderr
-            import queue
-            output_queue = queue.Queue()
 
-            def read_stream(stream, stream_name):
-                """Read from a stream and put lines in queue."""
-                try:
-                    for line in iter(stream.readline, ''):
-                        if line:
-                            output_queue.put(line)
-                except Exception:
-                    pass
+                # Read new content from stderr file
+                with open(self.bot_stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                    f.seek(stderr_pos)
+                    new_lines = f.readlines()
+                    stderr_pos = f.tell()
 
-            # Start reader threads for both streams
-            stdout_thread = threading.Thread(target=read_stream, args=(self.bot_process.stdout, 'stdout'), daemon=True)
-            stderr_thread = threading.Thread(target=read_stream, args=(self.bot_process.stderr, 'stderr'), daemon=True)
-            stdout_thread.start()
-            stderr_thread.start()
+                    for line in new_lines:
+                        if line.strip():
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+                            self.append_to_log_viewer(line, 'error')  # stderr is always error
 
-            # Read from queue while process is running
-            while is_process_running():
-                try:
-                    # Try to get line from queue with timeout
-                    line = output_queue.get(timeout=0.1)
+                # Sleep briefly to avoid busy-waiting
+                time.sleep(0.1)
 
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
+            except Exception as e:
+                # Log error but don't crash thread
+                print(f"Error reading bot output: {e}")
+                time.sleep(0.5)
 
-                    # Color code based on content
-                    line_lower = line.lower()
-                    if 'error' in line_lower or 'exception' in line_lower or 'traceback' in line_lower:
-                        self.append_to_log_viewer(line, 'error')
-                    elif 'warning' in line_lower or 'warn' in line_lower:
-                        self.append_to_log_viewer(line, 'warning')
-                    elif 'success' in line_lower or '✅' in line or 'completed' in line_lower:
-                        self.append_to_log_viewer(line, 'success')
-                    elif 'info' in line_lower or '📊' in line or '🔍' in line:
-                        self.append_to_log_viewer(line, 'info')
-                    else:
-                        self.append_to_log_viewer(line)
-                except queue.Empty:
-                    # No output available, continue waiting
-                    pass
-                except Exception:
-                    # Process might have ended
-                    pass
+        # Process finished - read any remaining output
+        try:
+            with open(self.bot_stdout_path, 'r', encoding='utf-8', errors='replace') as f:
+                f.seek(stdout_pos)
+                remaining = f.read()
+                if remaining.strip():
+                    for line in remaining.split('\n'):
+                        if line.strip():
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] {line}\n")
 
-            # Drain remaining output from queue
-            while not output_queue.empty():
-                try:
-                    line = output_queue.get_nowait()
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    self.append_to_log_viewer(f"[{timestamp}] ", 'timestamp')
-                    self.append_to_log_viewer(line)
-                except queue.Empty:
-                    break
+            with open(self.bot_stderr_path, 'r', encoding='utf-8', errors='replace') as f:
+                f.seek(stderr_pos)
+                remaining = f.read()
+                if remaining.strip():
+                    for line in remaining.split('\n'):
+                        if line.strip():
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            self.append_to_log_viewer(f"[{timestamp}] {line}\n", 'error')
+        except:
+            pass
 
-        # Process ended - add final message
+        # Add completion message
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.append_to_log_viewer(f"\n[{timestamp}] ", 'timestamp')
-        if self.bot_process and self.bot_process.returncode == 0:
-            self.append_to_log_viewer("Bot stopped gracefully.\n", 'success')
-        elif self.bot_process:
-            self.append_to_log_viewer(f"Bot exited with code {self.bot_process.returncode}\n", 'error')
-        else:
-            self.append_to_log_viewer("Bot process ended.\n", 'info')
+        self.append_to_log_viewer("Bot process ended.\n", 'info')
 
     def start_bot(self):
         """Launch bot as subprocess."""
@@ -1668,18 +1643,25 @@ Note: Credentials remain in .env file (not affected by this import)."""
             env['PYTHONUNBUFFERED'] = '1'  # Force unbuffered output (immediate logs)
             env['PYTHONIOENCODING'] = 'utf-8'  # Ensure UTF-8 encoding for emojis
 
-            # Launch bot subprocess
-            # NOTE: On Windows, use line buffering (bufsize=1) with text=True for proper line-by-line reading
-            # Python -u flag disables internal buffering
+            # Create temporary log file for subprocess stdout/stderr
+            # This prevents subprocess.PIPE deadlock (pipe buffer fills up and blocks process)
+            import tempfile
+            self.bot_stdout_file = tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8',
+                                                                 delete=False, suffix='_stdout.log')
+            self.bot_stderr_file = tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8',
+                                                                 delete=False, suffix='_stderr.log')
+
+            # Store file paths for reading
+            self.bot_stdout_path = self.bot_stdout_file.name
+            self.bot_stderr_path = self.bot_stderr_file.name
+
+            # Launch bot subprocess with stdout/stderr redirected to files
+            # This prevents deadlock - no pipe buffer to fill up!
             self.bot_process = subprocess.Popen(
                 [sys.executable, "-u", "autonomous_bot_main.py"],  # -u flag for unbuffered Python
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # Line buffering for text mode (required on Windows)
-                env=env,
-                encoding='utf-8',  # Explicit UTF-8 encoding
-                errors='replace'  # Replace invalid characters instead of crashing
+                stdout=self.bot_stdout_file,
+                stderr=self.bot_stderr_file,
+                env=env
             )
 
             # Monitor bot for early crashes (check every second for 15 seconds)
