@@ -22,6 +22,30 @@ from datetime import datetime
 from config import LOG_FILE, LOG_LEVEL
 
 
+class PrintHandler(logging.Handler):
+    """
+    Custom logging handler that uses print() instead of stream.write().
+    This ensures output goes to current sys.stdout (important for subprocess capture).
+
+    Unlike StreamHandler which caches sys.stdout reference, print() always
+    uses the current sys.stdout, making it work correctly when stdout is
+    redirected after handler creation.
+    """
+
+    def emit(self, record):
+        """
+        Emit a record using print().
+
+        Args:
+            record: LogRecord to emit
+        """
+        try:
+            msg = self.format(record)
+            print(msg, flush=True)  # flush=True ensures immediate output for GUI capture
+        except Exception:
+            self.handleError(record)
+
+
 class ColoredFormatter(logging.Formatter):
     """
     Custom formatter that adds colors to console output.
@@ -57,12 +81,7 @@ class ColoredFormatter(logging.Formatter):
         record.levelname = f"{color}{record.levelname}{reset}"
         record.msg = f"{indicator} {record.msg}"
 
-        result = super().format(record)
-
-        # Force flush stdout after each log (critical for GUI subprocess capture)
-        sys.stdout.flush()
-
-        return result
+        return super().format(record)
 
 
 def setup_logger(name: str) -> logging.Logger:
@@ -91,14 +110,12 @@ def setup_logger(name: str) -> logging.Logger:
         return logger
     
     # =========================================================================
-    # CONSOLE HANDLER
+    # CONSOLE HANDLER (using PrintHandler for subprocess capture)
     # =========================================================================
-    # Outputs to terminal with colors and emojis
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Uses print() instead of stream.write() to ensure output goes to current
+    # sys.stdout (critical for GUI subprocess capture on Windows)
+    console_handler = PrintHandler()
     console_handler.setLevel(logging.INFO)  # Console shows INFO and above
-
-    # Force unbuffered output (important for GUI subprocess capture)
-    console_handler.stream.reconfigure(line_buffering=True) if hasattr(console_handler.stream, 'reconfigure') else None
 
     console_format = ColoredFormatter(
         fmt='%(asctime)s │ %(levelname)-17s │ %(message)s',

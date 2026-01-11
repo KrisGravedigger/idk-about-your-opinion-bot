@@ -1879,20 +1879,29 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     from opinion_clob_sdk import Client
 
                     # Debug: show what we're passing
+                    multi_sig = self.multi_sig_var.get().strip()
                     results_text.insert('end', f"   Creating client with:\n")
                     results_text.insert('end', f"      host={api_host}\n")
                     results_text.insert('end', f"      apikey={api_key[:10]}...\n")
                     results_text.insert('end', f"      private_key={private_key[:10]}... (len={len(private_key)})\n")
                     results_text.insert('end', f"      rpc_url={rpc_url}\n")
+                    if multi_sig:
+                        results_text.insert('end', f"      multi_sig_addr={multi_sig}\n")
 
-                    # Try to create client (using correct SDK parameters)
-                    test_client = Client(
-                        host=api_host,
-                        apikey=api_key,
-                        chain_id=56,  # BSC mainnet
-                        private_key=private_key,
-                        rpc_url=rpc_url
-                    )
+                    # Build client parameters
+                    client_params = {
+                        'host': api_host,
+                        'apikey': api_key,
+                        'chain_id': 56,
+                        'private_key': private_key,
+                        'rpc_url': rpc_url
+                    }
+                    # Add multi_sig_addr only if provided
+                    if multi_sig:
+                        client_params['multi_sig_addr'] = multi_sig
+
+                    # Try to create client
+                    test_client = Client(**client_params)
                     results_text.insert('end', f"   ✅ SDK client initialized successfully\n", 'success')
 
                     # Try to fetch markets
