@@ -40,6 +40,11 @@ from config_validator import (
     validate_url, validate_telegram_token, validate_telegram_chat_id,
     validate_full_config, validate_credentials
 )
+from gui_helpers import (
+    toggle_field_visibility, toggle_widget_state,
+    show_validation_errors, show_validation_warnings,
+    validate_and_warn, load_json_file, save_json_file
+)
 
 # Disable SSL warnings (Opinion.trade uses self-signed cert)
 import urllib3
@@ -728,17 +733,14 @@ class BotLauncherGUI:
         
     def on_stop_loss_toggle(self):
         """Handle stop-loss toggle."""
-        enabled = self.enable_stop_loss_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.stop_loss_scale.config(state=state)
+        toggle_widget_state(self.enable_stop_loss_var, self.stop_loss_scale)
 
     def on_precision_toggle(self):
         """Handle precision settings toggle."""
-        enabled = self.enable_precision_edit_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.safety_margin_entry.config(state=state)
-        self.price_decimals_spinbox.config(state=state)
-        self.amount_decimals_spinbox.config(state=state)
+        toggle_widget_state(self.enable_precision_edit_var,
+                           self.safety_margin_entry,
+                           self.price_decimals_spinbox,
+                           self.amount_decimals_spinbox)
 
     def create_monitoring_tab(self) -> ttk.Frame:
         """Create Monitoring & Alerts tab."""
@@ -928,36 +930,23 @@ class BotLauncherGUI:
         
     def toggle_api_key_visibility(self):
         """Toggle API key visibility."""
-        if self.api_key_show_var.get():
-            self.api_key_entry.config(show="")
-        else:
-            self.api_key_entry.config(show="*")
-            
+        toggle_field_visibility(self.api_key_show_var, self.api_key_entry)
+
     def toggle_private_key_visibility(self):
         """Toggle private key visibility."""
-        if self.private_key_show_var.get():
-            self.private_key_entry.config(show="")
-        else:
-            self.private_key_entry.config(show="*")
-            
+        toggle_field_visibility(self.private_key_show_var, self.private_key_entry)
+
     def toggle_telegram_token_visibility(self):
         """Toggle Telegram token visibility."""
-        if self.telegram_token_show_var.get():
-            self.telegram_token_entry.config(show="")
-        else:
-            self.telegram_token_entry.config(show="*")
+        toggle_field_visibility(self.telegram_token_show_var, self.telegram_token_entry)
 
     def on_api_host_toggle(self):
         """Handle API host edit toggle."""
-        enabled = self.enable_api_host_edit_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.api_host_entry.config(state=state)
+        toggle_widget_state(self.enable_api_host_edit_var, self.api_host_entry)
 
     def on_rpc_toggle(self):
         """Handle RPC URL edit toggle."""
-        enabled = self.enable_rpc_edit_var.get()
-        state = 'normal' if enabled else 'disabled'
-        self.rpc_url_entry.config(state=state)
+        toggle_widget_state(self.enable_rpc_edit_var, self.rpc_url_entry)
 
     def setup_launcher_section(self):
         """Create bot launcher controls."""
@@ -1099,10 +1088,9 @@ class BotLauncherGUI:
         """Load configuration from bot_config.json or defaults from config.py."""
         try:
             config_file = Path("bot_config.json")
-            
+
             if config_file.exists():
-                with open(config_file, 'r') as f:
-                    self.config_data = json.load(f)
+                self.config_data = load_json_file(config_file)
                 self.update_status_bar("✅ Loaded configuration from bot_config.json")
             else:
                 # Load defaults from config.py
@@ -1309,20 +1297,9 @@ class BotLauncherGUI:
             config_data = self.collect_form_data()
             
             # Validate configuration
-            is_valid, errors, warnings = validate_full_config(config_data)
-            
-            if not is_valid:
-                error_msg = "Configuration validation failed:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
-                self.update_status_bar("❌ Validation failed - configuration not saved")
+            if not validate_and_warn(config_data, validate_full_config, "Save configuration"):
+                self.update_status_bar("❌ Validation failed or cancelled - configuration not saved")
                 return
-            
-            if warnings:
-                warning_msg = "Configuration has warnings:\n\n" + "\n".join(f"• {warn}" for warn in warnings)
-                warning_msg += "\n\nDo you want to save anyway?"
-                if not messagebox.askyesno("Configuration Warnings", warning_msg):
-                    self.update_status_bar("ℹ️ Save cancelled by user")
-                    return
             
             # Save bot configuration to JSON
             save_config_to_json(config_data, "bot_config.json")
@@ -1364,11 +1341,7 @@ class BotLauncherGUI:
             
             # Collect and validate
             config_data = self.collect_form_data()
-            is_valid, errors, warnings = validate_full_config(config_data)
-            
-            if not is_valid:
-                error_msg = "Cannot export invalid configuration:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
+            if not validate_and_warn(config_data, validate_full_config, "Export"):
                 return
             
             # Save (credentials are NOT included - handled by save_config_to_json)
@@ -1393,27 +1366,19 @@ class BotLauncherGUI:
                 return
             
             # Load and validate
-            with open(filename, 'r') as f:
-                imported_data = json.load(f)
-            
-            is_valid, errors, warnings = validate_full_config(imported_data)
-            
-            if not is_valid:
-                error_msg = "Imported configuration is invalid:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
+            imported_data = load_json_file(Path(filename))
+
+            if not validate_and_warn(imported_data, validate_full_config, "Import"):
                 return
             
             # Update config_data and populate form
             self.config_data = imported_data
             self.populate_form_fields()
             self.config_changed = True
-            
-            msg = f"Configuration imported from:\n{filename}\n\n"
-            if warnings:
-                msg += "Warnings:\n" + "\n".join(f"• {warn}" for warn in warnings) + "\n\n"
-            msg += "Click 'Save Configuration' to apply changes."
-            
-            messagebox.showinfo("Import Successful", msg)
+
+            messagebox.showinfo("Import Successful",
+                              f"Configuration imported from:\n{filename}\n\n"
+                              "Click 'Save Configuration' to apply changes.")
             self.update_status_bar(f"✅ Imported configuration from {Path(filename).name} (not saved yet)")
             
         except json.JSONDecodeError as e:
@@ -1442,11 +1407,7 @@ Do you want to proceed?"""
             config_data = self.extract_config_from_module(config_py)
             
             # Validate
-            is_valid, errors, warnings = validate_full_config(config_data)
-            
-            if not is_valid:
-                error_msg = "config.py contains invalid values:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Validation Error", error_msg)
+            if not validate_and_warn(config_data, validate_full_config, "Import"):
                 return
             
             # Save to bot_config.json
@@ -1609,29 +1570,18 @@ Note: Credentials remain in .env file (not affected by this import)."""
         
         # Validate configuration
         config_data = self.collect_form_data()
-        is_valid, errors, warnings = validate_full_config(config_data)
-        
-        if not is_valid:
-            error_msg = "Cannot start bot with invalid configuration:\n\n" + "\n".join(f"• {err}" for err in errors)
-            messagebox.showerror("Invalid Configuration", error_msg)
+        if not validate_and_warn(config_data, validate_full_config, "Start bot"):
             return
-        
-        if warnings:
-            warning_msg = "Configuration warnings:\n\n" + "\n".join(f"• {warn}" for warn in warnings)
-            warning_msg += "\n\nStart bot anyway?"
-            if not messagebox.askyesno("Configuration Warnings", warning_msg):
-                return
-        
+
         # Validate credentials
-        is_valid, errors, warnings = validate_credentials(
-            self.api_key_var.get(),
-            self.private_key_var.get(),
-            self.multi_sig_var.get()
-        )
-        
-        if not is_valid:
-            error_msg = "Cannot start bot with invalid credentials:\n\n" + "\n".join(f"• {err}" for err in errors)
-            messagebox.showerror("Invalid Credentials", error_msg)
+        def validate_creds_wrapper(data):
+            return validate_credentials(
+                self.api_key_var.get(),
+                self.private_key_var.get(),
+                self.multi_sig_var.get()
+            )
+
+        if not validate_and_warn({}, validate_creds_wrapper, "Start bot"):
             return
         
         try:
@@ -2117,29 +2067,22 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 messagebox.showerror("Profile Not Found", f"Profile file not found: {profile_name}")
                 return
             
-            with open(profile_path, 'r') as f:
-                profile_data = json.load(f)
-            
+            profile_data = load_json_file(profile_path)
+
             # Validate
-            is_valid, errors, warnings = validate_full_config(profile_data)
-            
-            if not is_valid:
-                error_msg = f"Profile '{profile_name}' is invalid:\n\n" + "\n".join(f"• {err}" for err in errors)
-                messagebox.showerror("Invalid Profile", error_msg)
+            if not validate_and_warn(profile_data, validate_full_config, "Load profile"):
                 return
-            
+
             # Load profile
             self.config_data = profile_data
             self.populate_form_fields()
             self.config_changed = True
-            
+
             msg = f"Loaded profile: {profile_name}\n\n"
             if 'profile_description' in profile_data:
                 msg += f"Description: {profile_data['profile_description']}\n\n"
-            if warnings:
-                msg += "Warnings:\n" + "\n".join(f"• {warn}" for warn in warnings) + "\n\n"
             msg += "Remember to Save Configuration to apply changes."
-            
+
             messagebox.showinfo("Profile Loaded", msg)
             self.update_status_bar(f"✅ Loaded profile: {profile_name} (not saved yet)")
             
