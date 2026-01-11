@@ -17,11 +17,11 @@ from datetime import datetime
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation
 from typing import Any, Optional, Union
 
-from config import (
-    PRICE_DECIMALS,
-    AMOUNT_DECIMALS,
-    STATE_FILE
-)
+from config_loader import config
+
+PRICE_DECIMALS = config.PRICE_DECIMALS
+AMOUNT_DECIMALS = config.AMOUNT_DECIMALS
+STATE_FILE = config.STATE_FILE
 
 
 # =============================================================================

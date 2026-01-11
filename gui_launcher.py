@@ -1907,7 +1907,8 @@ Note: Credentials remain in .env file (not affected by this import)."""
                     # Try to fetch markets
                     results_text.insert('end', f"   Fetching markets list...\n")
                     try:
-                        response = test_client.get_markets(page=1, page_size=1, status='ACTIVATED')
+                        from opinion_clob_sdk import TopicStatusFilter
+                        response = test_client.get_markets(page=1, limit=1, status=TopicStatusFilter.ACTIVATED)
                         if hasattr(response, 'success') and response.success:
                             results_text.insert('end', f"   ✅ API is working! Successfully fetched markets\n", 'success')
                         elif hasattr(response, 'result'):

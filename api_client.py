@@ -46,16 +46,17 @@ from opinion_clob_sdk.chain.py_order_utils.model.sides import OrderSide
 from opinion_clob_sdk.chain.py_order_utils.model.order_type import LIMIT_ORDER
 
 # Local imports
-from config import (
-    API_HOST,
-    API_KEY,
-    PRIVATE_KEY,
-    MULTI_SIG_ADDRESS,
-    CHAIN_ID,
-    RPC_URL
-)
+from config_loader import config
 from logger_config import setup_logger
 from utils import safe_float, safe_int, wei_to_usdt_float
+
+# Extract credentials from config_loader (merges config.py + .env)
+API_HOST = config.API_HOST
+API_KEY = config.API_KEY
+PRIVATE_KEY = config.PRIVATE_KEY
+MULTI_SIG_ADDRESS = config.MULTI_SIG_ADDRESS
+CHAIN_ID = config.CHAIN_ID
+RPC_URL = config.RPC_URL
 
 
 
