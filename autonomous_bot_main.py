@@ -60,12 +60,26 @@ import sys
 import argparse
 from pathlib import Path
 
+# Fix for Windows UTF-8 console output (handles emoji and unicode characters)
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 # Local imports
-from config import validate_config
+from config_loader import config
 from logger_config import setup_logger, log_startup_banner
 from api_client import create_client
 from core.autonomous_bot import AutonomousBot
 from utils import clear_state, get_timestamp
+
+# Import validate_config if it exists
+try:
+    from config import validate_config
+except ImportError:
+    # Fallback if validate_config doesn't exist
+    def validate_config():
+        return True
 
 # Initialize logger
 logger = setup_logger(__name__)
@@ -300,22 +314,21 @@ def main():
         config['SCORING_PROFILE'] = strategy_config['scoring_profile']
 
         # Override outcome filters
-        # Note: These are module-level imports, so we need to import and patch them
-        import config as config_module
-        config_module.OUTCOME_MIN_PROBABILITY = strategy_config['outcome_min_probability']
-        config_module.OUTCOME_MAX_PROBABILITY = strategy_config['outcome_max_probability']
+        # Note: config is now from config_loader, can set attributes directly
+        config.OUTCOME_MIN_PROBABILITY = strategy_config['outcome_min_probability']
+        config.OUTCOME_MAX_PROBABILITY = strategy_config['outcome_max_probability']
 
         # Override orderbook balance range (None = disable hard filter)
         if strategy_config['orderbook_balance_range'] is not None:
-            config_module.ORDERBOOK_BALANCE_RANGE = strategy_config['orderbook_balance_range']
+            config.ORDERBOOK_BALANCE_RANGE = strategy_config['orderbook_balance_range']
         else:
-            config_module.ORDERBOOK_BALANCE_RANGE = None
+            config.ORDERBOOK_BALANCE_RANGE = None
 
         # Override min hours until close (None = disable filter)
         if strategy_config['min_hours_until_close'] is not None:
-            config_module.MIN_HOURS_UNTIL_CLOSE = strategy_config['min_hours_until_close']
+            config.MIN_HOURS_UNTIL_CLOSE = strategy_config['min_hours_until_close']
         else:
-            config_module.MIN_HOURS_UNTIL_CLOSE = None
+            config.MIN_HOURS_UNTIL_CLOSE = None
 
         logger.info("   ✓ Overrides applied")
         logger.info("")

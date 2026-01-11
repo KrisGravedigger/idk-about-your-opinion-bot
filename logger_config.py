@@ -22,12 +22,36 @@ from datetime import datetime
 from config import LOG_FILE, LOG_LEVEL
 
 
+class PrintHandler(logging.Handler):
+    """
+    Custom logging handler that uses print() instead of stream.write().
+    This ensures output goes to current sys.stdout (important for subprocess capture).
+
+    Unlike StreamHandler which caches sys.stdout reference, print() always
+    uses the current sys.stdout, making it work correctly when stdout is
+    redirected after handler creation.
+    """
+
+    def emit(self, record):
+        """
+        Emit a record using print().
+
+        Args:
+            record: LogRecord to emit
+        """
+        try:
+            msg = self.format(record)
+            print(msg, flush=True)  # flush=True ensures immediate output for GUI capture
+        except Exception:
+            self.handleError(record)
+
+
 class ColoredFormatter(logging.Formatter):
     """
     Custom formatter that adds colors to console output.
     Makes it easier to spot warnings and errors in terminal.
     """
-    
+
     # ANSI color codes
     COLORS = {
         'DEBUG': '\033[36m',     # Cyan
@@ -37,7 +61,7 @@ class ColoredFormatter(logging.Formatter):
         'CRITICAL': '\033[35m',  # Magenta
         'RESET': '\033[0m'       # Reset
     }
-    
+
     # Emoji indicators for quick visual scanning
     INDICATORS = {
         'DEBUG': '🔍',
@@ -46,17 +70,17 @@ class ColoredFormatter(logging.Formatter):
         'ERROR': '❌',
         'CRITICAL': '🚨'
     }
-    
+
     def format(self, record):
         # Add color and indicator based on log level
         color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         reset = self.COLORS['RESET']
         indicator = self.INDICATORS.get(record.levelname, '')
-        
+
         # Format the message
         record.levelname = f"{color}{record.levelname}{reset}"
         record.msg = f"{indicator} {record.msg}"
-        
+
         return super().format(record)
 
 
@@ -86,12 +110,13 @@ def setup_logger(name: str) -> logging.Logger:
         return logger
     
     # =========================================================================
-    # CONSOLE HANDLER
+    # CONSOLE HANDLER (using PrintHandler for subprocess capture)
     # =========================================================================
-    # Outputs to terminal with colors and emojis
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Uses print() instead of stream.write() to ensure output goes to current
+    # sys.stdout (critical for GUI subprocess capture on Windows)
+    console_handler = PrintHandler()
     console_handler.setLevel(logging.INFO)  # Console shows INFO and above
-    
+
     console_format = ColoredFormatter(
         fmt='%(asctime)s │ %(levelname)-17s │ %(message)s',
         datefmt='%H:%M:%S'
