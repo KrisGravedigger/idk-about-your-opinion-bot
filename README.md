@@ -1,16 +1,42 @@
 # Opinion Trading Bot 🤖
 
-**Version 0.3 (Beta)**
+**Version 1.0.0 - The Accessibility Update**
 
 **Autonomous trading bot for Opinion.trade prediction markets on BNB Chain**
 
 A sophisticated liquidity provision bot designed to maximize airdrop points while generating trading profits through automated market-making strategies.
 
-> ⚠️ **BETA SOFTWARE**: Version 0.3 introduces significant new features (Telegram notifications, persistent P&L statistics, enhanced market filters) that have not been extensively tested in production. **Use with caution** and start with small amounts. Monitor the bot closely and report any issues.
+---
+
+## 📦 Standalone Executable - NEW in v1.0!
+
+**No Python installation required!** Download pre-built executables for your platform:
+
+- 🪟 **[Windows (10/11)](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)** - OpinionBot_Windows.zip
+- 🐧 **[Linux (Ubuntu 20.04+)](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)** - OpinionBot_Linux.zip
+- 🍎 **[macOS (10.15+)](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)** - OpinionBot_macOS.zip
+
+**Quick Start (2 minutes):**
+1. Download ZIP for your platform (~40-60 MB)
+2. Extract to a folder
+3. Double-click `OpinionBot.exe` (Windows) or `OpinionBot` (Linux/macOS)
+4. Follow welcome wizard → Configure credentials → Start trading!
+
+**Features:**
+- ✅ Self-contained (no dependencies to install)
+- ✅ Beautiful GUI with 6 configuration tabs
+- ✅ Real-time log viewer
+- ✅ Auto-update notifications
+- ✅ Welcome wizard for first-time setup
+
+**For technical users:** You can still run from source as before. See [Installation](#-installation) below.
 
 ---
 
 ## 📋 Table of Contents
+
+- [Standalone Executable](#-standalone-executable---new-in-v10)
+- [What's New in 1.0](#-whats-new-in-10)
 
 - [What's New in 0.3](#-whats-new-in-03)
 - [Features](#-features)
@@ -27,6 +53,71 @@ A sophisticated liquidity provision bot designed to maximize airdrop points whil
 - [Troubleshooting](#-troubleshooting)
 - [Development](#-development)
 - [License & Disclaimer](#-license--disclaimer)
+
+---
+
+## 🎉 What's New in 1.0
+
+**Major milestone: Making algorithmic trading accessible to everyone!**
+
+### 🖥️ **Standalone Executable Distribution**
+
+**No Python installation required!**
+
+- Download → Extract → Run (2 minutes setup)
+- Self-contained executables for Windows, Linux, macOS (~120-150 MB)
+- Zero dependency management
+- Auto-update notifications
+
+### 🎨 **Full-Featured GUI Configuration Tool**
+
+**Visual interface replaces manual config editing!**
+
+**6 Configuration Tabs:**
+- 💰 **Capital** - Visual mode selection, slider for percentages, tooltips
+- 📊 **Markets** - Scoring profiles, weight editor, market filters
+- 💱 **Trading** - Spread thresholds, improvement amounts
+- 🛡️ **Risk** - Stop-loss settings, order timeouts, liquidity monitoring
+- 🔔 **Monitoring** - Log level, Telegram integration, Test button
+- 🔐 **Credentials** - Masked fields, show/hide toggles, **clickable help links**
+
+**Bot Control Panel:**
+- ▶️ Start/⏹️ Stop/🔄 Restart buttons
+- Real-time status display (Running/Stopped)
+- Live log viewer with syntax highlighting
+- Utility buttons (View Logs, Open Folder, View PnL)
+
+### 🎁 **Welcome Wizard**
+
+**First-time users get guided setup:**
+- Auto-creates .env, bot_config.json, bonus_markets.txt
+- Step-by-step instructions
+- Opens Credentials tab automatically
+- Help links for API Key and Telegram setup
+
+### 🔄 **Auto-Update System**
+
+- Background check on startup
+- Notifies when new version available
+- One-click download
+- Settings preserved during update
+
+### 📖 **Integrated Help**
+
+**Clickable links in Credentials tab:**
+- "Don't have an API Key? Click here to request access" → Opens Google Form
+- "Need help setting up Telegram? Click here for guide" → Opens TELEGRAM_SETUP.md
+
+### 📊 **Impact**
+
+| Before v1.0 | After v1.0 |
+|-------------|------------|
+| 30 min setup | 2 min setup |
+| Python required | No installation |
+| Edit config.py | Visual GUI |
+| Developers only | Everyone |
+
+**See [TAG_DESCRIPTION_v1.0.0.txt](TAG_DESCRIPTION_v1.0.0.txt) for complete v1.0 details.**
 
 ---
 
