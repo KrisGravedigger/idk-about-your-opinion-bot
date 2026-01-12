@@ -1,0 +1,185 @@
+name: Build and Release Executables
+
+# Trigger workflow when a version tag is pushed (e.g., v0.3.0, v0.4.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Allow manual trigger from Actions tab (for testing)
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          # Windows build
+          - os: windows-latest
+            platform: Windows
+            ext: .exe
+            artifact_name: OpinionBot_Windows
+            python_version: '3.10'
+
+          # Linux build
+          - os: ubuntu-20.04
+            platform: Linux
+            ext: ''
+            artifact_name: OpinionBot_Linux
+            python_version: '3.10'
+
+          # macOS build
+          - os: macos-latest
+            platform: macOS
+            ext: ''
+            artifact_name: OpinionBot_macOS
+            python_version: '3.10'
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Python 3.10
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python_version }}
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller packaging
+
+      # Step 4: Build executable with PyInstaller
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller build_gui.spec
+
+      # Step 5: Create version.txt with tag version
+      - name: Create version.txt
+        run: |
+          echo "${GITHUB_REF#refs/tags/v}" > dist/OpinionBot/version.txt
+        shell: bash
+
+      # Step 6: Copy additional files to distribution
+      - name: Copy additional files
+        run: |
+          cp .env.example dist/OpinionBot/
+          cp README.md dist/OpinionBot/README.txt
+          cp LICENSE dist/OpinionBot/ || echo "No LICENSE file found"
+        shell: bash
+
+      # Step 7: Create user-friendly README for release
+      - name: Create release README
+        run: |
+          if [ -f RELEASE_README.txt ]; then
+            cp RELEASE_README.txt dist/OpinionBot/README_RELEASE.txt
+          else
+            echo "RELEASE_README.txt not found, skipping"
+          fi
+        shell: bash
+
+      # Step 8: Make executable executable on Unix systems
+      - name: Make executable (Unix only)
+        if: matrix.os != 'windows-latest'
+        run: |
+          chmod +x dist/OpinionBot/OpinionBot
+
+      # Step 9: Create ZIP archive (Windows)
+      - name: Create ZIP archive (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd dist
+          powershell Compress-Archive -Path OpinionBot -DestinationPath ${{ matrix.artifact_name }}.zip
+
+      # Step 10: Create ZIP archive (Linux/macOS)
+      - name: Create ZIP archive (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd dist
+          zip -r ${{ matrix.artifact_name }}.zip OpinionBot
+
+      # Step 11: Upload artifact for this build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}.zip
+          retention-days: 30
+
+      # Step 12: Upload to GitHub Release
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/${{ matrix.artifact_name }}.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 13: Print build summary
+      - name: Build summary
+        run: |
+          echo "✅ Build complete for ${{ matrix.platform }}"
+          echo "📦 Artifact: ${{ matrix.artifact_name }}.zip"
+          echo "📍 Location: dist/${{ matrix.artifact_name }}.zip"
+          if [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            echo "🚀 Uploaded to GitHub Releases"
+          fi
+        shell: bash
+
+# Job to create a release summary
+  release-summary:
+    name: Create Release Summary
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Create release notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "# Opinion Trading Bot $VERSION" > release_notes.md
+          echo "" >> release_notes.md
+          echo "## Downloads" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "Choose the download for your operating system:" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- **Windows**: OpinionBot_Windows.zip" >> release_notes.md
+          echo "- **Linux**: OpinionBot_Linux.zip" >> release_notes.md
+          echo "- **macOS**: OpinionBot_macOS.zip" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## Installation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "1. Download the ZIP file for your platform" >> release_notes.md
+          echo "2. Extract to a folder of your choice" >> release_notes.md
+          echo "3. Run OpinionBot.exe (Windows) or OpinionBot (Linux/macOS)" >> release_notes.md
+          echo "4. Configure your credentials in the GUI" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## What's New" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "See README.txt in the distribution for full changelog." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## Support" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- Documentation: See README.txt in the distribution" >> release_notes.md
+          echo "- Issues: https://github.com/${{ github.repository }}/issues" >> release_notes.md
+          cat release_notes.md
+
+      - name: Print completion message
+        run: |
+          echo "✅ All builds completed successfully!"
+          echo "📦 3 platform builds: Windows, Linux, macOS"
+          echo "🚀 Release published: ${GITHUB_REF#refs/tags/}"
+          echo "🔗 View release: https://github.com/${{ github.repository }}/releases"

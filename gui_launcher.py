@@ -25,9 +25,19 @@ import time
 import os
 import sys
 import webbrowser
+import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime
+
+# Import for version comparison
+try:
+    from packaging import version
+    PACKAGING_AVAILABLE = True
+except ImportError:
+    PACKAGING_AVAILABLE = False
+    print("Warning: packaging library not installed. Update checking will be disabled.")
+    print("Install with: pip install packaging")
 
 # Import configuration modules
 import config as config_py
@@ -123,13 +133,20 @@ class BotLauncherGUI:
         self.setup_action_buttons()  # Goes into left column
         self.setup_launcher_section()  # Goes into right column
         self.setup_status_bar()  # Goes at bottom of root
-        
+
+        # Check first run and setup files
+        self.check_first_run_and_setup()
+
         # Load initial configuration
         self.load_configuration()
-        
+
         # Check bot status on startup
         self.check_bot_status()
-        
+
+        # Check for updates (async, non-blocking)
+        if PACKAGING_AVAILABLE:
+            threading.Thread(target=self.check_for_updates, daemon=True).start()
+
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
@@ -1232,7 +1249,199 @@ class BotLauncherGUI:
         
         # Credentials tab
         self.api_host_var.set(self.config_data.get('api_host', 'https://proxy.opinion.trade:8443'))
-        
+
+    def check_first_run_and_setup(self):
+        """
+        Check if this is first run and generate necessary files.
+        Called during GUI startup before loading configuration.
+        """
+        first_run = False
+
+        # 1. Check and create .env from .env.example
+        if not Path(".env").exists():
+            first_run = True
+            print("ℹ️  First run detected - creating .env from template...")
+
+            if Path(".env.example").exists():
+                shutil.copy(".env.example", ".env")
+                print("✅ Created .env from .env.example")
+            else:
+                # Fallback: create minimal .env if template missing
+                self.create_minimal_env()
+
+        # 2. Check and create bonus_markets.txt
+        if not Path("bonus_markets.txt").exists():
+            print("ℹ️  Creating empty bonus_markets.txt...")
+
+            # Check if there's an example file
+            if Path("bonus_markets.txt.example").exists():
+                shutil.copy("bonus_markets.txt.example", "bonus_markets.txt")
+                print("✅ Created bonus_markets.txt from example")
+            else:
+                # Create empty file with template
+                Path("bonus_markets.txt").write_text(
+                    "# Bonus Market Addresses (one per line)\n"
+                    "# Example: 0x1234567890abcdef...\n"
+                    "# These markets get priority scoring.\n\n"
+                )
+                print("✅ Created empty bonus_markets.txt")
+
+        # 3. Check and create bot_config.json if missing
+        if not Path("bot_config.json").exists():
+            print("ℹ️  Creating default bot_config.json...")
+            # Use existing extract_config_from_module method
+            default_config = self.extract_config_from_module(config_py)
+            save_config_to_json(default_config, "bot_config.json")
+            print("✅ Created bot_config.json with defaults")
+
+        # 4. Show welcome wizard if first run
+        if first_run:
+            # Schedule the wizard to show after GUI is fully initialized
+            self.root.after(1000, self.show_first_run_wizard)
+
+        return first_run
+
+    def create_minimal_env(self):
+        """Create minimal .env file with placeholders."""
+        minimal_env = """# Opinion Trading Bot - Environment Variables
+# Fill in your values below:
+
+# Opinion.trade API Key
+# Get this from your account settings on Opinion.trade
+API_KEY=your_api_key_here
+
+# Your wallet's private key (64 hex characters, with or without 0x prefix)
+# NEVER share this! Anyone with this key can drain your wallet.
+PRIVATE_KEY=0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+
+# Your wallet address (if using Gnosis Safe, use Safe address)
+MULTI_SIG_ADDRESS=0xYourWalletAddressHere
+
+# RPC URL for BNB Chain (optional, default is public Binance node)
+RPC_URL=https://bsc-dataseed.binance.org
+
+# Telegram Notifications (optional)
+# Get bot token from @BotFather on Telegram
+# Get chat ID from @userinfobot
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+"""
+        Path(".env").write_text(minimal_env)
+        print("✅ Created .env with template values")
+
+    def show_first_run_wizard(self):
+        """Show welcome wizard for first-time users."""
+        welcome_msg = """🎉 Welcome to Opinion Trading Bot!
+
+This appears to be your first time running the bot.
+
+I've created the following files for you:
+  • .env - Store your API keys and credentials here
+  • bonus_markets.txt - Optional list of bonus markets
+  • bot_config.json - Bot configuration
+
+Next steps:
+1. Go to the 🔐 Credentials tab
+2. Enter your API Key, Private Key, and Wallet Address
+3. (Optional) Configure Telegram notifications
+4. Click 💾 Save Configuration
+5. Adjust settings in other tabs (Capital, Markets, Trading, Risk)
+6. Click ▶ Start Bot
+
+Would you like to open the Credentials tab now?"""
+
+        if messagebox.askyesno("Welcome to Opinion Trading Bot!", welcome_msg):
+            # Switch to Credentials tab (index 5 - 0-indexed, last tab)
+            self.notebook.select(5)
+            self.update_status_bar("ℹ️  Please configure your credentials in the Credentials tab")
+
+    def get_current_version(self) -> str:
+        """Get current bot version from version.txt file."""
+        version_file = Path("version.txt")
+        if version_file.exists():
+            try:
+                return version_file.read_text().strip()
+            except Exception as e:
+                print(f"Warning: Could not read version.txt: {e}")
+                return "0.3.0"  # Fallback
+        return "0.3.0"  # Fallback if file doesn't exist
+
+    def check_for_updates(self):
+        """
+        Check GitHub for new releases (runs in background thread).
+        Non-blocking - shows notification if update available.
+        """
+        try:
+            import requests
+
+            current_version = self.get_current_version()
+
+            # GitHub API endpoint for latest release
+            # Replace YOUR_USERNAME with actual GitHub username
+            api_url = "https://api.github.com/repos/KrisGravedigger/idk-about-your-opinion-bot/releases/latest"
+
+            response = requests.get(api_url, timeout=5)
+
+            if response.status_code != 200:
+                # Silently fail - don't annoy user if GitHub is down
+                print(f"Update check: GitHub API returned {response.status_code}")
+                return
+
+            data = response.json()
+            latest_version = data.get("tag_name", "").lstrip("v")  # Remove 'v' prefix
+
+            if not latest_version:
+                print("Update check: No version tag found in release")
+                return
+
+            # Compare versions
+            if version.parse(latest_version) > version.parse(current_version):
+                # New version available!
+                download_url = data.get("html_url")  # Link to release page
+
+                # Show notification in GUI thread
+                self.root.after(0, lambda: self.show_update_notification(
+                    latest_version,
+                    current_version,
+                    download_url
+                ))
+            else:
+                print(f"Update check: Already on latest version (v{current_version})")
+
+        except requests.exceptions.RequestException as e:
+            # Network error - silently fail
+            print(f"Update check failed (network): {e}")
+        except Exception as e:
+            # Silently fail - don't interrupt user experience
+            print(f"Update check failed: {e}")
+
+    def show_update_notification(self, new_version: str, current_version: str, download_url: str):
+        """Show update notification dialog."""
+        msg = f"""🎉 New Version Available!
+
+Current Version: v{current_version}
+Latest Version: v{new_version}
+
+Would you like to download the update?
+
+Update Instructions:
+1. Stop the bot (click ⏹ Stop Bot)
+2. Download the new version
+3. Extract to this folder (overwrite files)
+4. Your settings will be preserved:
+   - .env (credentials)
+   - state.json (bot state)
+   - pnl_stats.json (statistics)
+   - bot_config.json (configuration)
+
+Click Yes to open the download page."""
+
+        if messagebox.askyesno("Update Available", msg):
+            webbrowser.open(download_url)
+            self.update_status_bar(f"🔄 Update available: v{new_version} (opened download page)")
+        else:
+            self.update_status_bar(f"ℹ️  Update available: v{new_version} (skipped)")
+
     def collect_form_data(self) -> dict:
         """Collect all form data into a dictionary."""
         data = {}
