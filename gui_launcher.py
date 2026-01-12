@@ -867,21 +867,33 @@ class BotLauncherGUI:
         self.api_key_var = tk.StringVar(value="")
         self.api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key_var, width=40, show="*")
         self.api_key_entry.grid(row=0, column=1, sticky='w', pady=5, padx=5)
-        
+
         self.api_key_show_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(api_frame, text="Show", variable=self.api_key_show_var, command=self.toggle_api_key_visibility).grid(row=0, column=2, pady=5)
-        
-        ttk.Label(api_frame, text="Private Key:").grid(row=1, column=0, sticky='w', pady=5)
+
+        # Help link for API Key
+        api_help_label = tk.Label(
+            api_frame,
+            text="📖 Don't have an API Key? Click here to request access",
+            foreground="blue",
+            cursor="hand2",
+            font=("TkDefaultFont", 9, "underline")
+        )
+        api_help_label.grid(row=1, column=1, columnspan=2, sticky='w', pady=(0, 5))
+        api_help_label.bind("<Button-1>", lambda e: self.open_api_key_request_form())
+        ToolTip(api_help_label, "Opens Opinion.trade API access request form in your browser.\n\nFill the form to request API access from the Opinion.trade team.")
+
+        ttk.Label(api_frame, text="Private Key:").grid(row=2, column=0, sticky='w', pady=5)
         self.private_key_var = tk.StringVar(value="")
         self.private_key_entry = ttk.Entry(api_frame, textvariable=self.private_key_var, width=40, show="*")
-        self.private_key_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
-        
+        self.private_key_entry.grid(row=2, column=1, sticky='w', pady=5, padx=5)
+
         self.private_key_show_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(api_frame, text="Show", variable=self.private_key_show_var, command=self.toggle_private_key_visibility).grid(row=1, column=2, pady=5)
-        
-        ttk.Label(api_frame, text="Multi-sig Address:").grid(row=2, column=0, sticky='w', pady=5)
+        ttk.Checkbutton(api_frame, text="Show", variable=self.private_key_show_var, command=self.toggle_private_key_visibility).grid(row=2, column=2, pady=5)
+
+        ttk.Label(api_frame, text="Multi-sig Address:").grid(row=3, column=0, sticky='w', pady=5)
         self.multi_sig_var = tk.StringVar(value="")
-        ttk.Entry(api_frame, textvariable=self.multi_sig_var, width=40).grid(row=2, column=1, sticky='w', pady=5, padx=5)
+        ttk.Entry(api_frame, textvariable=self.multi_sig_var, width=40).grid(row=3, column=1, sticky='w', pady=5, padx=5)
         ToolTip(api_frame.winfo_children()[-1], "Multi-signature wallet address.\n\nLeave empty for READ-ONLY mode (no trading)\nRequired for live trading")
 
         # API Host with lock
@@ -892,13 +904,13 @@ class BotLauncherGUI:
             variable=self.enable_api_host_edit_var,
             command=self.on_api_host_toggle
         )
-        cb_api_host.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
+        cb_api_host.grid(row=4, column=0, columnspan=3, sticky='w', pady=5)
         ToolTip(cb_api_host, "⚠️ WARNING: Don't change unless instructed!\n\nDefault API host works for everyone.\nChanging this may break connectivity.")
 
-        ttk.Label(api_frame, text="API Host:").grid(row=4, column=0, sticky='w', pady=5)
+        ttk.Label(api_frame, text="API Host:").grid(row=5, column=0, sticky='w', pady=5)
         self.api_host_var = tk.StringVar(value="https://proxy.opinion.trade:8443")
         self.api_host_entry = ttk.Entry(api_frame, textvariable=self.api_host_var, width=40, state='disabled')
-        self.api_host_entry.grid(row=4, column=1, sticky='w', pady=5, padx=5)
+        self.api_host_entry.grid(row=5, column=1, sticky='w', pady=5, padx=5)
         ToolTip(self.api_host_entry, "Opinion.trade API endpoint.\n\nDefault: https://proxy.opinion.trade:8443\nDon't change unless instructed")
         
         # === Telegram Section ===
@@ -909,16 +921,28 @@ class BotLauncherGUI:
         self.telegram_token_var = tk.StringVar(value="")
         self.telegram_token_entry = ttk.Entry(telegram_frame, textvariable=self.telegram_token_var, width=40, show="*")
         self.telegram_token_entry.grid(row=0, column=1, sticky='w', pady=5, padx=5)
-        
+
         self.telegram_token_show_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(telegram_frame, text="Show", variable=self.telegram_token_show_var, command=self.toggle_telegram_token_visibility).grid(row=0, column=2, pady=5)
-        
-        ttk.Label(telegram_frame, text="Chat ID:").grid(row=1, column=0, sticky='w', pady=5)
+
+        # Help link for Telegram setup
+        telegram_help_label = tk.Label(
+            telegram_frame,
+            text="📖 Need help setting up Telegram? Click here for step-by-step guide",
+            foreground="blue",
+            cursor="hand2",
+            font=("TkDefaultFont", 9, "underline")
+        )
+        telegram_help_label.grid(row=1, column=1, columnspan=2, sticky='w', pady=(0, 5))
+        telegram_help_label.bind("<Button-1>", lambda e: self.open_telegram_setup_guide())
+        ToolTip(telegram_help_label, "Opens Telegram setup guide with detailed instructions.\n\nShows how to:\n- Create a Telegram bot with @BotFather\n- Get your Chat ID\n- Test notifications")
+
+        ttk.Label(telegram_frame, text="Chat ID:").grid(row=2, column=0, sticky='w', pady=5)
         self.telegram_chat_id_var = tk.StringVar(value="")
-        ttk.Entry(telegram_frame, textvariable=self.telegram_chat_id_var, width=40).grid(row=1, column=1, sticky='w', pady=5, padx=5)
+        ttk.Entry(telegram_frame, textvariable=self.telegram_chat_id_var, width=40).grid(row=2, column=1, sticky='w', pady=5, padx=5)
         ToolTip(telegram_frame.winfo_children()[-1], "Your Telegram chat ID.\n\nCan be numeric or @username\nLeave empty to disable Telegram")
-        
-        ttk.Button(telegram_frame, text="Test Telegram", command=self.test_telegram).grid(row=2, column=1, sticky='w', pady=5)
+
+        ttk.Button(telegram_frame, text="Test Telegram", command=self.test_telegram).grid(row=3, column=1, sticky='w', pady=5)
         
         # === Blockchain Section ===
         blockchain_frame = ttk.LabelFrame(scrollable_frame, text="Blockchain RPC (Advanced)", padding=10)
@@ -965,6 +989,54 @@ class BotLauncherGUI:
     def on_rpc_toggle(self):
         """Handle RPC URL edit toggle."""
         toggle_widget_state(self.enable_rpc_edit_var, self.rpc_url_entry)
+
+    def open_api_key_request_form(self):
+        """Open Opinion.trade API access request form in browser."""
+        url = "https://docs.google.com/forms/d/1h7gp8UffZeXzYQ-lv4jcou9PoRNOqMAQhyW4IwZDnII"
+        try:
+            webbrowser.open(url)
+            self.update_status_bar("📖 Opened API Key request form in browser")
+            messagebox.showinfo(
+                "API Key Request",
+                "The API access request form has been opened in your browser.\n\n"
+                "Please fill out the form to request API access from the Opinion.trade team.\n\n"
+                "You should receive your API key via email after your request is approved."
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open browser:\n{e}\n\nPlease visit manually:\n{url}")
+
+    def open_telegram_setup_guide(self):
+        """Open Telegram setup guide."""
+        # Try to open local file first, fallback to GitHub
+        local_guide = Path("TELEGRAM_SETUP.md")
+        github_url = "https://github.com/KrisGravedigger/idk-about-your-opinion-bot/blob/main/TELEGRAM_SETUP.md"
+
+        try:
+            if local_guide.exists():
+                # Open in default markdown viewer or text editor
+                if sys.platform == 'win32':
+                    os.startfile(str(local_guide))
+                elif sys.platform == 'darwin':  # macOS
+                    subprocess.run(['open', str(local_guide)])
+                else:  # Linux
+                    subprocess.run(['xdg-open', str(local_guide)])
+                self.update_status_bar("📖 Opened Telegram setup guide")
+            else:
+                # Fallback to GitHub
+                webbrowser.open(github_url)
+                self.update_status_bar("📖 Opened Telegram setup guide in browser")
+        except Exception as e:
+            # Last resort: open GitHub URL
+            try:
+                webbrowser.open(github_url)
+                self.update_status_bar("📖 Opened Telegram setup guide in browser")
+            except:
+                messagebox.showerror(
+                    "Error",
+                    f"Failed to open Telegram setup guide.\n\n"
+                    f"Please visit manually:\n{github_url}\n\n"
+                    f"Or check TELEGRAM_SETUP.md in the installation folder."
+                )
 
     def setup_launcher_section(self):
         """Create bot launcher controls."""
@@ -1143,9 +1215,13 @@ class BotLauncherGUI:
                 self.update_status_bar("ℹ️ Loaded defaults from config.py")
             
             # Load credentials from .env
+            # IMPORTANT: Only load from current directory, not parent directories
+            # This prevents accidentally loading developer's real credentials during testing
             from dotenv import load_dotenv
-            load_dotenv()
-            
+            env_file = Path(".env")
+            if env_file.exists():
+                load_dotenv(dotenv_path=env_file, verbose=False)
+
             self.api_key_var.set(os.getenv("API_KEY", ""))
             self.private_key_var.set(os.getenv("PRIVATE_KEY", ""))
             self.multi_sig_var.set(os.getenv("MULTI_SIG_ADDRESS", ""))

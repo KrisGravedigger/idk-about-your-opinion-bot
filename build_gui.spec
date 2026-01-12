@@ -38,6 +38,7 @@ datas = [
 optional_files = [
     ('bonus_markets.txt.example', '.'),  # Bonus markets template
     ('LICENSE', '.'),                     # License file
+    ('TELEGRAM_SETUP.md', '.'),          # Telegram setup guide
 ]
 
 for src, dst in optional_files:
