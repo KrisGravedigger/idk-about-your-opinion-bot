@@ -303,7 +303,9 @@ class MarketScanner:
         Returns:
             List of eligible outcome dictionaries
         """
-        from config import OUTCOME_MIN_PROBABILITY, OUTCOME_MAX_PROBABILITY
+        # Get config values from merged config (respects bot_config.json)
+        OUTCOME_MIN_PROBABILITY = config.OUTCOME_MIN_PROBABILITY
+        OUTCOME_MAX_PROBABILITY = config.OUTCOME_MAX_PROBABILITY
 
         logger.debug(f"🎯 Outcome probability filtering:")
         logger.debug(f"   Config range: {OUTCOME_MIN_PROBABILITY*100:.0f}%-{OUTCOME_MAX_PROBABILITY*100:.0f}%")
@@ -405,12 +407,10 @@ class MarketScanner:
             logger.debug("")
             return None
 
-        # Import config values
-        from config import (
-            OUTCOME_MIN_PROBABILITY,
-            OUTCOME_MAX_PROBABILITY,
-            OUTCOME_PROBABILITY_METHOD
-        )
+        # Get config values from merged config (respects bot_config.json)
+        OUTCOME_MIN_PROBABILITY = config.OUTCOME_MIN_PROBABILITY
+        OUTCOME_MAX_PROBABILITY = config.OUTCOME_MAX_PROBABILITY
+        OUTCOME_PROBABILITY_METHOD = config.OUTCOME_PROBABILITY_METHOD
 
         # Fetch BOTH orderbooks
         logger.debug(f"📡 Fetching YES orderbook: {yes_token_id[:20]}...")
@@ -444,8 +444,6 @@ class MarketScanner:
         # ========================================================================
         # OUTCOME PROBABILITY FILTERING
         # ========================================================================
-        from config import OUTCOME_PROBABILITY_METHOD
-
         logger.debug(f"   Method: {OUTCOME_PROBABILITY_METHOD}")
 
         # Calculate implied probabilities
