@@ -18,6 +18,7 @@ A sophisticated liquidity provision bot designed to maximize airdrop points whil
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
 - [Configuration](#-configuration)
+- [GUI Configuration Tool](#-gui-configuration-tool)
 - [Telegram Notifications](#-telegram-notifications)
 - [Running the Bot](#-running-the-bot)
 - [How It Works](#-how-it-works)
@@ -97,6 +98,14 @@ A sophisticated liquidity provision bot designed to maximize airdrop points whil
 - **Session Summaries** - Comprehensive performance reports on startup and shutdown
 - **State Persistence** - Resume interrupted trading cycles seamlessly
 
+### User Interface
+- **GUI Configuration Tool** - Visual interface for configuration and bot control (2,308 lines)
+- **6 Configuration Tabs** - Capital, Market, Trading, Risk, Monitoring, Credentials
+- **Real-Time Log Viewer** - Live bot output with syntax highlighting
+- **One-Click Bot Control** - Start/stop/restart with visual status monitoring
+- **Profile Management** - Save/load different trading strategies
+- **Import/Export** - Configuration backup and sharing
+
 ---
 
 ## 🏗️ Architecture
@@ -142,8 +151,10 @@ opinion_trading_bot/
 ├── utils.py                       # Helper functions
 ├── logger_config.py               # Logging configuration
 ├── config.py                      # Configuration parameters
+├── gui_launcher.py                # GUI configuration & launcher tool
+├── gui_helpers.py                 # GUI utility functions
 │
-├── autonomous_bot_main.py         # Entry point
+├── autonomous_bot_main.py         # Entry point (CLI)
 ├── state.json                     # Bot state (auto-generated)
 ├── pnl_stats.json                 # ⭐ NEW - P&L statistics (auto-generated)
 ├── bonus_markets.txt              # Bonus market IDs
@@ -202,13 +213,20 @@ cp .env.example .env
 # 5. (Optional) Add bonus markets
 # Edit bonus_markets.txt with market IDs (one per line)
 
-# 6. Adjust configuration
-# Edit config.py to set capital, strategy parameters, etc.
+# 6. Configure and run the bot
 
-# 7. Run the bot
+# OPTION A: Use GUI (recommended for beginners)
+python gui_launcher.py
+# - Visual interface for all configuration
+# - One-click bot start/stop
+# - Real-time log viewer
+# - See "GUI Configuration Tool" section below
+
+# OPTION B: Use CLI (advanced users)
+# Edit config.py to set capital, strategy parameters, etc.
 python autonomous_bot_main.py
 
-# Optional flags:
+# Optional CLI flags:
 python autonomous_bot_main.py --max-cycles 5  # Run for 5 cycles then stop
 python autonomous_bot_main.py --reset-state   # Start fresh (clear previous state)
 ```
@@ -374,6 +392,148 @@ SCORING_PROFILES = {
 
 DEFAULT_SCORING_PROFILE = 'production_farming'
 ```
+
+---
+
+## 🎛️ GUI Configuration Tool
+
+For users who prefer a visual interface, the bot includes a comprehensive GUI configurator and launcher.
+
+### Features
+
+**🎨 Visual Configuration Interface**
+- **6 Configuration Tabs**: Capital, Market Filters, Trading Strategy, Risk Management, Monitoring, Credentials
+- **Real-time Validation**: Instant feedback on configuration errors
+- **Tooltips**: Helpful explanations for each setting
+- **Profile Management**: Save/load different trading strategies
+
+**🚀 Integrated Bot Launcher**
+- **One-Click Start/Stop**: Launch bot as subprocess with visual controls
+- **Real-Time Log Viewer**: Live console output with syntax highlighting
+- **Status Monitoring**: Track bot status, PID, and runtime
+- **Quick Actions**: Restart bot, view logs, open folders, check P&L
+
+**💾 Configuration Management**
+- **Import/Export**: Save configurations as JSON files
+- **Merge with config.py**: Import settings from Python config file
+- **Pre-built Profiles**: Load test mode, aggressive, or conservative profiles
+- **Credential Manager**: Securely save API keys and wallet info to `.env`
+
+### Usage
+
+```bash
+# Launch GUI
+python gui_launcher.py
+```
+
+### Interface Overview
+
+#### Configuration Tabs
+
+1. **Capital Tab**
+   - Choose between Fixed or Percentage capital mode
+   - Set position size and safety thresholds
+   - Configure minimum balance requirements
+
+2. **Market Tab**
+   - Time-based filters (min/max hours until market close)
+   - Orderbook balance filters
+   - Outcome probability ranges
+   - Scoring profile selection (Production Farming, Test Quick Fill, Custom)
+   - Custom scoring weights editor
+
+3. **Trading Tab**
+   - Spread thresholds configuration
+   - Price improvement amounts for each threshold
+   - Market maker strategy settings
+
+4. **Risk Tab**
+   - Stop-loss protection settings
+   - Order timeout configuration (BUY/SELL)
+   - Liquidity monitoring thresholds
+   - Auto-cancel parameters
+
+5. **Monitoring Tab**
+   - Logging level selection
+   - Telegram notifications toggle
+   - Heartbeat interval configuration
+   - Test Telegram connection button
+
+6. **Credentials Tab**
+   - API Key and Private Key input (masked)
+   - Multi-sig wallet address
+   - RPC URL configuration
+   - Telegram bot credentials
+   - Save to `.env` button
+
+#### Bot Control Panel
+
+**Control Buttons:**
+- ▶️ **Start Bot** - Launch bot with current configuration
+- ⏹️ **Stop Bot** - Gracefully stop running bot
+- 🔄 **Restart** - Stop and restart bot
+
+**Status Display:**
+- Current bot status (Running/Stopped)
+- Process ID (PID)
+- Runtime duration
+
+**Utility Buttons:**
+- 📊 **View Logs** - Open log files in default editor
+- 📁 **Open Folder** - Open bot directory in file explorer
+- 🗑️ **Clear Logs** - Clear the real-time log viewer
+- 📊 **View PnL** - View P&L statistics (pnl_stats.json)
+- 📋 **View State** - View current bot state (state.json)
+
+**Real-Time Log Viewer:**
+- Live output from bot with colored syntax highlighting
+- Auto-scroll toggle
+- Dark theme for comfortable viewing
+- Timestamps and log level indicators
+
+### Menu Bar
+
+**File Menu:**
+- New Configuration
+- Load Configuration...
+- Save Configuration (Ctrl+S)
+- Save As...
+- Import from config.py
+- Exit
+
+**Profiles Menu:**
+- Manage Profiles...
+- Load Test Mode
+- Load Aggressive
+- Load Conservative
+
+**Tools Menu:**
+- Test Configuration - Validate all settings
+- View Logs - Open log files
+- Open Bot Folder - Open in file explorer
+
+**Help Menu:**
+- Documentation
+- About
+
+### Configuration Workflow
+
+1. **Launch GUI**: `python gui_launcher.py`
+2. **Enter Credentials**: Go to Credentials tab, enter API key, private key, wallet address
+3. **Configure Strategy**: Use tabs to set capital, filters, trading parameters
+4. **Save Configuration**: File → Save Configuration (saves to `bot_config.json` and `.env`)
+5. **Test Settings**: Tools → Test Configuration (validates all parameters)
+6. **Start Bot**: Click "▶️ Start Bot" button
+7. **Monitor**: Watch real-time logs in the viewer
+8. **Stop**: Click "⏹️ Stop Bot" when done
+
+### Tips
+
+- **Use Profiles**: Save different strategies as profiles for quick switching
+- **Test First**: Use "Test Mode" profile for risk-free testing
+- **Watch Logs**: Keep an eye on the real-time viewer for errors or warnings
+- **Validate Often**: Click "Test Configuration" before starting to catch issues early
+- **Auto-Save**: GUI automatically saves to `bot_config.json` on changes
 
 ---
 

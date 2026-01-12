@@ -486,7 +486,7 @@ class MarketScanner:
         logger.debug(f"   Config: ORDERBOOK_BALANCE_RANGE = {ORDERBOOK_BALANCE_RANGE}")       
 
         if ORDERBOOK_BALANCE_RANGE is not None:
-            # Sprawdź YES orderbook balance
+            # Check YES orderbook balance
             if len(yes_bids) > 0:
                 logger.debug(f"   YES first bid: {yes_bids[0]}")
             if len(yes_asks) > 0:
@@ -495,7 +495,7 @@ class MarketScanner:
             yes_bid_percentage = calculate_orderbook_balance(yes_bids, yes_asks)
             logger.debug(f"   YES balance: {yes_bid_percentage:.1f}% bids" if yes_bid_percentage else "   YES: Could not calculate balance")
             
-            # Sprawdź NO orderbook balance
+            # Check NO orderbook balance
             if len(no_bids) > 0:
                 logger.debug(f"   NO first bid: {no_bids[0]}")
             if len(no_asks) > 0:

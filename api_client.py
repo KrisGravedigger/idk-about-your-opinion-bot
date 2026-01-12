@@ -166,15 +166,7 @@ class OpinionClient:
                     limit=page_size,
                     page=page
                 )
-                '''
-                # Debug: sprawdź strukturę odpowiedzi
-                print(f"\n{'='*60}")
-                print(f"DEBUG: Response type: {type(response)}")
-                print(f"DEBUG: Response dir: {dir(response)}")
-                print(f"DEBUG: Response value: {response}")
-                print(f"{'='*60}\n")
-                '''
-                
+
                 # Check for API errors
                 if hasattr(response, 'errno') and response.errno != 0:
                     logger.error(f"API error fetching markets: {response.errmsg}")
@@ -211,12 +203,7 @@ class OpinionClient:
                             # Already a dict or other type
                             converted_markets.append(m)
                     markets = converted_markets
-                
-                '''
-                print(f"DEBUG: Markets type: {type(markets)}, count: {len(markets) if markets else 0}")
-                if markets:
-                    print(f"DEBUG: First market sample: {markets[0] if isinstance(markets, list) else 'Not a list'}")
-                '''
+
                 logger.debug(f"Markets type: {type(markets)}, count: {len(markets) if markets else 0}")
                 
                 if not markets:
@@ -735,7 +722,7 @@ class OpinionClient:
             # Call SDK method
             response = self._client.get_my_orders(
                 market_id=market_id or 0,
-                status=api_status,  # ← Już jest int albo ""
+                status=api_status,  # ← Already int or ""
                 limit=min(limit, 20),
                 page=1
             )
