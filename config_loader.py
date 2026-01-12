@@ -75,6 +75,23 @@ class ConfigLoader:
                     else:
                         setattr(self, upper_key, value)
 
+            # Special handling for scoring_profile - update DEFAULT_SCORING_PROFILE
+            if 'scoring_profile' in json_config:
+                self.DEFAULT_SCORING_PROFILE = json_config['scoring_profile']
+
+            # Special handling for custom scoring_weights
+            if 'scoring_weights' in json_config and json_config.get('scoring_profile') == 'custom':
+                # Create or update custom profile in SCORING_PROFILES
+                if not hasattr(self, 'SCORING_PROFILES') or not isinstance(self.SCORING_PROFILES, dict):
+                    self.SCORING_PROFILES = {}
+
+                self.SCORING_PROFILES['custom'] = {
+                    'description': 'Custom profile from GUI',
+                    'weights': json_config['scoring_weights'],
+                    'bonus_multiplier': json_config.get('bonus_multiplier', 1.0),
+                    'invert_spread': False,
+                }
+
         except (json.JSONDecodeError, IOError) as e:
             print(f"Warning: Failed to load bot_config.json: {e}")
 
@@ -111,6 +128,31 @@ class ConfigLoader:
     def __contains__(self, key: str) -> bool:
         """Allow 'in' operator."""
         return hasattr(self, key)
+
+    def get_scoring_profile(self, profile_name: str = None):
+        """
+        Get scoring profile by name from merged config.
+
+        Args:
+            profile_name: Name of profile (or None for default)
+
+        Returns:
+            Profile dict
+
+        Raises:
+            ValueError: If profile doesn't exist
+        """
+        if profile_name is None:
+            profile_name = self.DEFAULT_SCORING_PROFILE
+
+        if not hasattr(self, 'SCORING_PROFILES') or profile_name not in self.SCORING_PROFILES:
+            available = ', '.join(self.SCORING_PROFILES.keys()) if hasattr(self, 'SCORING_PROFILES') else 'none'
+            raise ValueError(
+                f"Unknown scoring profile: '{profile_name}'\n"
+                f"Available profiles: {available}"
+            )
+
+        return self.SCORING_PROFILES[profile_name]
 
 
 # Create singleton instance

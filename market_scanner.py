@@ -19,7 +19,8 @@ from typing import Optional, Union
 from dataclasses import dataclass
 
 from config_loader import config
-from config import get_scoring_profile  # Keep function import
+# Use get_scoring_profile from config_loader (merged config) instead of config.py
+get_scoring_profile = config.get_scoring_profile
 from logger_config import setup_logger, log_section_header
 
 BONUS_MARKETS_FILE = config.BONUS_MARKETS_FILE

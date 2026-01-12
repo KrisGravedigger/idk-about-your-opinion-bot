@@ -204,7 +204,7 @@ def validate_private_key(value: str) -> Tuple[bool, Optional[str], Optional[str]
     if not re.match(r'^[0-9a-fA-F]{64}$', key):
         return False, "Private key must contain only hexadecimal characters", None
 
-    return True, None, "⚠️ NEVER share your private key!"
+    return True, None, None
 
 
 def validate_wallet_address(value: str, allow_empty: bool = True) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -318,6 +318,25 @@ def validate_full_config(config_dict: dict) -> Tuple[bool, List[str], List[str]]
         if warn:
             warnings.append(f"Capital Percentage: {warn}")
 
+    # Dust Threshold validation
+    if 'dust_threshold' in config_dict:
+        dust = config_dict['dust_threshold']
+        if dust < 5.0:
+            warnings.append(
+                f"Dust Threshold ({dust} USDT) is below recommended minimum of 5 USDT. "
+                f"Very small trades may be unprofitable due to gas fees."
+            )
+
+        # Check if dust threshold is appropriate for position size
+        if config_dict.get('capital_mode') == 'fixed' and 'capital_amount_usdt' in config_dict:
+            recommended_dust = config_dict['capital_amount_usdt'] * 0.05  # 5% of position
+            if dust < recommended_dust:
+                warnings.append(
+                    f"Dust Threshold ({dust} USDT) is below 5% of planned position "
+                    f"({config_dict['capital_amount_usdt']} USDT). "
+                    f"Recommended minimum: {recommended_dust:.2f} USDT for safer operation."
+                )
+
     # Trading Strategy
     if all(k in config_dict for k in ['spread_threshold_1', 'spread_threshold_2', 'spread_threshold_3']):
         valid, err, warn = validate_spread_thresholds(
@@ -405,7 +424,5 @@ def validate_credentials(api_key: str, private_key: str, multi_sig_address: str 
             errors.append(f"Multi-sig Address: {err}")
         if warn:
             warnings.append(f"Multi-sig Address: {warn}")
-    else:
-        warnings.append("Multi-sig Address: Empty - bot will run in READ-ONLY mode")
 
     return (len(errors) == 0, errors, warnings)
