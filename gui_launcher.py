@@ -25,9 +25,19 @@ import time
 import os
 import sys
 import webbrowser
+import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime
+
+# Import for version comparison
+try:
+    from packaging import version
+    PACKAGING_AVAILABLE = True
+except ImportError:
+    PACKAGING_AVAILABLE = False
+    print("Warning: packaging library not installed. Update checking will be disabled.")
+    print("Install with: pip install packaging")
 
 # Import configuration modules
 import config as config_py
@@ -123,13 +133,20 @@ class BotLauncherGUI:
         self.setup_action_buttons()  # Goes into left column
         self.setup_launcher_section()  # Goes into right column
         self.setup_status_bar()  # Goes at bottom of root
-        
+
+        # Check first run and setup files
+        self.check_first_run_and_setup()
+
         # Load initial configuration
         self.load_configuration()
-        
+
         # Check bot status on startup
         self.check_bot_status()
-        
+
+        # Check for updates (async, non-blocking)
+        if PACKAGING_AVAILABLE:
+            threading.Thread(target=self.check_for_updates, daemon=True).start()
+
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
@@ -850,21 +867,33 @@ class BotLauncherGUI:
         self.api_key_var = tk.StringVar(value="")
         self.api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key_var, width=40, show="*")
         self.api_key_entry.grid(row=0, column=1, sticky='w', pady=5, padx=5)
-        
+
         self.api_key_show_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(api_frame, text="Show", variable=self.api_key_show_var, command=self.toggle_api_key_visibility).grid(row=0, column=2, pady=5)
-        
-        ttk.Label(api_frame, text="Private Key:").grid(row=1, column=0, sticky='w', pady=5)
+
+        # Help link for API Key
+        api_help_label = tk.Label(
+            api_frame,
+            text="📖 Don't have an API Key? Click here to request access",
+            foreground="blue",
+            cursor="hand2",
+            font=("TkDefaultFont", 9, "underline")
+        )
+        api_help_label.grid(row=1, column=1, columnspan=2, sticky='w', pady=(0, 5))
+        api_help_label.bind("<Button-1>", lambda e: self.open_api_key_request_form())
+        ToolTip(api_help_label, "Opens Opinion.trade API access request form in your browser.\n\nFill the form to request API access from the Opinion.trade team.")
+
+        ttk.Label(api_frame, text="Private Key:").grid(row=2, column=0, sticky='w', pady=5)
         self.private_key_var = tk.StringVar(value="")
         self.private_key_entry = ttk.Entry(api_frame, textvariable=self.private_key_var, width=40, show="*")
-        self.private_key_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
-        
+        self.private_key_entry.grid(row=2, column=1, sticky='w', pady=5, padx=5)
+
         self.private_key_show_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(api_frame, text="Show", variable=self.private_key_show_var, command=self.toggle_private_key_visibility).grid(row=1, column=2, pady=5)
-        
-        ttk.Label(api_frame, text="Multi-sig Address:").grid(row=2, column=0, sticky='w', pady=5)
+        ttk.Checkbutton(api_frame, text="Show", variable=self.private_key_show_var, command=self.toggle_private_key_visibility).grid(row=2, column=2, pady=5)
+
+        ttk.Label(api_frame, text="Multi-sig Address:").grid(row=3, column=0, sticky='w', pady=5)
         self.multi_sig_var = tk.StringVar(value="")
-        ttk.Entry(api_frame, textvariable=self.multi_sig_var, width=40).grid(row=2, column=1, sticky='w', pady=5, padx=5)
+        ttk.Entry(api_frame, textvariable=self.multi_sig_var, width=40).grid(row=3, column=1, sticky='w', pady=5, padx=5)
         ToolTip(api_frame.winfo_children()[-1], "Multi-signature wallet address.\n\nLeave empty for READ-ONLY mode (no trading)\nRequired for live trading")
 
         # API Host with lock
@@ -875,13 +904,13 @@ class BotLauncherGUI:
             variable=self.enable_api_host_edit_var,
             command=self.on_api_host_toggle
         )
-        cb_api_host.grid(row=3, column=0, columnspan=3, sticky='w', pady=5)
+        cb_api_host.grid(row=4, column=0, columnspan=3, sticky='w', pady=5)
         ToolTip(cb_api_host, "⚠️ WARNING: Don't change unless instructed!\n\nDefault API host works for everyone.\nChanging this may break connectivity.")
 
-        ttk.Label(api_frame, text="API Host:").grid(row=4, column=0, sticky='w', pady=5)
+        ttk.Label(api_frame, text="API Host:").grid(row=5, column=0, sticky='w', pady=5)
         self.api_host_var = tk.StringVar(value="https://proxy.opinion.trade:8443")
         self.api_host_entry = ttk.Entry(api_frame, textvariable=self.api_host_var, width=40, state='disabled')
-        self.api_host_entry.grid(row=4, column=1, sticky='w', pady=5, padx=5)
+        self.api_host_entry.grid(row=5, column=1, sticky='w', pady=5, padx=5)
         ToolTip(self.api_host_entry, "Opinion.trade API endpoint.\n\nDefault: https://proxy.opinion.trade:8443\nDon't change unless instructed")
         
         # === Telegram Section ===
@@ -892,16 +921,28 @@ class BotLauncherGUI:
         self.telegram_token_var = tk.StringVar(value="")
         self.telegram_token_entry = ttk.Entry(telegram_frame, textvariable=self.telegram_token_var, width=40, show="*")
         self.telegram_token_entry.grid(row=0, column=1, sticky='w', pady=5, padx=5)
-        
+
         self.telegram_token_show_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(telegram_frame, text="Show", variable=self.telegram_token_show_var, command=self.toggle_telegram_token_visibility).grid(row=0, column=2, pady=5)
-        
-        ttk.Label(telegram_frame, text="Chat ID:").grid(row=1, column=0, sticky='w', pady=5)
+
+        # Help link for Telegram setup
+        telegram_help_label = tk.Label(
+            telegram_frame,
+            text="📖 Need help setting up Telegram? Click here for step-by-step guide",
+            foreground="blue",
+            cursor="hand2",
+            font=("TkDefaultFont", 9, "underline")
+        )
+        telegram_help_label.grid(row=1, column=1, columnspan=2, sticky='w', pady=(0, 5))
+        telegram_help_label.bind("<Button-1>", lambda e: self.open_telegram_setup_guide())
+        ToolTip(telegram_help_label, "Opens Telegram setup guide with detailed instructions.\n\nShows how to:\n- Create a Telegram bot with @BotFather\n- Get your Chat ID\n- Test notifications")
+
+        ttk.Label(telegram_frame, text="Chat ID:").grid(row=2, column=0, sticky='w', pady=5)
         self.telegram_chat_id_var = tk.StringVar(value="")
-        ttk.Entry(telegram_frame, textvariable=self.telegram_chat_id_var, width=40).grid(row=1, column=1, sticky='w', pady=5, padx=5)
+        ttk.Entry(telegram_frame, textvariable=self.telegram_chat_id_var, width=40).grid(row=2, column=1, sticky='w', pady=5, padx=5)
         ToolTip(telegram_frame.winfo_children()[-1], "Your Telegram chat ID.\n\nCan be numeric or @username\nLeave empty to disable Telegram")
-        
-        ttk.Button(telegram_frame, text="Test Telegram", command=self.test_telegram).grid(row=2, column=1, sticky='w', pady=5)
+
+        ttk.Button(telegram_frame, text="Test Telegram", command=self.test_telegram).grid(row=3, column=1, sticky='w', pady=5)
         
         # === Blockchain Section ===
         blockchain_frame = ttk.LabelFrame(scrollable_frame, text="Blockchain RPC (Advanced)", padding=10)
@@ -948,6 +989,54 @@ class BotLauncherGUI:
     def on_rpc_toggle(self):
         """Handle RPC URL edit toggle."""
         toggle_widget_state(self.enable_rpc_edit_var, self.rpc_url_entry)
+
+    def open_api_key_request_form(self):
+        """Open Opinion.trade API access request form in browser."""
+        url = "https://docs.google.com/forms/d/1h7gp8UffZeXzYQ-lv4jcou9PoRNOqMAQhyW4IwZDnII"
+        try:
+            webbrowser.open(url)
+            self.update_status_bar("📖 Opened API Key request form in browser")
+            messagebox.showinfo(
+                "API Key Request",
+                "The API access request form has been opened in your browser.\n\n"
+                "Please fill out the form to request API access from the Opinion.trade team.\n\n"
+                "You should receive your API key via email after your request is approved."
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open browser:\n{e}\n\nPlease visit manually:\n{url}")
+
+    def open_telegram_setup_guide(self):
+        """Open Telegram setup guide."""
+        # Try to open local file first, fallback to GitHub
+        local_guide = Path("TELEGRAM_SETUP.md")
+        github_url = "https://github.com/KrisGravedigger/idk-about-your-opinion-bot/blob/main/TELEGRAM_SETUP.md"
+
+        try:
+            if local_guide.exists():
+                # Open in default markdown viewer or text editor
+                if sys.platform == 'win32':
+                    os.startfile(str(local_guide))
+                elif sys.platform == 'darwin':  # macOS
+                    subprocess.run(['open', str(local_guide)])
+                else:  # Linux
+                    subprocess.run(['xdg-open', str(local_guide)])
+                self.update_status_bar("📖 Opened Telegram setup guide")
+            else:
+                # Fallback to GitHub
+                webbrowser.open(github_url)
+                self.update_status_bar("📖 Opened Telegram setup guide in browser")
+        except Exception as e:
+            # Last resort: open GitHub URL
+            try:
+                webbrowser.open(github_url)
+                self.update_status_bar("📖 Opened Telegram setup guide in browser")
+            except:
+                messagebox.showerror(
+                    "Error",
+                    f"Failed to open Telegram setup guide.\n\n"
+                    f"Please visit manually:\n{github_url}\n\n"
+                    f"Or check TELEGRAM_SETUP.md in the installation folder."
+                )
 
     def setup_launcher_section(self):
         """Create bot launcher controls."""
@@ -1126,9 +1215,13 @@ class BotLauncherGUI:
                 self.update_status_bar("ℹ️ Loaded defaults from config.py")
             
             # Load credentials from .env
+            # IMPORTANT: Only load from current directory, not parent directories
+            # This prevents accidentally loading developer's real credentials during testing
             from dotenv import load_dotenv
-            load_dotenv()
-            
+            env_file = Path(".env")
+            if env_file.exists():
+                load_dotenv(dotenv_path=env_file, verbose=False)
+
             self.api_key_var.set(os.getenv("API_KEY", ""))
             self.private_key_var.set(os.getenv("PRIVATE_KEY", ""))
             self.multi_sig_var.set(os.getenv("MULTI_SIG_ADDRESS", ""))
@@ -1232,7 +1325,199 @@ class BotLauncherGUI:
         
         # Credentials tab
         self.api_host_var.set(self.config_data.get('api_host', 'https://proxy.opinion.trade:8443'))
-        
+
+    def check_first_run_and_setup(self):
+        """
+        Check if this is first run and generate necessary files.
+        Called during GUI startup before loading configuration.
+        """
+        first_run = False
+
+        # 1. Check and create .env from .env.example
+        if not Path(".env").exists():
+            first_run = True
+            print("ℹ️  First run detected - creating .env from template...")
+
+            if Path(".env.example").exists():
+                shutil.copy(".env.example", ".env")
+                print("✅ Created .env from .env.example")
+            else:
+                # Fallback: create minimal .env if template missing
+                self.create_minimal_env()
+
+        # 2. Check and create bonus_markets.txt
+        if not Path("bonus_markets.txt").exists():
+            print("ℹ️  Creating empty bonus_markets.txt...")
+
+            # Check if there's an example file
+            if Path("bonus_markets.txt.example").exists():
+                shutil.copy("bonus_markets.txt.example", "bonus_markets.txt")
+                print("✅ Created bonus_markets.txt from example")
+            else:
+                # Create empty file with template
+                Path("bonus_markets.txt").write_text(
+                    "# Bonus Market Addresses (one per line)\n"
+                    "# Example: 0x1234567890abcdef...\n"
+                    "# These markets get priority scoring.\n\n"
+                )
+                print("✅ Created empty bonus_markets.txt")
+
+        # 3. Check and create bot_config.json if missing
+        if not Path("bot_config.json").exists():
+            print("ℹ️  Creating default bot_config.json...")
+            # Use existing extract_config_from_module method
+            default_config = self.extract_config_from_module(config_py)
+            save_config_to_json(default_config, "bot_config.json")
+            print("✅ Created bot_config.json with defaults")
+
+        # 4. Show welcome wizard if first run
+        if first_run:
+            # Schedule the wizard to show after GUI is fully initialized
+            self.root.after(1000, self.show_first_run_wizard)
+
+        return first_run
+
+    def create_minimal_env(self):
+        """Create minimal .env file with placeholders."""
+        minimal_env = """# Opinion Trading Bot - Environment Variables
+# Fill in your values below:
+
+# Opinion.trade API Key
+# Get this from your account settings on Opinion.trade
+API_KEY=your_api_key_here
+
+# Your wallet's private key (64 hex characters, with or without 0x prefix)
+# NEVER share this! Anyone with this key can drain your wallet.
+PRIVATE_KEY=0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+
+# Your wallet address (if using Gnosis Safe, use Safe address)
+MULTI_SIG_ADDRESS=0xYourWalletAddressHere
+
+# RPC URL for BNB Chain (optional, default is public Binance node)
+RPC_URL=https://bsc-dataseed.binance.org
+
+# Telegram Notifications (optional)
+# Get bot token from @BotFather on Telegram
+# Get chat ID from @userinfobot
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+"""
+        Path(".env").write_text(minimal_env)
+        print("✅ Created .env with template values")
+
+    def show_first_run_wizard(self):
+        """Show welcome wizard for first-time users."""
+        welcome_msg = """🎉 Welcome to Opinion Trading Bot!
+
+This appears to be your first time running the bot.
+
+I've created the following files for you:
+  • .env - Store your API keys and credentials here
+  • bonus_markets.txt - Optional list of bonus markets
+  • bot_config.json - Bot configuration
+
+Next steps:
+1. Go to the 🔐 Credentials tab
+2. Enter your API Key, Private Key, and Wallet Address
+3. (Optional) Configure Telegram notifications
+4. Click 💾 Save Configuration
+5. Adjust settings in other tabs (Capital, Markets, Trading, Risk)
+6. Click ▶ Start Bot
+
+Would you like to open the Credentials tab now?"""
+
+        if messagebox.askyesno("Welcome to Opinion Trading Bot!", welcome_msg):
+            # Switch to Credentials tab (index 5 - 0-indexed, last tab)
+            self.notebook.select(5)
+            self.update_status_bar("ℹ️  Please configure your credentials in the Credentials tab")
+
+    def get_current_version(self) -> str:
+        """Get current bot version from version.txt file."""
+        version_file = Path("version.txt")
+        if version_file.exists():
+            try:
+                return version_file.read_text().strip()
+            except Exception as e:
+                print(f"Warning: Could not read version.txt: {e}")
+                return "0.3.0"  # Fallback
+        return "0.3.0"  # Fallback if file doesn't exist
+
+    def check_for_updates(self):
+        """
+        Check GitHub for new releases (runs in background thread).
+        Non-blocking - shows notification if update available.
+        """
+        try:
+            import requests
+
+            current_version = self.get_current_version()
+
+            # GitHub API endpoint for latest release
+            # Replace YOUR_USERNAME with actual GitHub username
+            api_url = "https://api.github.com/repos/KrisGravedigger/idk-about-your-opinion-bot/releases/latest"
+
+            response = requests.get(api_url, timeout=5)
+
+            if response.status_code != 200:
+                # Silently fail - don't annoy user if GitHub is down
+                print(f"Update check: GitHub API returned {response.status_code}")
+                return
+
+            data = response.json()
+            latest_version = data.get("tag_name", "").lstrip("v")  # Remove 'v' prefix
+
+            if not latest_version:
+                print("Update check: No version tag found in release")
+                return
+
+            # Compare versions
+            if version.parse(latest_version) > version.parse(current_version):
+                # New version available!
+                download_url = data.get("html_url")  # Link to release page
+
+                # Show notification in GUI thread
+                self.root.after(0, lambda: self.show_update_notification(
+                    latest_version,
+                    current_version,
+                    download_url
+                ))
+            else:
+                print(f"Update check: Already on latest version (v{current_version})")
+
+        except requests.exceptions.RequestException as e:
+            # Network error - silently fail
+            print(f"Update check failed (network): {e}")
+        except Exception as e:
+            # Silently fail - don't interrupt user experience
+            print(f"Update check failed: {e}")
+
+    def show_update_notification(self, new_version: str, current_version: str, download_url: str):
+        """Show update notification dialog."""
+        msg = f"""🎉 New Version Available!
+
+Current Version: v{current_version}
+Latest Version: v{new_version}
+
+Would you like to download the update?
+
+Update Instructions:
+1. Stop the bot (click ⏹ Stop Bot)
+2. Download the new version
+3. Extract to this folder (overwrite files)
+4. Your settings will be preserved:
+   - .env (credentials)
+   - state.json (bot state)
+   - pnl_stats.json (statistics)
+   - bot_config.json (configuration)
+
+Click Yes to open the download page."""
+
+        if messagebox.askyesno("Update Available", msg):
+            webbrowser.open(download_url)
+            self.update_status_bar(f"🔄 Update available: v{new_version} (opened download page)")
+        else:
+            self.update_status_bar(f"ℹ️  Update available: v{new_version} (skipped)")
+
     def collect_form_data(self) -> dict:
         """Collect all form data into a dictionary."""
         data = {}
