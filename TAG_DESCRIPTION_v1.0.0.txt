@@ -1,0 +1,84 @@
+Version 1.0.0 - The Accessibility Update
+
+Major Features
+
+🖥️ **Standalone Executable Distribution** - No Python installation required
+- Windows, Linux, macOS builds
+- Self-contained (~120-150 MB)
+- Zero dependency management
+- Extract and run
+
+🎨 **Full-Featured GUI Configuration Tool** - 2,500+ lines of visual interface
+- 6 configuration tabs (Capital, Markets, Trading, Risk, Monitoring, Credentials)
+- Real-time validation with tooltips
+- Bot control panel (start/stop/restart)
+- Live log viewer with syntax highlighting
+- Profile management (save/load configurations)
+
+🎁 **Welcome Wizard** - Guided first-run setup
+- Auto-creates .env, bot_config.json, bonus_markets.txt
+- Step-by-step instructions
+- Opens Credentials tab automatically
+
+🔄 **Auto-Update System** - Background version checking
+- Notifies when new version available
+- One-click browser open to releases
+- Settings preserved during updates
+
+📖 **Integrated Help Links** - Clickable assistance
+- API Key request form link
+- Telegram setup guide link
+
+What's New
+
+- PyInstaller build system (build_gui.spec)
+- GitHub Actions CI/CD for multi-platform builds (.github/workflows/build-release.yml)
+- First-run detection and file generation
+- Update checker with GitHub API integration
+- Masked credential fields with show/hide toggles
+- Advanced settings locked by default (API Host, RPC URL)
+- .env loading restricted to current directory (security fix)
+- version.txt for update tracking
+
+Files Added
+
+- build_gui.spec - PyInstaller configuration
+- .github/workflows/build-release.yml - Automated build pipeline
+- version.txt - Version tracking
+- RELEASE_README.txt - User guide for standalone releases
+- BUILD_INSTRUCTIONS.md - Developer build guide
+- IMPLEMENTATION_SUMMARY.md - Technical documentation
+
+GUI Enhancements
+
+- gui_launcher.py: Added first-run setup, update checker, help links (~200 lines)
+- 6 comprehensive configuration tabs
+- Real-time validation and tooltips
+- Bot subprocess management
+- Live log streaming
+
+Technical Details
+
+- Setup time: 30 min → 2 min (93% reduction)
+- Target audience: Developers only → Everyone
+- Platform support: Windows 10+, Linux (Ubuntu 20.04+), macOS 10.15+
+- Update method: Manual Git pull → Auto-notification
+- All v0.3 features fully preserved and backward compatible
+
+For Technical Users
+
+Nothing removed - you can still:
+- Clone from GitHub and run from source
+- Edit config.py directly
+- Use python autonomous_bot_main.py
+- Get updates via Git
+
+But now you also get GUI tools for convenience.
+
+Download
+
+- Windows: OpinionBot_Windows.zip
+- Linux: OpinionBot_Linux.zip
+- macOS: OpinionBot_macOS.zip
+
+See README.md for complete documentation.
