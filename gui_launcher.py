@@ -45,6 +45,7 @@ from gui_helpers import (
     show_validation_errors, show_validation_warnings,
     validate_and_warn, load_json_file, save_json_file
 )
+from telegram_notifications import TelegramNotifier
 
 # Disable SSL warnings (Opinion.trade uses self-signed cert)
 import urllib3
@@ -320,7 +321,7 @@ class BotLauncherGUI:
         ttk.Label(safety_frame, text="Dust Threshold (USDT):").grid(row=2, column=0, sticky='w', pady=5)
         self.dust_threshold_var = tk.DoubleVar(value=30.0)
         ttk.Entry(safety_frame, textvariable=self.dust_threshold_var, width=15).grid(row=2, column=1, sticky='w', pady=5, padx=5)
-        ToolTip(safety_frame.winfo_children()[-1], "Ignore positions smaller than this.\n\nDefault: 30.0 USDT\nHelps avoid tiny unprofitable trades")
+        ToolTip(safety_frame.winfo_children()[-1], "Ignore positions smaller than this.\n\nDefault: 30.0 USDT\nRecommended (moderately safe minimum):\n- Fixed mode: 5% of planned position\n- Minimum: 5 USDT\n\nLower values allow smaller trades but may be unprofitable due to gas fees.\nValidation warning shown if below recommended values.")
         
         return frame
         
@@ -1023,9 +1024,36 @@ class BotLauncherGUI:
             width=15
         ).pack(side='left', padx=5)
 
+        ttk.Button(
+            util_frame,
+            text="📊 View PnL",
+            command=self.view_transaction_history,
+            width=15
+        ).pack(side='left', padx=5)
+
+        ttk.Button(
+            util_frame,
+            text="📋 View State",
+            command=self.view_state_file,
+            width=15
+        ).pack(side='left', padx=5)
+
         # Real-time log viewer
         log_viewer_frame = ttk.LabelFrame(launcher_frame, text="Real-Time Bot Output", padding=5)
         log_viewer_frame.pack(fill='both', expand=True, pady=(10, 0))
+
+        # Auto-scroll toggle
+        autoscroll_frame = ttk.Frame(log_viewer_frame)
+        autoscroll_frame.pack(fill='x', pady=(0, 5))
+
+        self.auto_scroll_var = tk.BooleanVar(value=True)
+        cb_autoscroll = ttk.Checkbutton(
+            autoscroll_frame,
+            text="Auto-scroll to bottom",
+            variable=self.auto_scroll_var,
+            command=self.on_autoscroll_toggle
+        )
+        cb_autoscroll.pack(side='left')
 
         self.log_viewer = scrolledtext.ScrolledText(
             log_viewer_frame,
@@ -1461,11 +1489,24 @@ Note: Credentials remain in .env file (not affected by this import)."""
                 self.log_viewer.insert('end', text, tag)
             else:
                 self.log_viewer.insert('end', text)
-            self.log_viewer.see('end')  # Auto-scroll to bottom
+
+            # Only auto-scroll if enabled
+            if self.auto_scroll_var.get():
+                self.log_viewer.see('end')
+
             self.log_viewer.config(state='disabled')
 
         # Call from GUI thread
         self.root.after(0, _append)
+
+    def on_autoscroll_toggle(self):
+        """Handle auto-scroll toggle change."""
+        if self.auto_scroll_var.get():
+            # If re-enabled, scroll to bottom immediately
+            self.log_viewer.see('end')
+            self.update_status_bar("✅ Auto-scroll enabled")
+        else:
+            self.update_status_bar("⏸️ Auto-scroll disabled")
 
     def read_bot_output(self):
         """Background thread that reads bot output from temp files and displays in log viewer."""
@@ -1684,7 +1725,26 @@ Note: Credentials remain in .env file (not affected by this import)."""
             self.bot_status_label.config(text="🔴 Stopped", foreground="red")
             self.pid_label.config(text="--")
             self.runtime_label.config(text="--")
-            
+
+            # Send Telegram notification if enabled
+            try:
+                telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+                if telegram_token and telegram_chat_id:
+                    notifier = TelegramNotifier(telegram_token, telegram_chat_id)
+                    runtime = time.time() - self.bot_start_time if self.bot_start_time > 0 else 0
+                    runtime_str = f"{int(runtime // 3600)}h {int((runtime % 3600) // 60)}m" if runtime > 0 else "N/A"
+                    notifier.send_message(
+                        f"🛑 <b>Bot Stopped</b>\n\n"
+                        f"⏱ Runtime: {runtime_str}\n"
+                        f"📅 Stopped at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                        f"<i>Bot was manually stopped via GUI</i>",
+                        async_send=True
+                    )
+            except Exception as e:
+                # Don't fail stop operation if notification fails
+                pass
+
             self.update_status_bar("✅ Bot stopped successfully")
             
         except Exception as e:
@@ -2114,18 +2174,68 @@ Note: Credentials remain in .env file (not affected by this import)."""
         """Open project directory in file explorer."""
         try:
             project_dir = Path.cwd()
-            
+
             if sys.platform == 'win32':
                 os.startfile(project_dir)
             elif sys.platform == 'darwin':
                 subprocess.run(['open', project_dir])
             else:
                 subprocess.run(['xdg-open', project_dir])
-            
+
             self.update_status_bar("📁 Opened project folder")
-            
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open folder:\n\n{str(e)}")
+
+    def view_transaction_history(self):
+        """Open transaction history file in default editor."""
+        history_file = Path("transaction_history.json")
+
+        if not history_file.exists():
+            messagebox.showinfo(
+                "No Transaction History",
+                "Transaction history file does not exist yet.\n\n"
+                "It will be created when the bot executes its first trade."
+            )
+            return
+
+        try:
+            if sys.platform == 'win32':
+                os.startfile(history_file)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', history_file])
+            else:
+                subprocess.run(['xdg-open', history_file])
+
+            self.update_status_bar("📊 Opened transaction history")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open transaction history:\n\n{str(e)}")
+
+    def view_state_file(self):
+        """Open bot state file in default editor."""
+        state_file = Path("state.json")
+
+        if not state_file.exists():
+            messagebox.showinfo(
+                "No State File",
+                "Bot state file does not exist yet.\n\n"
+                "It will be created when the bot starts running."
+            )
+            return
+
+        try:
+            if sys.platform == 'win32':
+                os.startfile(state_file)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', state_file])
+            else:
+                subprocess.run(['xdg-open', state_file])
+
+            self.update_status_bar("📋 Opened bot state file")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open state file:\n\n{str(e)}")
             
     def show_documentation(self):
         """Show documentation/README."""
