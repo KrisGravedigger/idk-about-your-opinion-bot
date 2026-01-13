@@ -9,8 +9,10 @@ on:
 # Allow manual trigger from Actions tab (for testing)
   workflow_dispatch:
 
+# Required permissions for creating releases
 permissions:
-  contents: write  # Required for creating releases and uploading assets
+  contents: write
+  actions: read
 
 jobs:
   build:
