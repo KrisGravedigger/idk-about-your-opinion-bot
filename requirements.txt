@@ -6,7 +6,7 @@
 # -----------------
 
 # Opinion.trade SDK - Primary trading interface for BNB Chain prediction markets
-opinion-clob-sdk>=1.0.0
+opinion-clob-sdk>=0.4.3
 
 # Environment variable management - Securely load API keys and credentials
 python-dotenv>=1.0.0
