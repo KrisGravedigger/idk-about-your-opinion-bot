@@ -98,10 +98,13 @@ class ToolTip:
 
 class BotLauncherGUI:
     """Main GUI application window."""
-    
+
+    # Application version - update this for each release
+    VERSION = "1.0.7"
+
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Opinion Trading Bot - Configuration & Launcher v1.0.6")
+        self.root.title(f"Opinion Trading Bot - Configuration & Launcher v{self.VERSION}")
         self.root.geometry("1400x900")  # Wider for two-column layout
 
         # Initialize variables
@@ -1439,8 +1442,8 @@ Would you like to open the Credentials tab now?"""
                 return version_file.read_text().strip()
             except Exception as e:
                 print(f"Warning: Could not read version.txt: {e}")
-                return "1.0.6"  # Fallback
-        return "0.3.0"  # Fallback if file doesn't exist
+                return self.VERSION  # Fallback
+        return self.VERSION  # Fallback if file doesn't exist
 
     def check_for_updates(self):
         """
@@ -2529,7 +2532,7 @@ Note: Credentials remain in .env file (not affected by this import)."""
             self.view_logs()  # Use same method to open README
         else:
             messagebox.showinfo("Documentation",
-                              "📚 Opinion Trading Bot v1.0.6\n\n"
+                              f"📚 Opinion Trading Bot v{self.VERSION}\n\n"
                               "For documentation, visit the project repository or README file.\n\n"
                               "Quick Start:\n"
                               "1. Configure credentials in 🔐 Credentials tab\n"
@@ -2540,8 +2543,8 @@ Note: Credentials remain in .env file (not affected by this import)."""
             
     def show_about(self):
         """Show about dialog."""
-        about_msg = """Opinion Trading Bot - GUI Configurator
-Version 1.0.6
+        about_msg = f"""Opinion Trading Bot - GUI Configurator
+Version {self.VERSION}
 
 A graphical interface for configuring and launching 
 the autonomous trading bot for Opinion.trade 
