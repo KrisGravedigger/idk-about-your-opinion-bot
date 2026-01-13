@@ -101,7 +101,7 @@ class BotLauncherGUI:
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Opinion Trading Bot - Configuration & Launcher v0.3")
+        self.root.title("Opinion Trading Bot - Configuration & Launcher v1.0.5")
         self.root.geometry("1400x900")  # Wider for two-column layout
 
         # Initialize variables
@@ -1439,7 +1439,7 @@ Would you like to open the Credentials tab now?"""
                 return version_file.read_text().strip()
             except Exception as e:
                 print(f"Warning: Could not read version.txt: {e}")
-                return "0.3.0"  # Fallback
+                return "1.0.5"  # Fallback
         return "0.3.0"  # Fallback if file doesn't exist
 
     def check_for_updates(self):
@@ -2528,8 +2528,8 @@ Note: Credentials remain in .env file (not affected by this import)."""
         if readme.exists():
             self.view_logs()  # Use same method to open README
         else:
-            messagebox.showinfo("Documentation", 
-                              "📚 Opinion Trading Bot v0.3\n\n"
+            messagebox.showinfo("Documentation",
+                              "📚 Opinion Trading Bot v1.0.5\n\n"
                               "For documentation, visit the project repository or README file.\n\n"
                               "Quick Start:\n"
                               "1. Configure credentials in 🔐 Credentials tab\n"
@@ -2541,7 +2541,7 @@ Note: Credentials remain in .env file (not affected by this import)."""
     def show_about(self):
         """Show about dialog."""
         about_msg = """Opinion Trading Bot - GUI Configurator
-Version 0.3 Beta
+Version 1.0.5
 
 A graphical interface for configuring and launching 
 the autonomous trading bot for Opinion.trade 
