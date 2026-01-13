@@ -31,11 +31,11 @@ block_cipher = None
 datas = [
     ('.env.example', '.'),           # Credentials template
     ('README.md', '.'),              # Documentation
-    ('version.txt', '.'),            # Version for update checker
 ]
 
 # Add optional files if they exist
 optional_files = [
+    ('version.txt', '.'),                # Version for update checker
     ('bonus_markets.txt.example', '.'),  # Bonus markets template
     ('LICENSE', '.'),                     # License file
     ('TELEGRAM_SETUP.md', '.'),          # Telegram setup guide

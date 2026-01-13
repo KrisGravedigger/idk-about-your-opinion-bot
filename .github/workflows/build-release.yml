@@ -61,16 +61,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller packaging
 
-      # Step 4: Build executable with PyInstaller
+      # Step 4: Create version.txt with tag version (BEFORE build)
+      - name: Create version.txt
+        run: |
+          echo "${GITHUB_REF#refs/tags/v}" > version.txt
+        shell: bash
+
+      # Step 5: Build executable with PyInstaller
       - name: Build executable with PyInstaller
         run: |
           pyinstaller build_gui.spec
-
-      # Step 5: Create version.txt with tag version
-      - name: Create version.txt
-        run: |
-          echo "${GITHUB_REF#refs/tags/v}" > dist/OpinionBot/version.txt
-        shell: bash
 
       # Step 6: Copy additional files to distribution
       - name: Copy additional files
@@ -118,7 +118,7 @@ jobs:
           path: dist/${{ matrix.artifact_name }}.zip
           retention-days: 30
 
-      # Step 12: Upload to GitHub Release
+      # Step 12: Upload to GitHub Release (all platforms upload to same release)
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
