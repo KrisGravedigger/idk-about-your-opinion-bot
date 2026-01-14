@@ -355,7 +355,17 @@ class SellMonitor:
                 # =============================================================
                 REPRICING_CHECK_INTERVAL = 3  # Check every 3rd iteration
                 if check_count % REPRICING_CHECK_INTERVAL == 0:
-                    repricing_result = self.check_and_execute_repricing(order_id, sell_price)
+                    # Get current order price from API to ensure accuracy
+                    try:
+                        order_details = self.client.get_order(order_id)
+                        if order_details:
+                            current_order_price = safe_float(order_details.get('price', sell_price))
+                        else:
+                            current_order_price = sell_price
+                    except:
+                        current_order_price = sell_price
+
+                    repricing_result = self.check_and_execute_repricing(order_id, current_order_price)
 
                     if repricing_result and repricing_result.get('status') == 'repriced':
                         # Order was repriced - update tracking variables
@@ -933,8 +943,19 @@ class SellMonitor:
             if not asks:
                 return None
 
+            # Debug: Show current price and orderbook
+            logger.debug(f"Repricing analysis: current_order_price=${current_price:.4f}, total_asks={len(asks)}")
+            if asks:
+                best_ask_price = safe_float(asks[0].get('price', 0))
+                logger.debug(f"  Best ask in orderbook: ${best_ask_price:.4f}")
+
             # Filter out our own order and get competing asks (better prices = lower prices)
             competing_asks = [ask for ask in asks if safe_float(ask.get('price', 999)) < current_price]
+
+            logger.debug(f"  Competing asks found: {len(competing_asks)}")
+            if competing_asks and len(competing_asks) <= 5:
+                for i, ask in enumerate(competing_asks[:5]):
+                    logger.debug(f"    Ask #{i+1}: price=${safe_float(ask.get('price', 0)):.4f}, shares={safe_float(ask.get('shares', 0)):.2f}")
 
             if not competing_asks:
                 # No better prices - check if we should return to higher price (dynamic adjustment)
