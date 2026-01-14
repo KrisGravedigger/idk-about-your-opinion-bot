@@ -89,7 +89,8 @@ class SellMonitor:
             f"SellMonitor initialized: "
             f"check_interval={self.check_interval}s, "
             f"timeout={self.timeout_hours}h, "
-            f"stop_loss={self.enable_stop_loss} ({self.stop_loss_trigger}%)"
+            f"stop_loss={self.enable_stop_loss} ({self.stop_loss_trigger}%), "
+            f"repricing={self.enable_repricing} (mode={self.reprice_mode}, threshold={self.reprice_threshold_pct}%)"
         )
     
     def monitor_until_filled(
@@ -350,17 +351,32 @@ class SellMonitor:
                             logger.warning("")
                 
                 # =============================================================
+                # PERIODIC REPRICING CHECK
+                # =============================================================
+                REPRICING_CHECK_INTERVAL = 3  # Check every 3rd iteration
+                if check_count % REPRICING_CHECK_INTERVAL == 0:
+                    repricing_result = self.check_and_execute_repricing(order_id, sell_price)
+
+                    if repricing_result and repricing_result.get('status') == 'repriced':
+                        # Order was repriced - update tracking variables
+                        order_id = repricing_result.get('new_order_id')
+                        sell_price = repricing_result.get('new_price')
+                        logger.info(f"✅ Order repriced successfully, continuing monitoring with new order {order_id}")
+                        # Continue monitoring the new order
+                        continue
+
+                # =============================================================
                 # PERIODIC LIQUIDITY CHECK
                 # =============================================================
                 if check_count - last_liquidity_check >= LIQUIDITY_CHECK_INTERVAL:
                     logger.debug(f"[{check_time}] 🔍 Checking liquidity...")
-                    
+
                     liquidity = self.liquidity_checker.check_liquidity(
                         market_id=market_id,
                         token_id=token_id,
                         initial_best_bid=buy_price  # Use buy price as baseline
                     )
-                    
+
                     if not liquidity['ok']:
                         logger.warning("")
                         logger.warning("=" * 50)
@@ -370,13 +386,13 @@ class SellMonitor:
                         logger.warning(f"   Current bid: {format_price(liquidity['current_best_bid'])}")
                         logger.warning(f"   Current spread: {format_percent(liquidity['current_spread_pct'])}")
                         logger.warning("")
-                        
+
                         # If auto-cancel enabled, return deteriorated status
                         if self.config.get('LIQUIDITY_AUTO_CANCEL', True):
                             logger.warning("   Auto-cancel enabled - exiting monitoring")
                             logger.warning("   Bot will cancel order and find new market")
                             logger.warning("")
-                            
+
                             return {
                                 'status': 'deteriorated',
                                 'filled_amount': None,
@@ -391,7 +407,7 @@ class SellMonitor:
                             f"Bid: {format_price(liquidity['current_best_bid'])}, "
                             f"Spread: {format_percent(liquidity['current_spread_pct'])}"
                         )
-                    
+
                     last_liquidity_check = check_count
 
                 # =============================================================
@@ -879,6 +895,297 @@ class SellMonitor:
             logger.error("")
 
         return (filled_shares, fill_price, filled_usdt)
+
+    def check_and_execute_repricing(self, order_id: str, current_price: float) -> dict:
+        """
+        Check if repricing is needed and execute if necessary.
+
+        Args:
+            order_id: Current sell order ID
+            current_price: Current sell order price
+
+        Returns:
+            Dict with status and new_order_id if repriced, None if no change
+            {'status': 'repriced', 'new_order_id': '...', 'new_price': 0.123}
+            or None if no repricing needed
+        """
+        # Skip if repricing disabled
+        if not self.enable_repricing:
+            return None
+
+        position = self.state.get('current_position', {})
+        token_id = position.get('token_id')
+        buy_price = safe_float(position.get('avg_fill_price', 0))
+        original_price = safe_float(position.get('original_sell_price', current_price))
+        filled_amount = safe_float(position.get('filled_amount', 0))
+
+        if not token_id or buy_price <= 0 or filled_amount <= 0:
+            logger.warning("Cannot check repricing: missing required position data")
+            return None
+
+        try:
+            # Get fresh orderbook
+            orderbook = self.client.get_market_orderbook(token_id)
+            if not orderbook or 'asks' not in orderbook:
+                return None
+
+            asks = orderbook.get('asks', [])
+            if not asks:
+                return None
+
+            # Filter out our own order and get competing asks (better prices = lower prices)
+            competing_asks = [ask for ask in asks if safe_float(ask.get('price', 999)) < current_price]
+
+            if not competing_asks:
+                # No better prices - check if we should return to higher price (dynamic adjustment)
+                if self.enable_dynamic and current_price < original_price:
+                    return self._check_dynamic_price_increase(order_id, current_price, original_price, asks)
+                return None
+
+            # Calculate total competing liquidity
+            total_competing_shares = sum(safe_float(ask.get('shares', 0)) for ask in competing_asks)
+
+            # Calculate threshold
+            threshold_shares = filled_amount * (self.reprice_threshold_pct / 100.0)
+
+            logger.debug(f"Repricing check: competing={total_competing_shares:.2f} shares, threshold={threshold_shares:.2f} shares")
+
+            # Check if threshold met
+            if total_competing_shares < threshold_shares:
+                # Not enough competition - check dynamic increase
+                if self.enable_dynamic and current_price < original_price:
+                    return self._check_dynamic_price_increase(order_id, current_price, original_price, asks)
+                return None
+
+            # Threshold met - calculate new target price
+            target_price = self._calculate_target_price(competing_asks, total_competing_shares)
+
+            if target_price is None:
+                return None
+
+            # Apply price floor if configured
+            min_allowed_price = self._calculate_min_allowed_price(buy_price)
+            if target_price < min_allowed_price:
+                logger.info(f"Target price ${target_price:.4f} below floor ${min_allowed_price:.4f}, using floor")
+                target_price = min_allowed_price
+
+            # Check if price change is significant (avoid tiny adjustments)
+            price_change_pct = abs((target_price - current_price) / current_price * 100)
+            if price_change_pct < 0.5:  # Less than 0.5% change
+                logger.debug(f"Price change too small ({price_change_pct:.2f}%), skipping")
+                return None
+
+            # Execute repricing
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("🔄 REPRICING SELL ORDER")
+            logger.info("=" * 70)
+            logger.info(f"   Current price: {format_price(current_price)}")
+            logger.info(f"   Target price: {format_price(target_price)}")
+            logger.info(f"   Change: {format_percent((target_price - current_price) / current_price * 100)}")
+            logger.info(f"   Reason: {total_competing_shares:.2f} shares at better prices (threshold: {threshold_shares:.2f})")
+            logger.info("")
+
+            return self._execute_repricing(order_id, target_price, filled_amount)
+
+        except Exception as e:
+            logger.error(f"Error checking repricing: {e}")
+            return None
+
+    def _calculate_min_allowed_price(self, buy_price: float) -> float:
+        """Calculate minimum allowed sell price based on configuration."""
+        if not self.allow_below_buy:
+            return buy_price
+
+        # Allow reduction up to max_reduction_pct below buy price
+        min_price = buy_price * (1 - self.max_reduction_pct / 100.0)
+        return round_price(min_price)
+
+    def _calculate_target_price(self, competing_asks: list, total_shares: float) -> float:
+        """
+        Calculate target price based on repricing mode.
+
+        Args:
+            competing_asks: List of ask orders with better prices than ours
+            total_shares: Total shares in competing asks
+
+        Returns:
+            Target price or None if cannot calculate
+        """
+        if not competing_asks:
+            return None
+
+        # Sort by price (ascending - best prices first)
+        sorted_asks = sorted(competing_asks, key=lambda x: safe_float(x.get('price', 999)))
+
+        if self.reprice_mode == 'best':
+            # Match best (lowest) competing price
+            target = safe_float(sorted_asks[0].get('price', 0))
+            logger.debug(f"Mode='best': targeting ${target:.4f}")
+            return round_price(target)
+
+        elif self.reprice_mode == 'second_best':
+            # Match second best price
+            if len(sorted_asks) >= 2:
+                target = safe_float(sorted_asks[1].get('price', 0))
+                logger.debug(f"Mode='second_best': targeting ${target:.4f}")
+                return round_price(target)
+            else:
+                # Fallback to best if only one level
+                target = safe_float(sorted_asks[0].get('price', 0))
+                logger.debug(f"Mode='second_best' (fallback to best): targeting ${target:.4f}")
+                return round_price(target)
+
+        elif self.reprice_mode == 'liquidity_percent':
+            # Target price level that captures X% of total liquidity
+            target_shares = total_shares * (self.liq_target_pct / 100.0)
+            cumulative_shares = 0.0
+
+            for ask in sorted_asks:
+                cumulative_shares += safe_float(ask.get('shares', 0))
+                if cumulative_shares >= target_shares:
+                    target = safe_float(ask.get('price', 0))
+                    logger.debug(f"Mode='liquidity_percent': targeting ${target:.4f} (captures {self.liq_target_pct}%)")
+                    return round_price(target)
+
+            # Fallback to worst competing price if we didn't reach threshold
+            target = safe_float(sorted_asks[-1].get('price', 0))
+            logger.debug(f"Mode='liquidity_percent' (fallback): targeting ${target:.4f}")
+            return round_price(target)
+
+        return None
+
+    def _check_dynamic_price_increase(self, order_id: str, current_price: float,
+                                      original_price: float, asks: list) -> dict:
+        """
+        Check if we should increase price back toward original price.
+        Only applies when mode is 'second_best' or 'liquidity_percent'.
+
+        Returns:
+            Dict with repricing info or None
+        """
+        if self.reprice_mode not in ['second_best', 'liquidity_percent']:
+            return None
+
+        # Get competing asks at better prices
+        competing_asks = [ask for ask in asks if safe_float(ask.get('price', 999)) < current_price]
+
+        if self.reprice_mode == 'second_best':
+            # If we're second best but now could be first best, move up
+            if len(competing_asks) == 0:
+                # No competition - can return to original
+                target = original_price
+                logger.info(f"Dynamic adjustment: no competition, returning to original ${target:.4f}")
+            elif len(competing_asks) == 1:
+                # Only one competitor - we should be second best (stay where we are)
+                return None
+            else:
+                # Multiple competitors - could move up one level
+                sorted_asks = sorted(competing_asks, key=lambda x: safe_float(x.get('price', 999)))
+                target = safe_float(sorted_asks[1].get('price', 0))  # Second best
+
+                if target <= current_price:
+                    return None  # No improvement
+
+                logger.info(f"Dynamic adjustment: moving to second best ${target:.4f}")
+
+            return self._execute_repricing(order_id, round_price(target),
+                                          safe_float(self.state.get('current_position', {}).get('filled_amount', 0)))
+
+        elif self.reprice_mode == 'liquidity_percent':
+            # Check if liquidity dropped below return threshold
+            total_competing_shares = sum(safe_float(ask.get('shares', 0)) for ask in competing_asks)
+            position = self.state.get('current_position', {})
+            filled_amount = safe_float(position.get('filled_amount', 0))
+
+            return_threshold_shares = filled_amount * (self.liq_return_pct / 100.0)
+
+            if total_competing_shares < return_threshold_shares:
+                # Liquidity dropped - move up to next level
+                if not competing_asks:
+                    target = original_price
+                else:
+                    # Find next level up
+                    sorted_asks = sorted(competing_asks, key=lambda x: safe_float(x.get('price', 999)), reverse=True)
+                    target = safe_float(sorted_asks[0].get('price', 0))
+                    target = min(target, original_price)  # Don't exceed original
+
+                if target <= current_price:
+                    return None
+
+                logger.info(f"Dynamic adjustment: liquidity dropped to {total_competing_shares:.2f} shares (< {return_threshold_shares:.2f}), moving to ${target:.4f}")
+
+                return self._execute_repricing(order_id, round_price(target), filled_amount)
+
+        return None
+
+    def _execute_repricing(self, old_order_id: str, new_price: float, amount_tokens: float) -> dict:
+        """
+        Execute repricing: cancel old order and place new one.
+
+        Returns:
+            Dict with new order info or None if failed
+        """
+        try:
+            # Cancel old order
+            logger.info(f"   Cancelling old order {old_order_id}...")
+            success = self.client.cancel_order(old_order_id)
+
+            if not success:
+                logger.error("   Failed to cancel old order")
+                return None
+
+            logger.info("   ✓ Old order cancelled")
+            time.sleep(1)  # Brief pause
+
+            # Place new order
+            position = self.state.get('current_position', {})
+            market_id = position.get('market_id')
+            token_id = position.get('token_id')
+            outcome_side = position.get('outcome_side', 'YES')
+
+            logger.info(f"   Placing new order at {format_price(new_price)}...")
+
+            # Use order_manager if available
+            from order_manager import OrderManager
+            order_manager = OrderManager(self.client)
+
+            result = order_manager.place_sell(
+                market_id=market_id,
+                token_id=token_id,
+                price=new_price,
+                amount_tokens=amount_tokens,
+                outcome_side=outcome_side
+            )
+
+            if not result:
+                logger.error("   Failed to place new order")
+                return None
+
+            new_order_id = result.get('order_id', result.get('orderId', 'unknown'))
+
+            logger.info(f"   ✓ New order placed: {new_order_id}")
+            logger.info("")
+
+            # Update state
+            position['sell_order_id'] = new_order_id
+            position['sell_price'] = new_price
+            # Note: original_sell_price is preserved
+
+            from core.state_manager import StateManager
+            state_file = self.config.get('STATE_FILE', 'state.json')
+            state_manager = StateManager(state_file)
+            state_manager.save_state(self.state)
+
+            return {
+                'status': 'repriced',
+                'new_order_id': new_order_id,
+                'new_price': new_price
+            }
+
+        except Exception as e:
+            logger.error(f"   Error executing repricing: {e}")
+            return None
 
 
 # =============================================================================
