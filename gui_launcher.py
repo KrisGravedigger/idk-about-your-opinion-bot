@@ -931,6 +931,16 @@ class BotLauncherGUI:
         """Handle stop-loss toggle."""
         toggle_widget_state(self.enable_stop_loss_var, self.stop_loss_scale)
 
+    def on_precision_toggle(self):
+        """Handle precision settings toggle."""
+        state = 'normal' if self.enable_precision_edit_var.get() else 'disabled'
+        if hasattr(self, 'safety_margin_entry'):
+            self.safety_margin_entry.config(state=state)
+        if hasattr(self, 'price_decimals_spinbox'):
+            self.price_decimals_spinbox.config(state=state)
+        if hasattr(self, 'amount_decimals_spinbox'):
+            self.amount_decimals_spinbox.config(state=state)
+
     def on_sell_repricing_toggle(self):
         """Handle sell repricing toggle - enable/disable all repricing parameters."""
         enabled = self.enable_sell_repricing_var.get()
