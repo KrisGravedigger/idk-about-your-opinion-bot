@@ -75,6 +75,16 @@ class SellMonitor:
         self.stop_loss_trigger = config.get('STOP_LOSS_TRIGGER_PERCENT', -10.0)
         self.stop_loss_offset = config.get('STOP_LOSS_AGGRESSIVE_OFFSET', 0.001)
 
+        # Sell order repricing config
+        self.enable_repricing = config.get('ENABLE_SELL_ORDER_REPRICING', True)
+        self.reprice_threshold_pct = config.get('SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT', 50.0)
+        self.allow_below_buy = config.get('ALLOW_SELL_BELOW_BUY_PRICE', False)
+        self.max_reduction_pct = config.get('MAX_SELL_PRICE_REDUCTION_PCT', 5.0)
+        self.reprice_mode = config.get('SELL_REPRICE_SCALE_MODE', 'best')
+        self.liq_target_pct = config.get('SELL_REPRICE_LIQUIDITY_TARGET_PCT', 30.0)
+        self.liq_return_pct = config.get('SELL_REPRICE_LIQUIDITY_RETURN_PCT', 20.0)
+        self.enable_dynamic = config.get('ENABLE_DYNAMIC_SELL_PRICE_ADJUSTMENT', True)
+
         logger.debug(
             f"SellMonitor initialized: "
             f"check_interval={self.check_interval}s, "
