@@ -1,7 +1,5 @@
 # Opinion Trading Bot 🤖
 
-# Opinion Trading Bot 🤖
-
 **Version 1.1.0 - The Repricing Update**
 
 **Autonomous trading bot for Opinion.trade prediction markets on BNB Chain**
