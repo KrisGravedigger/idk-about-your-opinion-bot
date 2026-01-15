@@ -1,1342 +1,389 @@
 # Opinion Trading Bot 🤖
 
-**Version 1.0.0 - The Accessibility Update**
+# Opinion Trading Bot 🤖
+
+**Version 1.1.0 - The Repricing Update**
 
 **Autonomous trading bot for Opinion.trade prediction markets on BNB Chain**
 
-A sophisticated liquidity provision bot designed to maximize airdrop points while generating trading profits through automated market-making strategies.
+---
+
+## 📖 tl;dr
+
+**TL;DR:** Autonomous trading bot for Opinion.trade prediction markets (BNB Chain). Maximizes airdrop points through intelligent market-making with risk controls.
+**Top 5 features:**
+  (1) Fully autonomous trading cycle, 
+  (2) Stop-loss & sell order repricing, 
+  (3) Telegram notifications, 
+  (4) One-click GUI, 
+  (5) Persistent P&L statistics.
 
 ---
 
-## 📦 Standalone Executable - NEW in v1.0!
+## 🚀 Quick Start (10 steps, ~5 minutes)
 
-**No Python installation required!** Download pre-built executables for your platform:
+1. **Prepare environment** - VPS or VPN outside banned jurisdictions ([terms](https://app.opinion.trade/terms))
+2. **Request API key** - [Google Form](https://docs.google.com/forms/d/1h7gp8UffZeXzYQ-lv4jcou9PoRNOqMAQhyW4IwZDnII/viewform?edit_requested=true)
+3. **Create dedicated wallet** - Fund with BNB (gas) + USDT (trading), connect to opinion.trade
+4. **Transfer USDT** - From wallet to opinion.trade exchange (Opinion page)
+5. **Download release** - [Latest version](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)
+6. **Extract ZIP** - Windows: `OpinionBot_Windows.zip` | Linux/macOS: appropriate file
+7. **Run executable** - `OpinionBot.exe` (Windows) or `OpinionBot` (Linux/macOS)
+8. **Fill in credentials** - API keys (Opinion + Telegram), parameters (read tooltips if unsure)
+9. **Save settings** - "Save Configuration" button
+10. **Start!** - "▶️ Start Bot" button → Watch logs or sleep peacefully (Telegram notifications)
 
-- 🪟 **[Windows (10/11)](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)** - OpinionBot_Windows.zip
-- 🐧 **[Linux (Ubuntu 20.04+)](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)** - OpinionBot_Linux.zip
-- 🍎 **[macOS (10.15+)](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest)** - OpinionBot_macOS.zip
-
-**Quick Start (2 minutes):**
-1. Download ZIP for your platform (~40-60 MB)
-2. Extract to a folder
-3. Double-click `OpinionBot.exe` (Windows) or `OpinionBot` (Linux/macOS)
-4. Follow welcome wizard → Configure credentials → Start trading!
-
-**Features:**
-- ✅ Self-contained (no dependencies to install)
-- ✅ Beautiful GUI with 6 configuration tabs
-- ✅ Real-time log viewer
-- ✅ Auto-update notifications
-- ✅ Welcome wizard for first-time setup
-
-**For technical users:** You can still run from source as before. See [Installation](#-installation) below.
+**If problems occur:** Stop bot → Cancel/sell position manually on opinion.trade
 
 ---
 
 ## 📋 Table of Contents
 
-- [Standalone Executable](#-standalone-executable---new-in-v10)
-- [What's New in 1.0](#-whats-new-in-10)
-
-- [What's New in 0.3](#-whats-new-in-03)
 - [Features](#-features)
-- [Architecture](#-architecture)
-- [Quick Start](#-quick-start)
 - [Installation](#-installation)
-- [Configuration](#-configuration)
-- [GUI Configuration Tool](#-gui-configuration-tool)
-- [Telegram Notifications](#-telegram-notifications)
-- [Running the Bot](#-running-the-bot)
+- [Configuration](#️-configuration)
+- [GUI](#️-gui-configuration-tool)
+- [Telegram](#-telegram-notifications)
 - [How It Works](#-how-it-works)
-- [Module Overview](#-module-overview)
-- [Safety Features](#-safety-features)
+- [Safety](#️-safety-features)
 - [Troubleshooting](#-troubleshooting)
-- [Development](#-development)
-- [License & Disclaimer](#-license--disclaimer)
-
----
-
-## 🎉 What's New in 1.0
-
-**Major milestone: Making algorithmic trading accessible to everyone!**
-
-### 🖥️ **Standalone Executable Distribution**
-
-**No Python installation required!**
-
-- Download → Extract → Run (2 minutes setup)
-- Self-contained executables for Windows, Linux, macOS (~120-150 MB)
-- Zero dependency management
-- Auto-update notifications
-
-### 🎨 **Full-Featured GUI Configuration Tool**
-
-**Visual interface replaces manual config editing!**
-
-**6 Configuration Tabs:**
-- 💰 **Capital** - Visual mode selection, slider for percentages, tooltips
-- 📊 **Markets** - Scoring profiles, weight editor, market filters
-- 💱 **Trading** - Spread thresholds, improvement amounts
-- 🛡️ **Risk** - Stop-loss settings, order timeouts, liquidity monitoring
-- 🔔 **Monitoring** - Log level, Telegram integration, Test button
-- 🔐 **Credentials** - Masked fields, show/hide toggles, **clickable help links**
-
-**Bot Control Panel:**
-- ▶️ Start/⏹️ Stop/🔄 Restart buttons
-- Real-time status display (Running/Stopped)
-- Live log viewer with syntax highlighting
-- Utility buttons (View Logs, Open Folder, View PnL)
-
-### 🎁 **Welcome Wizard**
-
-**First-time users get guided setup:**
-- Auto-creates .env, bot_config.json, bonus_markets.txt
-- Step-by-step instructions
-- Opens Credentials tab automatically
-- Help links for API Key and Telegram setup
-
-### 🔄 **Auto-Update System**
-
-- Background check on startup
-- Notifies when new version available
-- One-click download
-- Settings preserved during update
-
-### 📖 **Integrated Help**
-
-**Clickable links in Credentials tab:**
-- "Don't have an API Key? Click here to request access" → Opens Google Form
-- "Need help setting up Telegram? Click here for guide" → Opens TELEGRAM_SETUP.md
-
-### 📊 **Impact**
-
-| Before v1.0 | After v1.0 |
-|-------------|------------|
-| 30 min setup | 2 min setup |
-| Python required | No installation |
-| Edit config.py | Visual GUI |
-| Developers only | Everyone |
-
-**See [TAG_DESCRIPTION_v1.0.0.txt](TAG_DESCRIPTION_v1.0.0.txt) for complete v1.0 details.**
-
----
-
-## 🎉 What's New in 0.3
-
-### 🆕 Major Features
-
-**1. Telegram Notifications** 📱
-- Real-time notifications for all important bot events
-- Bot start/stop with comprehensive statistics
-- State change alerts (BUY_PLACED, SELL_PLACED)
-- Stop-loss trigger notifications
-- Configurable heartbeat updates (default: every hour)
-- Complete setup guide in [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)
-
-**2. Persistent P&L Statistics** 📊
-- Separate `pnl_stats.json` file for statistics persistence
-- Statistics survive even if `state.json` is deleted
-- Auto-display on bot startup
-- Enhanced tracking: best/worst trades, average win/loss
-- Historical performance preserved across sessions
-
-**3. Enhanced Risk Management** 🛡️
-- **Stop-loss protection** - Automatic position closure at configurable loss threshold
-- **Market expiration filters** - Skip markets closing too soon or too far in the future
-- **Orderbook bias filters** - Avoid heavily imbalanced markets
-- **Improved market selection** - Better filters for market quality
-
-**4. YES/NO Market Support** 🎯
-- Full support for both YES and NO outcome trading
-- Automatic outcome selection based on market conditions
-- Probability-based filtering for both sides
-
-### ⚡ Improvements
-- **Major code refactoring** - Reduced autonomous_bot.py by 56% (2096 → 922 lines)
-- **Modular handler architecture** - Extracted stage-specific logic to separate handlers
-- **Centralized validation** - Eliminated 90% of code duplication
-- **Comprehensive test suite** - Unit tests with >80% coverage for core modules
-- More robust state recovery after interruptions
-- Better error handling and logging
-- Enhanced position tracking and P&L calculation
-- Improved market scoring algorithms
+- [License](#-license--disclaimer)
 
 ---
 
 ## ✨ Features
 
-### Core Trading Engine
-- **Fully Autonomous Operation** - Complete trading cycle from market selection to position closing
-- **State Machine Architecture** - 8-stage state machine with persistence across restarts
-- **Intelligent Market Selection** - Multi-factor scoring system with bonus market support
-- **YES/NO Market Support** - Trades both YES and NO outcomes based on market conditions
-- **Advanced Pricing Strategy** - Threshold-based market making with safety checks
-- **Smart Order Monitoring** - Detects fills, competition, and market deterioration
+### Trading Engine
+- **Autonomous cycle** - Scanning → BUY → SELL → P&L → Repeat
+- **YES/NO markets** - Trades both sides of markets
+- **Intelligent scoring** - Multi-factor market selection with bonuses
+- **Sell order repricing** ⭐ **v1.1** - 3 modes (best/second_best/liquidity_percent), dynamic return to higher price
+- **Stop-loss** - Automatic position closure at loss threshold (default -10%)
 
 ### Risk Management
-- **Capital Management** - Fixed or percentage-based position sizing
-- **Stop-Loss Protection** ⭐ NEW - Automatic position closure when losses exceed threshold (-10% default)
-- **Market Filters** ⭐ NEW - Skip markets closing too soon/late or heavily biased
-- **Liquidity Monitoring** - Detects and responds to orderbook deterioration
-- **Order Timeouts** - Automatic cancellation after configurable time periods
-- **Balance Safety Checks** - Prevents over-trading when capital is low
+- **Capital modes** - Fixed or percentage-based
+- **Market filters** - Time to close, orderbook bias, probabilities
+- **Liquidity monitoring** - Cancels orders on deterioration
+- **Price floor** ⭐ **v1.1** - Optional protection against selling below buy price
+- **Order timeouts** - Automatic cancellation after time limit
 
-### Analytics & Notifications
-- **Persistent P&L Statistics** ⭐ NEW - Separate file preserves stats across sessions
-- **Telegram Notifications** ⭐ NEW - Real-time alerts for all important events
-- **P&L Calculation** - Precise profit/loss tracking using Decimal arithmetic
-- **Trade Statistics** - Win rate, total P&L, consecutive losses, best/worst trades
-- **Session Summaries** - Comprehensive performance reports on startup and shutdown
-- **State Persistence** - Resume interrupted trading cycles seamlessly
-
-### User Interface
-- **GUI Configuration Tool** - Visual interface for configuration and bot control (2,308 lines)
-- **6 Configuration Tabs** - Capital, Market, Trading, Risk, Monitoring, Credentials
-- **Real-Time Log Viewer** - Live bot output with syntax highlighting
-- **One-Click Bot Control** - Start/stop/restart with visual status monitoring
-- **Profile Management** - Save/load different trading strategies
-- **Import/Export** - Configuration backup and sharing
-
----
-
-## 🏗️ Architecture
-
-### Project Structure
-
-```
-opinion_trading_bot/
-├── core/                          # Core business logic
-│   ├── autonomous_bot.py          # Main orchestrator (922 lines, -56% from refactor)
-│   ├── position_validator.py      # ⭐ NEW - Validation logic (326 lines)
-│   ├── position_recovery.py       # ⭐ NEW - Recovery/self-healing (385 lines)
-│   ├── capital_manager.py         # Position sizing & balance checks
-│   └── state_manager.py           # State persistence & validation
-│
-├── handlers/                      # ⭐ NEW - Stage-specific handlers
-│   ├── market_selector.py         # SCANNING stage handler (415 lines)
-│   ├── buy_handler.py             # BUY stages handler (536 lines)
-│   └── sell_handler.py            # SELL stages handler (299 lines)
-│
-├── monitoring/                    # Order & market monitoring
-│   ├── buy_monitor.py             # BUY order fill monitoring
-│   ├── sell_monitor.py            # SELL order fill & stop-loss monitoring
-│   └── liquidity_checker.py      # Orderbook liquidity analysis
-│
-├── strategies/                    # Trading strategies
-│   └── pricing.py                 # Threshold-based pricing strategy
-│
-├── tests/                         # ⭐ NEW - Unit test suite
-│   ├── test_position_validator.py # Tests for PositionValidator
-│   └── README.md                  # Testing guide
-│
-├── docs/                          # ⭐ NEW - Documentation
-│   └── ARCHITECTURE.md            # Comprehensive architecture docs
-│
-├── api_client.py                  # Opinion.trade API wrapper
-├── market_scanner.py              # Market discovery & ranking
-├── order_manager.py               # Order placement & management
-├── position_tracker.py            # P&L calculation & tracking
-├── pnl_statistics.py              # ⭐ NEW - Persistent P&L stats manager
-├── telegram_notifications.py      # ⭐ NEW - Telegram notification service
-├── scoring.py                     # Market scoring algorithms
-├── utils.py                       # Helper functions
-├── logger_config.py               # Logging configuration
-├── config.py                      # Configuration parameters
-├── gui_launcher.py                # GUI configuration & launcher tool
-├── gui_helpers.py                 # GUI utility functions
-│
-├── autonomous_bot_main.py         # Entry point (CLI)
-├── state.json                     # Bot state (auto-generated)
-├── pnl_stats.json                 # ⭐ NEW - P&L statistics (auto-generated)
-├── bonus_markets.txt              # Bonus market IDs
-├── .env                           # Credentials (create from .env.example)
-└── TELEGRAM_SETUP.md              # ⭐ NEW - Telegram setup guide
-```
-
-### Code Quality Improvements
-
-Recent refactoring has significantly improved code maintainability:
-- **autonomous_bot.py reduced by 56%** (2096 → 922 lines)
-- **Code duplication reduced by 90%** (~50% → ~5%)
-- **Modular handlers** for each trading stage
-- **Centralized validation and recovery** logic
-- **Comprehensive test coverage** (>80% for core modules)
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
-
-### State Machine
-
-```
-IDLE → SCANNING → BUY_PLACED → BUY_MONITORING → BUY_FILLED →
-SELL_PLACED → SELL_MONITORING → COMPLETED → IDLE (repeat)
-```
-
-**Stage Descriptions:**
-- `IDLE`: Ready to start new cycle
-- `SCANNING`: Finding and ranking markets (YES/NO outcomes)
-- `BUY_PLACED`: BUY order submitted, transitioning to monitoring
-- `BUY_MONITORING`: Monitoring BUY order for fills/competition
-- `BUY_FILLED`: BUY completed, preparing SELL order
-- `SELL_PLACED`: SELL order submitted, transitioning to monitoring
-- `SELL_MONITORING`: Monitoring SELL order for fills/stop-loss
-- `COMPLETED`: Trade finished, calculating P&L
-
----
-
-## 🚀 Quick Start
-
-```bash
-# 1. Clone repository
-git clone <repository-url>
-cd opinion_trading_bot
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Configure credentials
-cp .env.example .env
-# Edit .env with your API_KEY, PRIVATE_KEY, MULTI_SIG_ADDRESS
-
-# 4. (Optional) Configure Telegram notifications
-# See TELEGRAM_SETUP.md for detailed instructions
-# Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to .env
-
-# 5. (Optional) Add bonus markets
-# Edit bonus_markets.txt with market IDs (one per line)
-
-# 6. Configure and run the bot
-
-# OPTION A: Use GUI (recommended for beginners)
-python gui_launcher.py
-# - Visual interface for all configuration
-# - One-click bot start/stop
-# - Real-time log viewer
-# - See "GUI Configuration Tool" section below
-
-# OPTION B: Use CLI (advanced users)
-# Edit config.py to set capital, strategy parameters, etc.
-python autonomous_bot_main.py
-
-# Optional CLI flags:
-python autonomous_bot_main.py --max-cycles 5  # Run for 5 cycles then stop
-python autonomous_bot_main.py --reset-state   # Start fresh (clear previous state)
-```
+### Monitoring & UI
+- **GUI launcher** - 6 configuration tabs, real-time logs, bot control
+- **Telegram alerts** - Event notifications + hourly heartbeat
+- **Persistent P&L** - Statistics survive `state.json` deletion
+- **Auto-update** - Notifications for new versions
 
 ---
 
 ## 📦 Installation
 
-### Requirements
+### Standalone (Recommended)
+**No Python installation required!**
+- [Windows](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest) - `OpinionBot_Windows.zip`
+- [Linux](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest) - `OpinionBot_Linux.zip`
+- [macOS](https://github.com/KrisGravedigger/idk-about-your-opinion-bot/releases/latest) - `OpinionBot_macOS.zip`
 
-- **Python 3.10+**
-- **BNB Chain wallet** with:
-  - USDT for trading (minimum 20 USDT recommended)
-  - Small amount of BNB for gas fees (0.01 BNB)
-- **Opinion.trade API key**
-- **(Optional) Telegram account** for notifications
-
-### Setup Steps
-
-1. **Create virtual environment** (recommended)
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or
-   venv\Scripts\activate  # Windows
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Configure credentials**
-   ```bash
-   cp .env.example .env
-   ```
-
-   Edit `.env`:
-   ```env
-   API_KEY=your_opinion_trade_api_key
-   PRIVATE_KEY=0xYourWalletPrivateKey
-   MULTI_SIG_ADDRESS=0xYourWalletAddress
-
-   # Optional: Telegram notifications
-   TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-   TELEGRAM_CHAT_ID=your_chat_id
-   ```
-
-4. **Configure bot behavior**
-
-   Edit `config.py` to adjust:
-   - Capital allocation (`CAPITAL_MODE`, `CAPITAL_AMOUNT_USDT`, `CAPITAL_PERCENTAGE`)
-   - Pricing strategy thresholds
-   - Stop-loss parameters
-   - Market filters (expiration, bias)
-   - Monitoring intervals
-   - Telegram heartbeat interval
-   - Risk management settings
+### From Source (Python 3.10+)
+```bash
+git clone <repository-url>
+cd opinion_trading_bot
+pip install -r requirements.txt
+python gui_launcher.py  # GUI
+# or
+python autonomous_bot_main.py  # CLI
+```
 
 ---
 
 ## ⚙️ Configuration
 
-### Essential Parameters (`config.py`)
+### Configuration Priority
 
-#### Capital Management
+**IMPORTANT:** Settings saved through the GUI (`bot_config.json`) take priority over settings in `config.py`. The bot loads GUI settings first, then falls back to `config.py` for any missing values.
 
+### Key Parameters (`config.py` or GUI)
+
+**Capital:**
 ```python
-# Capital mode: 'fixed' or 'percentage'
-CAPITAL_MODE = 'percentage'
-
-# Fixed mode: use this exact amount per position
-CAPITAL_AMOUNT_USDT = 20.0
-
-# Percentage mode: use this % of current balance
-CAPITAL_PERCENTAGE = 90.0
-
-# Safety thresholds
+CAPITAL_MODE = 'percentage'  # 'fixed' or 'percentage'
+CAPITAL_AMOUNT_USDT = 20.0   # Fixed mode
+CAPITAL_PERCENTAGE = 90.0    # Percentage mode
 MIN_BALANCE_TO_CONTINUE_USDT = 50.0
-MIN_POSITION_SIZE_USDT = 50.0
 ```
 
-#### Market Filters (NEW in 0.3)
-
+**Market Filters:**
 ```python
-# Time-based filters (hours)
-MIN_HOURS_UNTIL_CLOSE = 30    # Skip markets closing too soon
-MAX_HOURS_UNTIL_CLOSE = None  # Skip markets closing too far out
-
-# Orderbook balance filter
-# (min_percentage, max_percentage) for BID side volume
-ORDERBOOK_BALANCE_RANGE = (45, 80)  # Skip if <45% or >80% bids
-
-# Outcome probability filters
-OUTCOME_MIN_PROBABILITY = 0.30  # Skip if implied prob < 30%
-OUTCOME_MAX_PROBABILITY = 0.84  # Skip if implied prob > 84%
+MIN_HOURS_UNTIL_CLOSE = 30   # Minimum time to close
+MAX_HOURS_UNTIL_CLOSE = None # Maximum (None = no limit)
+ORDERBOOK_BALANCE_RANGE = (45, 80)  # % bids (45-80%)
+OUTCOME_MIN_PROBABILITY = 0.30  # Min probability
+OUTCOME_MAX_PROBABILITY = 0.84  # Max probability
 ```
 
-#### Pricing Strategy
-
+**Pricing:**
 ```python
-# Spread thresholds (in dollars)
-SPREAD_THRESHOLD_1 = 0.20  # Tiny spreads: ≤$0.20
-SPREAD_THRESHOLD_2 = 0.50  # Small spreads: $0.21-$0.50
-SPREAD_THRESHOLD_3 = 1.00  # Medium spreads: $0.51-$1.00
-                           # Wide spreads: >$1.00
-
-# Improvement amounts for each threshold
-IMPROVEMENT_TINY = 0.00    # Join queue (no improvement)
-IMPROVEMENT_SMALL = 0.10   # $0.10 better
-IMPROVEMENT_MEDIUM = 0.20  # $0.20 better
-IMPROVEMENT_WIDE = 0.30    # $0.30 better
+SPREAD_THRESHOLD_1 = 0.20  # Tiny: ≤$0.20
+SPREAD_THRESHOLD_2 = 0.50  # Small: $0.21-$0.50
+SPREAD_THRESHOLD_3 = 1.00  # Medium: $0.51-$1.00
+IMPROVEMENT_TINY = 0.00    # Join queue
+IMPROVEMENT_SMALL = 0.10   # +$0.10
+IMPROVEMENT_MEDIUM = 0.20  # +$0.20
+IMPROVEMENT_WIDE = 0.30    # +$0.30
 ```
 
-#### Stop-Loss Protection (NEW in 0.3)
-
+**Stop-Loss:**
 ```python
 ENABLE_STOP_LOSS = True
-STOP_LOSS_TRIGGER_PERCENT = -10.0  # Trigger at -10% loss
-STOP_LOSS_AGGRESSIVE_OFFSET = 0.001  # Place aggressive limit
+STOP_LOSS_TRIGGER_PERCENT = -10.0  # -10% loss
 ```
 
-#### Telegram Notifications (NEW in 0.3)
-
+**Sell Order Repricing** ⭐ **v1.1:**
 ```python
-# Heartbeat interval (hours) - send periodic status updates
-# Set to 0 to disable heartbeat notifications
-TELEGRAM_HEARTBEAT_INTERVAL_HOURS = 1.0
+ENABLE_SELL_ORDER_REPRICING = True
+SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT = 50.0  # Trigger at ≥50% liquidity drop
+ALLOW_SELL_BELOW_BUY_PRICE = False  # Price floor protection
+MAX_SELL_PRICE_REDUCTION_PCT = 5.0  # Max -5% from buy price
+SELL_REPRICE_SCALE_MODE = 'best'  # 'best', 'second_best', 'liquidity_percent'
+SELL_REPRICE_LIQUIDITY_TARGET_PCT = 30.0  # Target for liquidity_percent mode
+ENABLE_DYNAMIC_SELL_PRICE_ADJUSTMENT = True  # Auto-return to higher price
+SELL_REPRICE_LIQUIDITY_RETURN_PCT = 20.0  # Return threshold
 ```
 
-#### Liquidity Monitoring
-
+**Telegram:**
 ```python
-LIQUIDITY_AUTO_CANCEL = True
-LIQUIDITY_BID_DROP_THRESHOLD = 25.0  # Cancel if bid drops >25%
-LIQUIDITY_SPREAD_THRESHOLD = 15.0    # Cancel if spread >15%
-```
-
-### Scoring Profiles
-
-Define market selection strategies in `config.py`:
-
-```python
-SCORING_PROFILES = {
-    'production_farming': {
-        'weights': {
-            'price_balance': 0.45,      # 50/50 bid/ask balance
-            'hourglass_advanced': 0.25,  # Orderbook shape
-            'spread': 0.20,              # Wide spreads
-            'volume_24h': 0.10,          # High volume bonus
-        },
-        'bonus_multiplier': 1.5,
-        'invert_spread': False,  # Larger = better
-    },
-    'test_quick_fill': {
-        'weights': {
-            'spread': 1.0,  # Only spread matters
-        },
-        'bonus_multiplier': 1.0,
-        'invert_spread': True,  # Smaller = better (fast fills)
-    },
-}
-
-DEFAULT_SCORING_PROFILE = 'production_farming'
+TELEGRAM_HEARTBEAT_INTERVAL_HOURS = 1.0  # Heartbeat every hour
 ```
 
 ---
 
 ## 🎛️ GUI Configuration Tool
 
-For users who prefer a visual interface, the bot includes a comprehensive GUI configurator and launcher.
-
 ### Features
+- **6 tabs:** Capital, Market, Trading, Risk, Monitoring, Credentials
+- **Real-time logs** with syntax highlighting
+- **Start/Stop/Restart** with one click
+- **Validation** before launch
+- **Profile management** - Save/load different strategies
 
-**🎨 Visual Configuration Interface**
-- **6 Configuration Tabs**: Capital, Market Filters, Trading Strategy, Risk Management, Monitoring, Credentials
-- **Real-time Validation**: Instant feedback on configuration errors
-- **Tooltips**: Helpful explanations for each setting
-- **Profile Management**: Save/load different trading strategies
-
-**🚀 Integrated Bot Launcher**
-- **One-Click Start/Stop**: Launch bot as subprocess with visual controls
-- **Real-Time Log Viewer**: Live console output with syntax highlighting
-- **Status Monitoring**: Track bot status, PID, and runtime
-- **Quick Actions**: Restart bot, view logs, open folders, check P&L
-
-**💾 Configuration Management**
-- **Import/Export**: Save configurations as JSON files
-- **Merge with config.py**: Import settings from Python config file
-- **Pre-built Profiles**: Load test mode, aggressive, or conservative profiles
-- **Credential Manager**: Securely save API keys and wallet info to `.env`
-
-### Usage
-
+### Launch
 ```bash
-# Launch GUI
 python gui_launcher.py
 ```
 
-### Interface Overview
+### Tabs
 
-#### Configuration Tabs
+**1. Capital** - Mode selection, sliders, tooltips  
+**2. Market** - Scoring profiles, filters (time, bias, probability)  
+**3. Trading** - Spread thresholds, improvements  
+**4. Risk** - Stop-loss, **SELL repricing** ⭐, timeouts, liquidity  
+**5. Monitoring** - Log level, Telegram (test button)  
+**6. Credentials** - API keys (masked), RPC URL, Telegram
 
-1. **Capital Tab**
-   - Choose between Fixed or Percentage capital mode
-   - Set position size and safety thresholds
-   - Configure minimum balance requirements
+**Risk Tab - Sell Repricing** ⭐ **v1.1:**
+- Enable/disable repricing
+- Liquidity threshold (slider + text field)
+- Scale mode (best/second_best/liquidity_percent)
+- Liquidity target/return percentages
+- Price floor protection
+- Max reduction percentage
+- Dynamic adjustment toggle
 
-2. **Market Tab**
-   - Time-based filters (min/max hours until market close)
-   - Orderbook balance filters
-   - Outcome probability ranges
-   - Scoring profile selection (Production Farming, Test Quick Fill, Custom)
-   - Custom scoring weights editor
-
-3. **Trading Tab**
-   - Spread thresholds configuration
-   - Price improvement amounts for each threshold
-   - Market maker strategy settings
-
-4. **Risk Tab**
-   - Stop-loss protection settings
-   - Order timeout configuration (BUY/SELL)
-   - Liquidity monitoring thresholds
-   - Auto-cancel parameters
-
-5. **Monitoring Tab**
-   - Logging level selection
-   - Telegram notifications toggle
-   - Heartbeat interval configuration
-   - Test Telegram connection button
-
-6. **Credentials Tab**
-   - API Key and Private Key input (masked)
-   - Multi-sig wallet address
-   - RPC URL configuration
-   - Telegram bot credentials
-   - Save to `.env` button
-
-#### Bot Control Panel
-
-**Control Buttons:**
-- ▶️ **Start Bot** - Launch bot with current configuration
-- ⏹️ **Stop Bot** - Gracefully stop running bot
-- 🔄 **Restart** - Stop and restart bot
-
-**Status Display:**
-- Current bot status (Running/Stopped)
-- Process ID (PID)
-- Runtime duration
-
-**Utility Buttons:**
-- 📊 **View Logs** - Open log files in default editor
-- 📁 **Open Folder** - Open bot directory in file explorer
-- 🗑️ **Clear Logs** - Clear the real-time log viewer
-- 📊 **View PnL** - View P&L statistics (pnl_stats.json)
-- 📋 **View State** - View current bot state (state.json)
-
-**Real-Time Log Viewer:**
-- Live output from bot with colored syntax highlighting
-- Auto-scroll toggle
-- Dark theme for comfortable viewing
-- Timestamps and log level indicators
-
-### Menu Bar
-
-**File Menu:**
-- New Configuration
-- Load Configuration...
-- Save Configuration (Ctrl+S)
-- Save As...
-- Import from config.py
-- Exit
-
-**Profiles Menu:**
-- Manage Profiles...
-- Load Test Mode
-- Load Aggressive
-- Load Conservative
-
-**Tools Menu:**
-- Test Configuration - Validate all settings
-- View Logs - Open log files
-- Open Bot Folder - Open in file explorer
-
-**Help Menu:**
-- Documentation
-- About
-
-### Configuration Workflow
-
-1. **Launch GUI**: `python gui_launcher.py`
-2. **Enter Credentials**: Go to Credentials tab, enter API key, private key, wallet address
-3. **Configure Strategy**: Use tabs to set capital, filters, trading parameters
-4. **Save Configuration**: File → Save Configuration (saves to `bot_config.json` and `.env`)
-5. **Test Settings**: Tools → Test Configuration (validates all parameters)
-6. **Start Bot**: Click "▶️ Start Bot" button
-7. **Monitor**: Watch real-time logs in the viewer
-8. **Stop**: Click "⏹️ Stop Bot" when done
-
-### Tips
-
-- **Use Profiles**: Save different strategies as profiles for quick switching
-- **Test First**: Use "Test Mode" profile for risk-free testing
-- **Watch Logs**: Keep an eye on the real-time viewer for errors or warnings
-- **Validate Often**: Click "Test Configuration" before starting to catch issues early
-- **Auto-Save**: GUI automatically saves to `bot_config.json` on changes
+### Control Panel
+- ▶️ **Start** / ⏹️ **Stop** / 🔄 **Restart**
+- Status display (Running/Stopped, PID, runtime)
+- **View Logs** / **Open Folder** / **View PnL** / **View State**
 
 ---
 
 ## 📱 Telegram Notifications
 
-### Setup
-
-See **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)** for complete step-by-step instructions.
-
-**Quick setup:**
-1. Message `@BotFather` on Telegram → create bot → copy token
-2. Message `@userinfobot` on Telegram → copy your Chat ID
+### Setup (2 minutes)
+1. `@BotFather` → `/newbot` → Copy token
+2. `@userinfobot` → Copy Chat ID
 3. Add to `.env`:
-   ```env
-   TELEGRAM_BOT_TOKEN=your_token_here
-   TELEGRAM_CHAT_ID=your_chat_id_here
-   ```
+```env
+   TELEGRAM_BOT_TOKEN=your_token
+   TELEGRAM_CHAT_ID=your_chat_id
+```
+4. Test: `python telegram_notifications.py` or button in GUI
+
+**Full guide:** [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)
 
 ### Notification Types
-
-**Bot Start** 🚀
-- Current P&L statistics
-- Available capital and balance
-- Capital mode and scoring profile
-- Stop-loss status
-
-**Bot Stop** ⛔
-- Final P&L statistics
-- Last 20 log lines before shutdown
-- Timestamp
-
-**State Changes** 📍
-- BUY order placed
-- SELL order placed
-- Market details and prices
-
-**Stop-Loss** 🚨
-- Trigger notification
-- Current loss percentage
-- Price comparison
-
-**Heartbeat** 💓
-- Periodic status updates (default: every hour)
-- Current state and market info
-- Balance and position value
-- Sent silently (no notification sound)
-
-### Testing
-
-Test your Telegram connection:
-```bash
-python telegram_notifications.py
-```
-
-You should receive several test messages on Telegram.
-
----
-
-## 🎮 Running the Bot
-
-### Standard Operation
-
-```bash
-python autonomous_bot_main.py
-```
-
-The bot will:
-1. Display P&L statistics from previous sessions
-2. Send Telegram notification (if configured)
-3. Load/initialize state
-4. Find best market (YES or NO outcome)
-5. Place BUY order
-6. Monitor until filled
-7. Place SELL order
-8. Monitor until filled (with stop-loss protection)
-9. Calculate P&L and update statistics
-10. Repeat (if `AUTO_REINVEST=True`)
-
-### Command Line Options
-
-```bash
-# Run for specific number of cycles
-python autonomous_bot_main.py --max-cycles 5
-
-# Clear previous state and start fresh
-python autonomous_bot_main.py --reset-state
-
-# Show help
-python autonomous_bot_main.py --help
-```
-
-### Interrupting the Bot
-
-- Press `Ctrl+C` to stop gracefully
-- Bot saves state before exiting
-- Sends Telegram stop notification (if configured)
-- Resume later by running again (state persists)
-
-### Monitoring Output
-
-The bot provides real-time logging with emojis:
-
-| Symbol | Meaning |
-|--------|---------|
-| ✅ | Success |
-| ❌ | Error |
-| ⚠️ | Warning |
-| 🔄 | Processing |
-| 💰 | Money/P&L |
-| 📊 | Data/Stats |
-| 🌟 | Bonus market |
-| 🛑 | Stop-loss |
-| 📱 | Telegram notification |
-| 💓 | Heartbeat |
+- 🚀 **Bot Start** - Stats, capital, settings
+- ⛔ **Bot Stop** - Final stats, last logs
+- 📍 **State Changes** - BUY/SELL placed
+- 🛑 **Stop-Loss** - Trigger notification
+- 🔄 **Repricing** ⭐ **v1.1** - SELL price decrease/increase
+- 💓 **Heartbeat** - Every hour (silent)
 
 ---
 
 ## 🔧 How It Works
 
-### Market Selection
-
-1. **Fetch Active Markets** - Query all markets from API
-2. **Generate Outcomes** - Create YES/NO outcome candidates from each market
-3. **Apply Filters** - Remove outcomes that don't meet criteria:
-   - Minimum orderbook depth
-   - Time until close constraints (NEW in 0.3)
-   - Orderbook balance requirements (NEW in 0.3)
-   - Probability ranges (NEW in 0.3)
-   - Minimum order book orders
-4. **Score Outcomes** - Calculate score based on:
-   - Spread percentage
-   - Price balance (50/50 bid/ask)
-   - Orderbook shape (hourglass pattern)
-   - 24h volume
-   - Bonus multiplier (if in bonus_markets.txt)
-5. **Select Best** - Choose highest scoring outcome (YES or NO)
-
-### Order Execution
-
-**BUY Orders:**
+### Trading Cycle
 ```
-1. Get current orderbook
-2. Calculate spread (ask - bid)
-3. Determine improvement based on spread size:
-   - Tiny spread (≤$0.20) → bid + $0.00 (join queue)
-   - Small spread ($0.21-$0.50) → bid + $0.10
-   - Medium spread ($0.51-$1.00) → bid + $0.20
-   - Wide spread (>$1.00) → bid + $0.30
-4. Apply safety checks (don't cross ask)
-5. Place limit order
-6. Send Telegram notification
+1. SCANNING → Find best market (YES/NO)
+2. BUY_PLACED → Place buy order
+3. BUY_MONITORING → Monitor until filled (timeout 8h)
+4. BUY_FILLED → Purchase completed
+5. SELL_PLACED → Place sell order
+6. SELL_MONITORING → Monitor + stop-loss + repricing
+7. COMPLETED → Calculate P&L → Save stats
+8. IDLE → Repeat (if AUTO_REINVEST=True)
 ```
 
-**SELL Orders:**
-```
-1. Get current orderbook
-2. Calculate spread
-3. Determine improvement (same thresholds, subtract from ask)
-4. Apply safety checks (don't cross bid)
-5. Place limit order
-6. Send Telegram notification
-```
+### Market Scoring
+- **Spread** - Wider = better (more room for profit)
+- **Price balance** - 50/50 bid/ask = optimal
+- **Hourglass pattern** - Orderbook shape
+- **Volume 24h** - Higher = bonus
+- **Bonus markets** - 1.5x multiplier from `bonus_markets.txt`
 
-### Monitoring & Risk Management
+### Sell Order Repricing ⭐ **v1.1**
 
-**BUY Monitoring:**
-- Checks order status every 9 seconds
-- Monitors orderbook liquidity
-- Cancels if:
-  - Bid drops >25% from initial
-  - Spread widens >15%
-  - Timeout reached (8 hours default)
+**Triggers:**
+- Liquidity drop ≥ threshold (default 50%)
+- Orderbook deterioration
 
-**SELL Monitoring (with Stop-Loss):**
-- Checks order status every 9 seconds
-- Calculates unrealized P&L continuously
-- **Triggers stop-loss if:**
-  - Loss exceeds threshold (-10% default)
-  - Places aggressive limit order to exit
-  - Sends Telegram notification
-- Monitors liquidity deterioration
-- Cancels if timeout reached (8 hours default)
+**Modes:**
+- **best** - Price of best order (bid+$0.01)
+- **second_best** - Price of second order
+- **liquidity_percent** - Target % liquidity (e.g., 30%)
 
-### P&L Calculation & Statistics
+**Dynamic Adjustment:**
+- Automatic return to higher price when orderbook improves
+- Return threshold: liquidity return % (default 20%)
+- Never exceeds original sell price
 
-```python
-buy_cost = amount_usdt (what we spent)
-sell_proceeds = filled_tokens × sell_price (what we received)
-pnl = sell_proceeds - buy_cost
-pnl_percent = (pnl / buy_cost) × 100
-```
-
-Uses `Decimal` arithmetic for precision.
-
-**Statistics tracked (NEW in 0.3):**
-- Total trades, wins, losses
-- Total P&L in USDT
-- Win rate percentage
-- Best/worst trade
-- Average win/loss amounts
-- Consecutive losses
-
-Statistics are saved to `pnl_stats.json` and persist even if `state.json` is deleted.
-
----
-
-## 📚 Module Overview
-
-### Core Modules
-
-**`core/autonomous_bot.py`**
-- Main orchestrator implementing state machine (922 lines, refactored from 2096)
-- Coordinates all modules via delegation pattern
-- Handles state transitions between trading stages
-- Manages trading cycle and error recovery
-- **NEW:** Telegram notification integration
-- **NEW:** Heartbeat timing and sending
-
-**`core/position_validator.py`** ⭐ NEW
-- Centralized validation logic (eliminates 15+ duplications)
-- Dust position detection (by shares and value)
-- Token ID validation and recovery
-- Manual sale detection (>95% position missing)
-- Actual position verification from API
-- Returns structured `ValidationResult` objects
-
-**`core/position_recovery.py`** ⭐ NEW
-- Self-healing and recovery logic (eliminates 5+ duplications)
-- Recovers missing order_id from API
-- Recovers token_id from market details
-- Detects already-filled orders
-- Finds orphaned positions after bot restart
-- Returns structured `RecoveryResult` objects
-
-**`core/capital_manager.py`**
-- Calculates position sizes
-- Queries USDT balance
-- Validates against platform constraints
-- Warns if position too small for airdrop points
-
-**`core/state_manager.py`**
-- Loads/saves state.json
-- Initializes fresh state
-- Validates state structure
-- Migrates old formats
-- Resets positions between cycles
-
-### Handler Modules
-
-**`handlers/market_selector.py`** ⭐ NEW
-- Handles SCANNING stage (415 lines extracted from autonomous_bot.py)
-- Orphaned position detection and recovery
-- Market scanning and selection logic
-- Orderbook validation before trading
-- BUY order placement
-- Telegram notifications for market selection
-
-**`handlers/buy_handler.py`** ⭐ NEW
-- Handles BUY stages: BUY_PLACED, BUY_MONITORING, BUY_FILLED (536 lines)
-- BUY order monitoring with timeout and liquidity checks
-- Order recovery (missing order_id, already-filled detection)
-- Dust position validation
-- Token ID validation and recovery
-- SELL order preparation and placement
-- Delegates to PositionValidator and PositionRecovery
-
-**`handlers/sell_handler.py`** ⭐ NEW
-- Handles SELL stages: SELL_PLACED, SELL_MONITORING (299 lines)
-- SELL order monitoring with stop-loss protection
-- Manual sale detection (position sold outside bot)
-- Unrealized P&L calculation
-- Position verification
-- Delegates to PositionValidator
-
-### New Modules (0.3)
-
-**`pnl_statistics.py`** ⭐ NEW
-- Manages persistent P&L statistics in separate file
-- Tracks best/worst trades, averages
-- Survives state.json deletions
-- Auto-displays on startup
-
-**`telegram_notifications.py`** ⭐ NEW
-- Telegram notification service
-- Sends formatted messages for all events
-- HTML formatting support
-- Error handling for network issues
-
-### Monitoring Modules
-
-**`monitoring/buy_monitor.py`**
-- Monitors BUY orders until filled
-- Checks liquidity conditions
-- Handles timeouts
-- Returns structured results
-
-**`monitoring/sell_monitor.py`**
-- Monitors SELL orders until filled
-- Calculates unrealized P&L
-- **Triggers stop-loss if threshold exceeded**
-- Monitors liquidity deterioration
-
-**`monitoring/liquidity_checker.py`**
-- Compares current vs initial orderbook
-- Calculates bid drop percentage
-- Calculates spread percentage
-- Returns deterioration analysis
-
-### Strategy Modules
-
-**`strategies/pricing.py`**
-- Threshold-based pricing strategy
-- Calculates BUY/SELL prices
-- Applies safety margins
-- Prevents spread crossing
-
-### Support Modules
-
-**`api_client.py`**
-- Opinion.trade API wrapper
-- Handles authentication
-- Provides convenience methods
-- Error handling
-
-**`market_scanner.py`**
-- Fetches all active markets
-- **Generates YES/NO outcomes**
-- Applies filters (time, bias, probability)
-- Calculates scores
-- Returns ranked list
-
-**`order_manager.py`**
-- Places BUY/SELL orders
-- Cancels orders
-- Fetches order status
-- Handles order-related operations
-
-**`position_tracker.py`**
-- Calculates P&L using Decimal arithmetic
-- Tracks trade history
-- Provides session summaries
-- Win rate calculations
-
-**`scoring.py`**
-- Market scoring algorithms
-- Price balance metric
-- Hourglass pattern detection
-- Volume/liquidity scoring
-
-**`utils.py`**
-- Helper functions
-- Formatting utilities
-- Safe type conversions
-- Timestamp generation
-
-**`logger_config.py`**
-- Centralized logging setup
-- Console + file output
-- Color coding
-- Structured logging helpers
+**Price Floor Protection:**
+- `ALLOW_SELL_BELOW_BUY_PRICE = False` → Won't sell below buy price
+- `MAX_SELL_PRICE_REDUCTION_PCT = 5.0` → Max -5% from buy price
 
 ---
 
 ## 🛡️ Safety Features
 
 ### Capital Protection
+- Min balance check before each cycle
+- Position size validation (min 50 USDT default)
+- Stop-loss at -10% loss
+- Price floor for SELL orders ⭐ **v1.1**
 
-- **Minimum Balance Check** - Exits if balance < threshold
-- **Position Size Validation** - Ensures orders meet platform minimums
-- **Capital Allocation** - Prevents over-leveraging
-
-### Order Safety
-
-- **Spread Crossing Prevention** - Orders never cross spread (remain makers)
-- **Safety Margins** - Minimum distance from opposite side
-- **Price Validation** - Checks prices before submission
-
-### Risk Management (Enhanced in 0.3)
-
-- **Stop-Loss Protection** ⭐ - Automatic position closure at loss threshold (-10% default)
-- **Market Filters** ⭐ - Skip markets closing too soon/late (configurable)
-- **Bias Filters** ⭐ - Avoid heavily imbalanced orderbooks (45-80% range)
-- **Probability Filters** ⭐ - Skip outcomes with extreme probabilities (30-84% range)
-- **Liquidity Monitoring** - Cancels orders in deteriorating conditions
-- **Order Timeouts** - Prevents indefinite waiting
-- **State Persistence** - Resume after crashes/interruptions
+### Order Protection
+- Spread crossing prevention (always maker)
+- Safety margins from opposite side
+- Order timeouts (8h default)
+- Liquidity monitoring (cancel on >25% drop)
 
 ### Operational Safety
-
-- **Graceful Shutdown** - Ctrl+C saves state before exit
-- **Error Handling** - Comprehensive try/catch blocks
-- **Logging** - Full audit trail of all operations
-- **Validation** - Config validation at startup
-- **Telegram Alerts** ⭐ NEW - Real-time notifications of important events
+- Graceful shutdown (Ctrl+C → save state)
+- State persistence → Resume after crash
+- Comprehensive logging
+- Telegram alerts for critical events
 
 ---
 
 ## 🔍 Troubleshooting
 
-### Common Issues
-
 **"Configuration errors found"**
-- Check `.env` file exists and has all required values
-- Verify API_KEY is valid
-- Ensure PRIVATE_KEY is 64 hex characters
+→ Check `.env` (API_KEY, PRIVATE_KEY, MULTI_SIG_ADDRESS)
 
 **"Insufficient balance"**
-- Check USDT balance: `client.get_usdt_balance()`
-- Reduce `CAPITAL_AMOUNT_USDT` or `CAPITAL_PERCENTAGE`
-- Ensure `MIN_BALANCE_TO_CONTINUE_USDT` is appropriate
+→ Increase USDT or decrease CAPITAL_AMOUNT/CAPITAL_PERCENTAGE
 
 **"No markets found"**
-- Opinion.trade may have no active markets
-- Check if filters are too restrictive (time, bias, probability)
-- Check internet connection
-- Try again later
+→ Too restrictive filters or no active markets
 
-**Order stuck in "pending"**
-- Normal - order waiting for fill
-- Check if you're competitive in orderbook
-- Wait or cancel with Ctrl+C
+**Order stuck "pending"**
+→ Normal, waiting for fill. Cancel with Ctrl+C if needed.
 
-**"Failed to place order"**
-- Insufficient USDT balance
-- Insufficient BNB for gas (for some operations)
-- Invalid API key
-- Network issues
+**Telegram not working**
+→ `python telegram_notifications.py` (test) → See [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)
 
-**Telegram notifications not working**
-- Verify `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`
-- Check you've started conversation with bot on Telegram
-- Run test: `python telegram_notifications.py`
-- See [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) for detailed troubleshooting
+**Repricing not working** ⭐ **v1.1**
+→ Check `ENABLE_SELL_ORDER_REPRICING = True` + INFO level logs
 
 ### Debug Mode
-
-Enable detailed logging:
-
 ```python
-# In config.py
+# config.py
 LOG_LEVEL = "DEBUG"
 ```
 
-Check `opinion_farming_bot.log` for full details.
-
-### State Issues
-
-If state.json becomes corrupted:
-
+### Reset State
 ```bash
 python autonomous_bot_main.py --reset-state
 ```
-
-Or manually delete `state.json`.
-
-**Note:** P&L statistics in `pnl_stats.json` are preserved separately.
-
----
-
-## 👨‍💻 Development
-
-### Project Structure
-
-The codebase follows modular architecture with clear separation of concerns:
-
-- **Core** - Business logic and orchestration (autonomous_bot.py, validators, recovery)
-- **Handlers** - Stage-specific logic (SCANNING, BUY, SELL) ⭐ NEW
-- **Monitoring** - Order and market monitoring
-- **Strategies** - Trading strategies (pricing, etc.)
-- **Support** - Utilities, logging, API client
-- **Notifications** - Telegram integration (NEW in 0.3)
-- **Tests** - Unit test suite with pytest ⭐ NEW
-- **Docs** - Architecture documentation ⭐ NEW
-
-### Adding New Features
-
-1. **New Handler** - Add to `handlers/` for new trading stages
-2. **New Validator** - Add to `core/position_validator.py`
-3. **New Strategy** - Add to `strategies/`
-4. **New Monitor** - Add to `monitoring/`
-5. **New Metric** - Add to `scoring.py`
-6. **New State** - Update `state_manager.py` and migration logic
-7. **New Notification** - Add to `telegram_notifications.py`
-8. **Add Tests** - Create test file in `tests/` with coverage
-
-### Testing
-
-**Unit Tests** ⭐ NEW
-
-The project now includes comprehensive unit tests:
-
-```bash
-# Run all tests
-python -m pytest tests/
-
-# Run specific test file
-python -m pytest tests/test_position_validator.py
-
-# Run with coverage
-python -m pytest tests/ --cov=. --cov-report=html
-
-# Run specific test
-python -m pytest tests/test_position_validator.py::TestPositionValidator::test_check_dust_position_by_shares_valid
-```
-
-**Coverage Goals:**
-- Core modules (position_validator.py, position_recovery.py): >80%
-- Handlers (buy_handler.py, sell_handler.py, market_selector.py): >70%
-- Orchestrator (autonomous_bot.py): >60%
-
-See [tests/README.md](tests/README.md) for detailed testing guide.
-
-**Production Testing**
-
-⚠️ **Version 0.3 is BETA** - New features have limited production testing.
-
-Always:
-1. Test with small amounts first
-2. Use `--max-cycles 1` for single-cycle testing
-3. Monitor logs carefully
-4. Verify state.json and pnl_stats.json after each cycle
-5. Test Telegram notifications before relying on them
-
-### Documentation
-
-- **README.md** - Main documentation (this file)
-- **docs/ARCHITECTURE.md** ⭐ NEW - Comprehensive architecture documentation
-- **tests/README.md** ⭐ NEW - Testing guide and best practices
-- **TELEGRAM_SETUP.md** - Telegram notification setup
-
-### Code Quality
-
-- **Type Hints** - Used throughout for clarity
-- **Docstrings** - All public functions documented
-- **Comments** - Non-obvious logic explained
-- **Logging** - Comprehensive logging at all levels
-- **Modular Design** - Clear separation of concerns (56% reduction in main file)
-- **DRY Principle** - Code duplication reduced by 90%
-- **Test Coverage** - Unit tests for critical components
+(P&L stats in `pnl_stats.json` will remain)
 
 ---
 
 ## 📄 License & Disclaimer
 
-### Disclaimer
+⚠️ **RISKS:**
+- **Bot can lose all capital**
+- Markets are unpredictable
+- Stop-loss/repricing are not foolproof
+- Bugs may cause losses
+- New features may have undiscovered issues
 
-⚠️ **IMPORTANT - READ CAREFULLY**
+⚠️ **RESPONSIBILITY:**
+- Test with small amounts
+- Monitor regularly (use Telegram!)
+- Never invest more than you can afford to lose
+- Developers NOT responsible for losses
+- This is NOT financial advice
 
-This bot is provided for **educational purposes only**. Trading prediction markets involves substantial risk of loss.
-
-**VERSION 0.3 IS BETA SOFTWARE:**
-- New features (Telegram, persistent stats, enhanced filters) have not been extensively tested
-- Bugs may exist that could result in financial losses
-- **Use with extreme caution** and start with minimal capital
-- Monitor the bot closely and be prepared to intervene manually
-- Report any issues immediately
-
-**RISKS:**
-- You can lose all capital deployed
-- Markets can be volatile and unpredictable
-- Bugs in the code could result in losses
-- API or network issues could cause problems
-- Stop-loss is NOT foolproof and may fail
-- No guarantees of profitability
-
-**YOU ARE RESPONSIBLE FOR:**
-- Testing thoroughly with small amounts
-- Understanding the code before running it
-- Monitoring the bot regularly
-- Managing your own risk
-- Any financial losses incurred
-
-**THE DEVELOPERS:**
-- Provide no warranties or guarantees
-- Are not responsible for any losses
-- Do not provide financial advice
-- Recommend professional advice before trading
-
-### License
-
-MIT License - See LICENSE file for details
+**License:** MIT (see LICENSE)
 
 ---
 
-## 🤝 Support & Community
+## 🎉 What's New
 
-### Getting Help
+### v1.1.0 ⭐ **Current**
+- **Sell order repricing** - 3 modes, dynamic return to higher price
+- **Price floor protection** - Optionally won't sell below buy price
+- **Liquidity-based triggering** - Reacts to liquidity drops
+- **GUI integration** - Full control in Risk tab
+- **INFO level logging** - Repricing analysis in logs
 
-1. Check this README thoroughly
-2. Review `opinion_farming_bot.log`
-3. Check [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) for Telegram issues
-4. Search existing GitHub issues
-5. Open new issue with:
-   - Version number (0.3)
-   - Full error message
-   - Relevant log excerpt
-   - Configuration (without credentials!)
-   - Steps to reproduce
+### v1.0.0
+- Standalone executables (Windows/Linux/macOS)
+- Full-featured GUI (6 tabs)
+- Welcome wizard
+- Auto-update system
+- Clickable help links
 
-### Contributing
-
-Contributions welcome! Please:
-1. Fork repository
-2. Create feature branch
-3. Add tests if applicable
-4. Submit pull request
-
----
-
-## 📊 Performance Expectations
-
-### Realistic Expectations
-
-- **Win Rate**: 50-70% (depends on market conditions)
-- **Average P&L**: Variable, depends on market volatility
-- **Cycle Time**: 1-8 hours per complete cycle (with timeouts)
-- **Airdrop Points**: Maximized through strategic market selection
-
-### Factors Affecting Performance
-
-- Market volatility
-- Competition from other traders
-- Spread availability
-- Capital allocated
-- Configuration parameters
-- Stop-loss threshold
-- Market filters (may reduce opportunities)
-
----
-
-## 🔐 Security Best Practices
-
-### Credential Management
-
-- ✅ **DO** use `.env` file for credentials
-- ✅ **DO** use dedicated trading wallet
-- ✅ **DO** start with small amounts (especially in 0.3 beta)
-- ✅ **DO** keep backup of private key offline
-- ✅ **DO** secure your Telegram bot token
-- ❌ **DON'T** commit `.env` to Git
-- ❌ **DON'T** share private key or bot token
-- ❌ **DON'T** use main wallet
-- ❌ **DON'T** leave large amounts unmonitored
-
-### Operational Security
-
-- Keep software updated
-- Use secure network connections
-- Monitor bot regularly (use Telegram notifications!)
-- Review logs periodically
-- Set appropriate stop-loss thresholds
-- Test Telegram alerts before relying on them
-
----
-
-## 📈 Roadmap
-
-### Completed ✅
-
-- [x] ~~Telegram notifications~~ (v0.3)
-- [x] ~~Persistent P&L statistics~~ (v0.3)
-- [x] ~~Stop-loss protection~~ (v0.3)
-- [x] ~~Market expiration filters~~ (v0.3)
-- [x] ~~YES/NO market support~~ (v0.3)
-
-### Planned Features
-
-- [ ] CSV transaction logging for analysis
-- [ ] Multi-market support (parallel positions)
-- [ ] Web dashboard
-- [ ] Backtesting framework
-- [ ] Advanced strategies (e.g., momentum, mean reversion)
-- [ ] Mobile app integration
-
-### Known Limitations
-
-- Single position at a time
-- Manual configuration updates
-- Limited historical data analysis
-- No GUI interface
-- Beta stability (v0.3)
-
----
-
-## 📞 Contact
-
-For issues, questions, or contributions:
-- GitHub Issues: [Repository Issues Page]
-- Documentation: This README + [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)
-- Code: Fully commented and documented
-
----
-
-## 📝 Version History
-
-### Version 0.3 (Current - Beta)
-- Added Telegram notifications
-- Added persistent P&L statistics
-- Enhanced market filters (time, bias, probability)
+### v0.3
+- Telegram notifications
+- Persistent P&L statistics
 - Stop-loss protection
+- Market filters (time, bias, probability)
 - YES/NO market support
-- Improved state recovery
-
-### Version 0.2
-- Basic autonomous trading
-- State machine implementation
-- Market scoring and selection
-- Order monitoring
-- P&L tracking
 
 ---
 
-**Happy Trading! 🌾**
+## 📚 Documentation
 
-Remember: **Version 0.3 is BETA**. Start small, test thoroughly, monitor closely, and never invest more than you can afford to lose.
+- **README.md** (this file) - Main documentation
+- **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)** - Telegram setup step-by-step
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Code architecture
+- **[tests/README.md](tests/README.md)** - Testing guide
+
+---
+
+## 🤝 Support
+
+**Problems?**
+1. Read README
+2. Check `opinion_farming_bot.log`
+3. See [GitHub Issues](https://github.com/...)
+4. Open new issue (include: version, error, logs, config without credentials)
+
+**Contributing:** Pull requests welcome (fork → branch → PR)
+
+---
+
+**Happy Trading! 🤖💰**
+
+*Remember: Test with small amounts, monitor logs, use Telegram alerts.*
