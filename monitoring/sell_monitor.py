@@ -944,18 +944,18 @@ class SellMonitor:
                 return None
 
             # Debug: Show current price and orderbook
-            logger.debug(f"Repricing analysis: current_order_price=${current_price:.4f}, total_asks={len(asks)}")
+            logger.info(f"🔍 Repricing check: current_order_price=${current_price:.4f}, total_asks={len(asks)}")
             if asks:
                 best_ask_price = safe_float(asks[0].get('price', 0))
-                logger.debug(f"  Best ask in orderbook: ${best_ask_price:.4f}")
+                logger.info(f"   Best ask in orderbook: ${best_ask_price:.4f}")
 
             # Filter out our own order and get competing asks (better prices = lower prices)
             competing_asks = [ask for ask in asks if safe_float(ask.get('price', 999)) < current_price]
 
-            logger.debug(f"  Competing asks found: {len(competing_asks)}")
+            logger.info(f"   Competing asks found: {len(competing_asks)}")
             if competing_asks and len(competing_asks) <= 5:
                 for i, ask in enumerate(competing_asks[:5]):
-                    logger.debug(f"    Ask #{i+1}: price=${safe_float(ask.get('price', 0)):.4f}, shares={safe_float(ask.get('shares', 0)):.2f}")
+                    logger.info(f"     Ask #{i+1}: price=${safe_float(ask.get('price', 0)):.4f}, shares={safe_float(ask.get('shares', 0)):.2f}")
 
             if not competing_asks:
                 # No better prices - check if we should return to higher price (dynamic adjustment)
