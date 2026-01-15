@@ -100,7 +100,7 @@ class BotLauncherGUI:
     """Main GUI application window."""
 
     # Application version - update this for each release
-    VERSION = "1.0.7"
+    VERSION = "1.1.0"
 
     def __init__(self):
         self.root = tk.Tk()
@@ -771,26 +771,35 @@ class BotLauncherGUI:
         ttk.Label(liq_threshold_container, text="Liquidity Trigger Threshold (%):").pack(side='left', padx=(0, 10))
 
         self.sell_reprice_threshold_var = tk.DoubleVar(value=50.0)
+
+        # Entry field for direct input
+        self.sell_reprice_threshold_entry = ttk.Entry(
+            liq_threshold_container,
+            textvariable=self.sell_reprice_threshold_var,
+            width=10
+        )
+        self.sell_reprice_threshold_entry.pack(side='left', padx=5)
+
+        # Scale for visual adjustment
         self.sell_reprice_threshold_scale = ttk.Scale(
             liq_threshold_container,
             from_=1, to=1000,
             variable=self.sell_reprice_threshold_var,
             orient='horizontal',
-            length=200
+            length=150
         )
-        self.sell_reprice_threshold_scale.pack(side='left', fill='x', expand=True)
+        self.sell_reprice_threshold_scale.pack(side='left', fill='x', expand=True, padx=5)
 
-        self.sell_reprice_threshold_label = ttk.Label(liq_threshold_container, text="50%", width=8)
-        self.sell_reprice_threshold_label.pack(side='left', padx=(10, 0))
-        self.sell_reprice_threshold_var.trace_add('write',
-            lambda *args: self.sell_reprice_threshold_label.config(text=f"{self.sell_reprice_threshold_var.get():.0f}%"))
-        ToolTip(self.sell_reprice_threshold_scale,
+        tooltip_text = (
             "Reprice when total shares at better prices reach this % of our order size.\n\n"
             "Example: 50% with 100 share sell order = reprice when ≥50 shares appear at better prices\n\n"
             "Lower = more aggressive repricing\n"
             "Higher = more conservative repricing\n\n"
             "Default: 50%\n"
-            "Recommended: 50-250%")
+            "Recommended: 50-250%"
+        )
+        ToolTip(self.sell_reprice_threshold_entry, tooltip_text)
+        ToolTip(self.sell_reprice_threshold_scale, tooltip_text)
 
         # Allow Below Buy Price
         self.allow_below_buy_var = tk.BooleanVar(value=False)
@@ -853,25 +862,34 @@ class BotLauncherGUI:
         ttk.Label(liq_target_container, text="Liquidity Target (%):").pack(side='left', padx=(0, 10))
 
         self.liq_target_var = tk.DoubleVar(value=30.0)
+
+        # Entry field for direct input
+        self.liq_target_entry = ttk.Entry(
+            liq_target_container,
+            textvariable=self.liq_target_var,
+            width=10
+        )
+        self.liq_target_entry.pack(side='left', padx=5)
+
+        # Scale for visual adjustment
         self.liq_target_scale = ttk.Scale(
             liq_target_container,
             from_=1, to=100,
             variable=self.liq_target_var,
             orient='horizontal',
-            length=150
+            length=120
         )
-        self.liq_target_scale.pack(side='left', fill='x', expand=True)
+        self.liq_target_scale.pack(side='left', fill='x', expand=True, padx=5)
 
-        self.liq_target_label = ttk.Label(liq_target_container, text="30%", width=8)
-        self.liq_target_label.pack(side='left', padx=(10, 0))
-        self.liq_target_var.trace_add('write',
-            lambda *args: self.liq_target_label.config(text=f"{self.liq_target_var.get():.0f}%"))
-        ToolTip(self.liq_target_scale,
+        tooltip_text = (
             "Target price level that captures this % of better liquidity.\n\n"
             "Example: 30% means reprice to level where cumulative better orders = 30% of total\n\n"
             "Only used when mode = 'liquidity_percent'\n\n"
             "Default: 30%\n"
-            "Range: 1-100%")
+            "Range: 1-100%"
+        )
+        ToolTip(self.liq_target_entry, tooltip_text)
+        ToolTip(self.liq_target_scale, tooltip_text)
 
         # Liquidity Return % (only for liquidity_percent mode)
         liq_return_container = ttk.Frame(repricing_frame)
@@ -880,26 +898,35 @@ class BotLauncherGUI:
         ttk.Label(liq_return_container, text="Liquidity Return Threshold (%):").pack(side='left', padx=(0, 10))
 
         self.liq_return_var = tk.DoubleVar(value=20.0)
+
+        # Entry field for direct input
+        self.liq_return_entry = ttk.Entry(
+            liq_return_container,
+            textvariable=self.liq_return_var,
+            width=10
+        )
+        self.liq_return_entry.pack(side='left', padx=5)
+
+        # Scale for visual adjustment
         self.liq_return_scale = ttk.Scale(
             liq_return_container,
             from_=1, to=100,
             variable=self.liq_return_var,
             orient='horizontal',
-            length=150
+            length=120
         )
-        self.liq_return_scale.pack(side='left', fill='x', expand=True)
+        self.liq_return_scale.pack(side='left', fill='x', expand=True, padx=5)
 
-        self.liq_return_label = ttk.Label(liq_return_container, text="20%", width=8)
-        self.liq_return_label.pack(side='left', padx=(10, 0))
-        self.liq_return_var.trace_add('write',
-            lambda *args: self.liq_return_label.config(text=f"{self.liq_return_var.get():.0f}%"))
-        ToolTip(self.liq_return_scale,
+        tooltip_text = (
             "Return to higher price when better liquidity drops below this %.\n\n"
             "Example: If target=30% and return=20%, move down at 30% but move up when it drops to 20%\n\n"
             "Must be < Liquidity Target %\n"
             "Only used when mode = 'liquidity_percent'\n\n"
             "Default: 20%\n"
-            "Range: 1-100%")
+            "Range: 1-100%"
+        )
+        ToolTip(self.liq_return_entry, tooltip_text)
+        ToolTip(self.liq_return_scale, tooltip_text)
 
         # Dynamic Price Adjustment
         self.enable_dynamic_adjustment_var = tk.BooleanVar(value=True)
@@ -947,6 +974,7 @@ class BotLauncherGUI:
         state = 'normal' if enabled else 'disabled'
 
         # Toggle main repricing controls
+        self.sell_reprice_threshold_entry.config(state=state)
         self.sell_reprice_threshold_scale.config(state=state)
         self.cb_allow_below.config(state=state)
 
@@ -968,7 +996,9 @@ class BotLauncherGUI:
         # Liquidity target/return are only for 'liquidity_percent' mode
         liq_controls_enabled = (mode == 'liquidity_percent' and repricing_enabled)
 
+        self.liq_target_entry.config(state='normal' if liq_controls_enabled else 'disabled')
         self.liq_target_scale.config(state='normal' if liq_controls_enabled else 'disabled')
+        self.liq_return_entry.config(state='normal' if liq_controls_enabled else 'disabled')
         self.liq_return_scale.config(state='normal' if liq_controls_enabled else 'disabled')
 
         # Dynamic adjustment is only for 'second_best' and 'liquidity_percent' modes
