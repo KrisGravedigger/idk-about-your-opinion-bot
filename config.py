@@ -255,6 +255,53 @@ STOP_LOSS_TRIGGER_PERCENT = -10.0
 STOP_LOSS_AGGRESSIVE_OFFSET = 0.001  # 0.1¢ above best bid
 
 # =============================================================================
+# SELL ORDER REPRICING CONTROL
+# =============================================================================
+
+# Enable automatic repricing of sell orders when orderbook moves against us?
+# True = aggressively compete for best price (good for farming points)
+# False = maintain original sell price (good for profit maximization)
+ENABLE_SELL_ORDER_REPRICING = True
+
+# Liquidity threshold to trigger repricing (percentage)
+# Example: 50 = reprice when ≥50% of our order size appears at better prices
+# Higher values = less aggressive repricing
+SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT = 50.0
+
+# Allow repricing below buy price?
+# True = can sell at loss if needed (for point farming)
+# False = never go below buy price (for profit protection)
+ALLOW_SELL_BELOW_BUY_PRICE = False
+
+# Maximum price reduction relative to buy price (percentage)
+# Example: 5.0 = can reduce sell price down to buy_price * 0.95
+# Only active when ALLOW_SELL_BELOW_BUY_PRICE = True
+# Must be >= STOP_LOSS_TRIGGER_PERCENT (validated at startup)
+MAX_SELL_PRICE_REDUCTION_PCT = 5.0
+
+# Repricing scale mode
+# Determines how aggressively to reprice when threshold is met
+# Options: 'best', 'second_best', 'liquidity_percent'
+SELL_REPRICE_SCALE_MODE = 'best'  # 'best' | 'second_best' | 'liquidity_percent'
+
+# Liquidity percentage target for repricing (only used when mode = 'liquidity_percent')
+# Example: 30 = target price level that captures 30% of better liquidity
+# Range: 1-100
+SELL_REPRICE_LIQUIDITY_TARGET_PCT = 30.0
+
+# Return threshold for dynamic price adjustment (only used when mode = 'liquidity_percent')
+# When better liquidity drops below this %, return to higher price
+# Must be < SELL_REPRICE_LIQUIDITY_TARGET_PCT
+# Example: If target=30 and return=20, we move down at 30% but move up when it drops to 20%
+SELL_REPRICE_LIQUIDITY_RETURN_PCT = 20.0
+
+# Enable dynamic price adjustment?
+# True = automatically increase price when conditions improve
+# False = only decrease price, never increase
+# Only active for 'second_best' and 'liquidity_percent' modes
+ENABLE_DYNAMIC_SELL_PRICE_ADJUSTMENT = True
+
+# =============================================================================
 # LOGGING CONFIGURATION
 # =============================================================================
 
@@ -370,6 +417,45 @@ def validate_config():
         warnings.append(
             "USE_SPREAD_FARMING is deprecated. Please use USE_LIQUIDITY_FARMING instead. "
             "For now, it will use LIQUIDITY_FARMING_CONFIG automatically."
+        )
+
+    # Validate sell order repricing parameters
+    if ALLOW_SELL_BELOW_BUY_PRICE:
+        # Check that max reduction is not more aggressive than stop loss
+        if MAX_SELL_PRICE_REDUCTION_PCT < abs(STOP_LOSS_TRIGGER_PERCENT):
+            errors.append(
+                f"MAX_SELL_PRICE_REDUCTION_PCT ({MAX_SELL_PRICE_REDUCTION_PCT}%) must be >= "
+                f"abs(STOP_LOSS_TRIGGER_PERCENT) ({abs(STOP_LOSS_TRIGGER_PERCENT)}%)"
+            )
+
+    # Validate liquidity thresholds
+    if SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT < 1 or SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT > 1000:
+        errors.append(
+            f"SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT must be 1-1000, got {SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT}"
+        )
+
+    if SELL_REPRICE_LIQUIDITY_TARGET_PCT < 1 or SELL_REPRICE_LIQUIDITY_TARGET_PCT > 100:
+        errors.append(
+            f"SELL_REPRICE_LIQUIDITY_TARGET_PCT must be 1-100, got {SELL_REPRICE_LIQUIDITY_TARGET_PCT}"
+        )
+
+    if SELL_REPRICE_LIQUIDITY_RETURN_PCT < 1 or SELL_REPRICE_LIQUIDITY_RETURN_PCT > 100:
+        errors.append(
+            f"SELL_REPRICE_LIQUIDITY_RETURN_PCT must be 1-100, got {SELL_REPRICE_LIQUIDITY_RETURN_PCT}"
+        )
+
+    # Validate that return threshold is less than target threshold
+    if SELL_REPRICE_LIQUIDITY_RETURN_PCT >= SELL_REPRICE_LIQUIDITY_TARGET_PCT:
+        errors.append(
+            f"SELL_REPRICE_LIQUIDITY_RETURN_PCT ({SELL_REPRICE_LIQUIDITY_RETURN_PCT}%) must be < "
+            f"SELL_REPRICE_LIQUIDITY_TARGET_PCT ({SELL_REPRICE_LIQUIDITY_TARGET_PCT}%)"
+        )
+
+    # Validate repricing scale mode
+    valid_modes = ['best', 'second_best', 'liquidity_percent']
+    if SELL_REPRICE_SCALE_MODE not in valid_modes:
+        errors.append(
+            f"SELL_REPRICE_SCALE_MODE must be one of {valid_modes}, got '{SELL_REPRICE_SCALE_MODE}'"
         )
 
     return (len(errors) == 0, errors, warnings)

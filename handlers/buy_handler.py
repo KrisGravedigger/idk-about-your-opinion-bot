@@ -660,6 +660,12 @@ class BuyHandler:
             position['sell_price'] = sell_price
             position['sell_placed_at'] = get_timestamp()
 
+            # Save original sell price for repricing logic
+            # This is the initial target sell price that we wanted when placing the order
+            if 'original_sell_price' not in position:
+                position['original_sell_price'] = sell_price
+                logger.debug(f"   Saved original_sell_price: {format_price(sell_price)}")
+
             self.bot.state['stage'] = 'SELL_PLACED'
             self.state_manager.save_state(self.bot.state)
 

@@ -100,7 +100,7 @@ class BotLauncherGUI:
     """Main GUI application window."""
 
     # Application version - update this for each release
-    VERSION = "1.0.7"
+    VERSION = "1.1.0"
 
     def __init__(self):
         self.root = tk.Tk()
@@ -735,17 +735,219 @@ class BotLauncherGUI:
         # === Order Timeouts Section ===
         timeout_frame = ttk.LabelFrame(scrollable_frame, text="Order Timeouts", padding=10)
         timeout_frame.pack(fill='x', padx=10, pady=5)
-        
+
         ttk.Label(timeout_frame, text="Buy Order Timeout (hours):").grid(row=0, column=0, sticky='w', pady=5)
         self.buy_timeout_var = tk.DoubleVar(value=8.0)
         ttk.Entry(timeout_frame, textvariable=self.buy_timeout_var, width=10).grid(row=0, column=1, sticky='w', pady=5, padx=5)
         ToolTip(timeout_frame.winfo_children()[-1], "Cancel buy order if not filled within this time.\n\nDefault: 8 hours\nShorter = faster capital rotation")
-        
+
         ttk.Label(timeout_frame, text="Sell Order Timeout (hours):").grid(row=1, column=0, sticky='w', pady=5)
         self.sell_timeout_var = tk.DoubleVar(value=8.0)
         ttk.Entry(timeout_frame, textvariable=self.sell_timeout_var, width=10).grid(row=1, column=1, sticky='w', pady=5, padx=5)
         ToolTip(timeout_frame.winfo_children()[-1], "Cancel sell order if not filled within this time.\n\nDefault: 8 hours\nLonger = more patient exits")
-        
+
+        # === Sell Order Repricing Section ===
+        repricing_frame = ttk.LabelFrame(scrollable_frame, text="Sell Order Repricing Control", padding=10)
+        repricing_frame.pack(fill='x', padx=10, pady=5)
+
+        self.enable_sell_repricing_var = tk.BooleanVar(value=True)
+        cb_repricing = ttk.Checkbutton(
+            repricing_frame,
+            text="Enable Automatic Sell Order Repricing",
+            variable=self.enable_sell_repricing_var,
+            command=self.on_sell_repricing_toggle
+        )
+        cb_repricing.pack(anchor='w', pady=5)
+        ToolTip(cb_repricing,
+            "Enable automatic repricing of sell orders when orderbook moves.\n\n"
+            "Enabled: Aggressively compete for best price (good for point farming)\n"
+            "Disabled: Maintain original sell price (good for profit maximization)\n\n"
+            "Default: Enabled")
+
+        # Liquidity Threshold
+        liq_threshold_container = ttk.Frame(repricing_frame)
+        liq_threshold_container.pack(fill='x', pady=5)
+
+        ttk.Label(liq_threshold_container, text="Liquidity Trigger Threshold (%):").pack(side='left', padx=(0, 10))
+
+        self.sell_reprice_threshold_var = tk.DoubleVar(value=50.0)
+
+        # Entry field for direct input
+        self.sell_reprice_threshold_entry = ttk.Entry(
+            liq_threshold_container,
+            textvariable=self.sell_reprice_threshold_var,
+            width=10
+        )
+        self.sell_reprice_threshold_entry.pack(side='left', padx=5)
+
+        # Scale for visual adjustment
+        self.sell_reprice_threshold_scale = ttk.Scale(
+            liq_threshold_container,
+            from_=1, to=1000,
+            variable=self.sell_reprice_threshold_var,
+            orient='horizontal',
+            length=150
+        )
+        self.sell_reprice_threshold_scale.pack(side='left', fill='x', expand=True, padx=5)
+
+        tooltip_text = (
+            "Reprice when total shares at better prices reach this % of our order size.\n\n"
+            "Example: 50% with 100 share sell order = reprice when ≥50 shares appear at better prices\n\n"
+            "Lower = more aggressive repricing\n"
+            "Higher = more conservative repricing\n\n"
+            "Default: 50%\n"
+            "Recommended: 50-250%"
+        )
+        ToolTip(self.sell_reprice_threshold_entry, tooltip_text)
+        ToolTip(self.sell_reprice_threshold_scale, tooltip_text)
+
+        # Allow Below Buy Price
+        self.allow_below_buy_var = tk.BooleanVar(value=False)
+        self.cb_allow_below = ttk.Checkbutton(
+            repricing_frame,
+            text="Allow Repricing Below Buy Price",
+            variable=self.allow_below_buy_var,
+            command=self.on_allow_below_buy_toggle
+        )
+        self.cb_allow_below.pack(anchor='w', pady=5)
+        ToolTip(self.cb_allow_below,
+            "Allow sell price to go below buy price (selling at loss).\n\n"
+            "Enabled: Can sell at loss if needed (for point farming)\n"
+            "Disabled: Never go below buy price (for profit protection)\n\n"
+            "Default: Disabled (recommended for profit trading)")
+
+        # Max Price Reduction (only active when allow_below_buy is enabled)
+        max_reduction_container = ttk.Frame(repricing_frame)
+        max_reduction_container.pack(fill='x', pady=5)
+
+        ttk.Label(max_reduction_container, text="Max Price Reduction vs Buy Price (%):").pack(side='left', padx=(0, 10))
+
+        self.max_sell_reduction_var = tk.DoubleVar(value=5.0)
+        self.max_sell_reduction_entry = ttk.Entry(max_reduction_container, textvariable=self.max_sell_reduction_var, width=8)
+        self.max_sell_reduction_entry.pack(side='left', padx=5)
+        ToolTip(self.max_sell_reduction_entry,
+            "Maximum allowed price reduction relative to buy price.\n\n"
+            "Example: 5% means sell price can go down to buy_price * 0.95\n\n"
+            "Must be >= stop-loss percentage for safety\n"
+            "Only active when 'Allow Below Buy Price' is enabled\n\n"
+            "Default: 5%")
+
+        # Repricing Scale Mode
+        mode_container = ttk.Frame(repricing_frame)
+        mode_container.pack(fill='x', pady=5)
+
+        ttk.Label(mode_container, text="Repricing Scale Mode:").pack(side='left', padx=(0, 10))
+
+        self.reprice_scale_mode_var = tk.StringVar(value="best")
+        mode_combo = ttk.Combobox(
+            mode_container,
+            textvariable=self.reprice_scale_mode_var,
+            values=["best", "second_best", "liquidity_percent"],
+            state='readonly',
+            width=18
+        )
+        mode_combo.pack(side='left', padx=5)
+        mode_combo.bind('<<ComboboxSelected>>', lambda e: self.on_reprice_mode_change())
+        ToolTip(mode_combo,
+            "How aggressively to reprice when threshold is met:\n\n"
+            "best: Match the best (lowest) competing ask price\n"
+            "second_best: Match the second-best ask price\n"
+            "liquidity_percent: Target price level based on liquidity %\n\n"
+            "Default: best (most aggressive)")
+
+        # Liquidity Target % (only for liquidity_percent mode)
+        liq_target_container = ttk.Frame(repricing_frame)
+        liq_target_container.pack(fill='x', pady=5)
+
+        ttk.Label(liq_target_container, text="Liquidity Target (%):").pack(side='left', padx=(0, 10))
+
+        self.liq_target_var = tk.DoubleVar(value=30.0)
+
+        # Entry field for direct input
+        self.liq_target_entry = ttk.Entry(
+            liq_target_container,
+            textvariable=self.liq_target_var,
+            width=10
+        )
+        self.liq_target_entry.pack(side='left', padx=5)
+
+        # Scale for visual adjustment
+        self.liq_target_scale = ttk.Scale(
+            liq_target_container,
+            from_=1, to=100,
+            variable=self.liq_target_var,
+            orient='horizontal',
+            length=120
+        )
+        self.liq_target_scale.pack(side='left', fill='x', expand=True, padx=5)
+
+        tooltip_text = (
+            "Target price level that captures this % of better liquidity.\n\n"
+            "Example: 30% means reprice to level where cumulative better orders = 30% of total\n\n"
+            "Only used when mode = 'liquidity_percent'\n\n"
+            "Default: 30%\n"
+            "Range: 1-100%"
+        )
+        ToolTip(self.liq_target_entry, tooltip_text)
+        ToolTip(self.liq_target_scale, tooltip_text)
+
+        # Liquidity Return % (only for liquidity_percent mode)
+        liq_return_container = ttk.Frame(repricing_frame)
+        liq_return_container.pack(fill='x', pady=5)
+
+        ttk.Label(liq_return_container, text="Liquidity Return Threshold (%):").pack(side='left', padx=(0, 10))
+
+        self.liq_return_var = tk.DoubleVar(value=20.0)
+
+        # Entry field for direct input
+        self.liq_return_entry = ttk.Entry(
+            liq_return_container,
+            textvariable=self.liq_return_var,
+            width=10
+        )
+        self.liq_return_entry.pack(side='left', padx=5)
+
+        # Scale for visual adjustment
+        self.liq_return_scale = ttk.Scale(
+            liq_return_container,
+            from_=1, to=100,
+            variable=self.liq_return_var,
+            orient='horizontal',
+            length=120
+        )
+        self.liq_return_scale.pack(side='left', fill='x', expand=True, padx=5)
+
+        tooltip_text = (
+            "Return to higher price when better liquidity drops below this %.\n\n"
+            "Example: If target=30% and return=20%, move down at 30% but move up when it drops to 20%\n\n"
+            "Must be < Liquidity Target %\n"
+            "Only used when mode = 'liquidity_percent'\n\n"
+            "Default: 20%\n"
+            "Range: 1-100%"
+        )
+        ToolTip(self.liq_return_entry, tooltip_text)
+        ToolTip(self.liq_return_scale, tooltip_text)
+
+        # Dynamic Price Adjustment
+        self.enable_dynamic_adjustment_var = tk.BooleanVar(value=True)
+        self.cb_dynamic_adjustment = ttk.Checkbutton(
+            repricing_frame,
+            text="Enable Dynamic Price Adjustment",
+            variable=self.enable_dynamic_adjustment_var
+        )
+        self.cb_dynamic_adjustment.pack(anchor='w', pady=5)
+        ToolTip(self.cb_dynamic_adjustment,
+            "Automatically increase price when market conditions improve.\n\n"
+            "Enabled: Dynamically adjust price up/down based on orderbook\n"
+            "Disabled: Only decrease price, never increase\n\n"
+            "Only applies to 'second_best' and 'liquidity_percent' modes\n\n"
+            "Default: Enabled")
+
+        # Initialize widget states
+        self.on_reprice_mode_change()
+        self.on_sell_repricing_toggle()
+        self.on_allow_below_buy_toggle()
+
         return frame
         
     def update_stop_loss_label(self, value=None):
@@ -758,10 +960,50 @@ class BotLauncherGUI:
 
     def on_precision_toggle(self):
         """Handle precision settings toggle."""
-        toggle_widget_state(self.enable_precision_edit_var,
-                           self.safety_margin_entry,
-                           self.price_decimals_spinbox,
-                           self.amount_decimals_spinbox)
+        state = 'normal' if self.enable_precision_edit_var.get() else 'disabled'
+        if hasattr(self, 'safety_margin_entry'):
+            self.safety_margin_entry.config(state=state)
+        if hasattr(self, 'price_decimals_spinbox'):
+            self.price_decimals_spinbox.config(state=state)
+        if hasattr(self, 'amount_decimals_spinbox'):
+            self.amount_decimals_spinbox.config(state=state)
+
+    def on_sell_repricing_toggle(self):
+        """Handle sell repricing toggle - enable/disable all repricing parameters."""
+        enabled = self.enable_sell_repricing_var.get()
+        state = 'normal' if enabled else 'disabled'
+
+        # Toggle main repricing controls
+        self.sell_reprice_threshold_entry.config(state=state)
+        self.sell_reprice_threshold_scale.config(state=state)
+        self.cb_allow_below.config(state=state)
+
+        # Call other toggles to update their dependent widgets
+        self.on_allow_below_buy_toggle()
+        self.on_reprice_mode_change()
+
+    def on_allow_below_buy_toggle(self):
+        """Handle allow below buy price toggle."""
+        # Only enable max reduction entry if both repricing AND allow_below are enabled
+        enabled = self.enable_sell_repricing_var.get() and self.allow_below_buy_var.get()
+        self.max_sell_reduction_entry.config(state='normal' if enabled else 'disabled')
+
+    def on_reprice_mode_change(self):
+        """Handle repricing mode change - show/hide mode-specific controls."""
+        mode = self.reprice_scale_mode_var.get()
+        repricing_enabled = self.enable_sell_repricing_var.get()
+
+        # Liquidity target/return are only for 'liquidity_percent' mode
+        liq_controls_enabled = (mode == 'liquidity_percent' and repricing_enabled)
+
+        self.liq_target_entry.config(state='normal' if liq_controls_enabled else 'disabled')
+        self.liq_target_scale.config(state='normal' if liq_controls_enabled else 'disabled')
+        self.liq_return_entry.config(state='normal' if liq_controls_enabled else 'disabled')
+        self.liq_return_scale.config(state='normal' if liq_controls_enabled else 'disabled')
+
+        # Dynamic adjustment is only for 'second_best' and 'liquidity_percent' modes
+        dynamic_enabled = (mode in ['second_best', 'liquidity_percent'] and repricing_enabled)
+        self.cb_dynamic_adjustment.config(state='normal' if dynamic_enabled else 'disabled')
 
     def create_monitoring_tab(self) -> ttk.Frame:
         """Create Monitoring & Alerts tab."""
@@ -1257,6 +1499,10 @@ class BotLauncherGUI:
             'ENABLE_STOP_LOSS', 'STOP_LOSS_TRIGGER_PERCENT', 'STOP_LOSS_AGGRESSIVE_OFFSET',
             'LIQUIDITY_AUTO_CANCEL', 'LIQUIDITY_BID_DROP_THRESHOLD', 'LIQUIDITY_SPREAD_THRESHOLD',
             'BUY_ORDER_TIMEOUT_HOURS', 'SELL_ORDER_TIMEOUT_HOURS',
+            'ENABLE_SELL_ORDER_REPRICING', 'SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT',
+            'ALLOW_SELL_BELOW_BUY_PRICE', 'MAX_SELL_PRICE_REDUCTION_PCT',
+            'SELL_REPRICE_SCALE_MODE', 'SELL_REPRICE_LIQUIDITY_TARGET_PCT',
+            'SELL_REPRICE_LIQUIDITY_RETURN_PCT', 'ENABLE_DYNAMIC_SELL_PRICE_ADJUSTMENT',
             'LOG_LEVEL', 'LOG_FILE',
             'MARKET_SCAN_INTERVAL_SECONDS', 'FILL_CHECK_INTERVAL_SECONDS',
             'TELEGRAM_HEARTBEAT_INTERVAL_HOURS',
@@ -1313,7 +1559,21 @@ class BotLauncherGUI:
         self.liquidity_spread_var.set(self.config_data.get('liquidity_spread_threshold', 15.0))
         self.buy_timeout_var.set(self.config_data.get('buy_order_timeout_hours', 8.0))
         self.sell_timeout_var.set(self.config_data.get('sell_order_timeout_hours', 8.0))
+
+        # Sell Order Repricing
+        self.enable_sell_repricing_var.set(self.config_data.get('enable_sell_order_repricing', True))
+        self.sell_reprice_threshold_var.set(self.config_data.get('sell_reprice_liquidity_threshold_pct', 50.0))
+        self.allow_below_buy_var.set(self.config_data.get('allow_sell_below_buy_price', False))
+        self.max_sell_reduction_var.set(self.config_data.get('max_sell_price_reduction_pct', 5.0))
+        self.reprice_scale_mode_var.set(self.config_data.get('sell_reprice_scale_mode', 'best'))
+        self.liq_target_var.set(self.config_data.get('sell_reprice_liquidity_target_pct', 30.0))
+        self.liq_return_var.set(self.config_data.get('sell_reprice_liquidity_return_pct', 20.0))
+        self.enable_dynamic_adjustment_var.set(self.config_data.get('enable_dynamic_sell_price_adjustment', True))
+
         self.on_stop_loss_toggle()
+        self.on_sell_repricing_toggle()
+        self.on_allow_below_buy_toggle()
+        self.on_reprice_mode_change()
         
         # Monitoring tab
         self.log_level_var.set(self.config_data.get('log_level', 'INFO'))
@@ -1589,7 +1849,17 @@ Click Yes to open the download page."""
         data['liquidity_spread_threshold'] = self.liquidity_spread_var.get()
         data['buy_order_timeout_hours'] = self.buy_timeout_var.get()
         data['sell_order_timeout_hours'] = self.sell_timeout_var.get()
-        
+
+        # Sell Order Repricing
+        data['enable_sell_order_repricing'] = self.enable_sell_repricing_var.get()
+        data['sell_reprice_liquidity_threshold_pct'] = self.sell_reprice_threshold_var.get()
+        data['allow_sell_below_buy_price'] = self.allow_below_buy_var.get()
+        data['max_sell_price_reduction_pct'] = self.max_sell_reduction_var.get()
+        data['sell_reprice_scale_mode'] = self.reprice_scale_mode_var.get()
+        data['sell_reprice_liquidity_target_pct'] = self.liq_target_var.get()
+        data['sell_reprice_liquidity_return_pct'] = self.liq_return_var.get()
+        data['enable_dynamic_sell_price_adjustment'] = self.enable_dynamic_adjustment_var.get()
+
         # Monitoring tab
         data['log_level'] = self.log_level_var.get()
         data['log_file'] = self.log_file_var.get()
