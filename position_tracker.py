@@ -34,12 +34,11 @@ logger = setup_logger(__name__)
 class PositionPnL:
     """
     Data class holding P&L calculation results.
-
+    
     Attributes:
         buy_tokens: Number of tokens bought
         buy_price: Average buy price per token
-        buy_cost: Cost of SOLD tokens (for P&L calculation)
-        total_buy_cost: Total cost of ALL bought tokens (informational)
+        buy_cost: Total cost in USDT
         sell_tokens: Number of tokens sold
         sell_price: Average sell price per token
         sell_proceeds: Total proceeds in USDT
@@ -49,37 +48,30 @@ class PositionPnL:
     """
     buy_tokens: Decimal
     buy_price: Decimal
-    buy_cost: Decimal  # Cost of sold tokens only
-    total_buy_cost: Decimal  # Total cost of all bought tokens
+    buy_cost: Decimal
     sell_tokens: Decimal
     sell_price: Decimal
     sell_proceeds: Decimal
     pnl: Decimal
     pnl_percent: Decimal
     duration_seconds: Optional[float] = None
-
+    
     def is_profitable(self) -> bool:
         """Check if position was profitable."""
         return self.pnl > 0
-
-    def is_partial_sell(self) -> bool:
-        """Check if this was a partial sell (didn't sell all bought tokens)."""
-        return self.sell_tokens < self.buy_tokens
-
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for logging/display."""
         return {
             'buy_tokens': float(self.buy_tokens),
             'buy_price': float(self.buy_price),
             'buy_cost': float(self.buy_cost),
-            'total_buy_cost': float(self.total_buy_cost),
             'sell_tokens': float(self.sell_tokens),
             'sell_price': float(self.sell_price),
             'sell_proceeds': float(self.sell_proceeds),
             'pnl': float(self.pnl),
             'pnl_percent': float(self.pnl_percent),
-            'duration_seconds': self.duration_seconds,
-            'is_partial_sell': self.is_partial_sell()
+            'duration_seconds': self.duration_seconds
         }
 
 
@@ -134,22 +126,16 @@ class PositionTracker:
         d_buy_price = safe_decimal(buy_price)
         d_sell_tokens = safe_decimal(sell_tokens)
         d_sell_price = safe_decimal(sell_price)
-
+        
         # Calculate sell proceeds
         d_sell_proceeds = d_sell_tokens * d_sell_price
-
-        # CRITICAL: Calculate cost of SOLD tokens only (not all bought tokens)
-        # This is crucial for partial sells!
-        # Example: bought 488 tokens for $376.75, sold only 183 tokens
-        # -> Cost of sold tokens = 183 * $0.7720 = $141.42 (not $376.75!)
-        d_cost_of_sold_tokens = d_sell_tokens * d_buy_price
-
-        # Calculate P&L based on sold tokens only
-        d_pnl = d_sell_proceeds - d_cost_of_sold_tokens
-
-        # Calculate percentage based on cost of sold tokens (not total buy cost)
-        if d_cost_of_sold_tokens > 0:
-            d_pnl_percent = (d_pnl / d_cost_of_sold_tokens) * Decimal('100')
+        
+        # Calculate P&L
+        d_pnl = d_sell_proceeds - d_buy_cost
+        
+        # Calculate percentage (avoid division by zero)
+        if d_buy_cost > 0:
+            d_pnl_percent = (d_pnl / d_buy_cost) * Decimal('100')
         else:
             d_pnl_percent = Decimal('0')
         
@@ -157,13 +143,11 @@ class PositionTracker:
         d_pnl = d_pnl.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         d_pnl_percent = d_pnl_percent.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         d_sell_proceeds = d_sell_proceeds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        d_cost_of_sold_tokens = d_cost_of_sold_tokens.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
+        
         return PositionPnL(
             buy_tokens=d_buy_tokens,
             buy_price=d_buy_price,
-            buy_cost=d_cost_of_sold_tokens,  # Cost of sold tokens (used in P&L calculation)
-            total_buy_cost=d_buy_cost,  # Total cost of all bought tokens (informational)
+            buy_cost=d_buy_cost,
             sell_tokens=d_sell_tokens,
             sell_price=d_sell_price,
             sell_proceeds=d_sell_proceeds,
@@ -204,21 +188,16 @@ class PositionTracker:
     def log_pnl_inline(self, pnl: PositionPnL):
         """
         Log P&L in a single-line format (for compact output).
-
+        
         Args:
             pnl: PositionPnL object to log
         """
         pnl_sign = "+" if pnl.pnl >= 0 else ""
         emoji = "💰" if pnl.pnl >= 0 else "📉"
-
-        # For partial sells, show both cost of sold tokens and total cost
-        cost_str = f"{format_usdt(float(pnl.buy_cost))}"
-        if pnl.is_partial_sell():
-            cost_str = f"{format_usdt(float(pnl.buy_cost))} of {format_usdt(float(pnl.total_buy_cost))}"
-
+        
         logger.info(
             f"{emoji} POSITION CLOSED | "
-            f"Cost: {cost_str} | "
+            f"Cost: {format_usdt(float(pnl.buy_cost))} | "
             f"Proceeds: {format_usdt(float(pnl.sell_proceeds))} | "
             f"P&L: {pnl_sign}{float(pnl.pnl):.2f} USDT ({pnl_sign}{float(pnl.pnl_percent):.2f}%)"
         )

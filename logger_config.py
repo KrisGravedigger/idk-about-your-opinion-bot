@@ -252,34 +252,21 @@ def log_pnl_summary(logger: logging.Logger, pnl_data: dict):
     logger.info("POSITION CLOSED - P&L SUMMARY".center(50))
     logger.info("=" * 50)
     logger.info("")
-
-    buy_tokens = pnl_data.get('buy_tokens', 0)
-    sell_tokens = pnl_data.get('sell_tokens', 0)
-    is_partial = pnl_data.get('is_partial_sell', False)
-
     logger.info("📊 BUY Side:")
-    logger.info(f"   Amount: {buy_tokens:.4f} tokens")
+    logger.info(f"   Amount: {pnl_data.get('buy_tokens', 0):.4f} tokens")
     logger.info(f"   Avg price: ${pnl_data.get('buy_price', 0):.4f}")
-    logger.info(f"   Total cost: {pnl_data.get('total_buy_cost', 0):.2f} USDT")
+    logger.info(f"   Total cost: {pnl_data.get('buy_cost', 0):.2f} USDT")
     logger.info("")
     logger.info("📊 SELL Side:")
-    logger.info(f"   Amount: {sell_tokens:.4f} tokens")
+    logger.info(f"   Amount: {pnl_data.get('sell_tokens', 0):.4f} tokens")
     logger.info(f"   Avg price: ${pnl_data.get('sell_price', 0):.4f}")
     logger.info(f"   Total proceeds: {pnl_data.get('sell_proceeds', 0):.2f} USDT")
     logger.info("")
-
-    # Show cost basis for sold tokens if partial sell
-    if is_partial:
-        remaining = buy_tokens - sell_tokens
-        logger.info("⚠️  Partial Sell:")
-        logger.info(f"   Sold: {sell_tokens:.4f} tokens (cost basis: {pnl_data.get('buy_cost', 0):.2f} USDT)")
-        logger.info(f"   Remaining: {remaining:.4f} tokens (unrealized)")
-        logger.info("")
-
+    
     pnl = pnl_data.get('pnl', 0)
     pnl_pct = pnl_data.get('pnl_percent', 0)
     pnl_sign = "+" if pnl >= 0 else ""
-
+    
     logger.info("💰 Profit & Loss:")
     logger.info(f"   Net P&L: {pnl_sign}{pnl:.2f} USDT ({pnl_sign}{pnl_pct:.2f}%)")
     logger.info("")
