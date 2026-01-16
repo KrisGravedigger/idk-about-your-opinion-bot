@@ -657,6 +657,23 @@ class AutonomousBot:
                                             # Find our position in asks
                                             position_in_book = self._find_order_position_in_book(our_price, asks, 'asks')
 
+                                        # Calculate shares (for sell orders)
+                                        my_shares = 0
+                                        ahead_volume_percent = 0
+                                        if order_side == 'SELL' and our_price > 0:
+                                            my_shares = order_amount / our_price
+                                            ahead_volume = position_in_book.get('ahead_volume', 0)
+                                            if my_shares > 0:
+                                                ahead_volume_percent = (ahead_volume / my_shares) * 100
+
+                                        # Get repricing info (for sell orders)
+                                        repricing_enabled = False
+                                        repricing_level = None
+                                        if order_side == 'SELL' and hasattr(self.config, 'ENABLE_SELL_ORDER_REPRICING'):
+                                            repricing_enabled = self.config.ENABLE_SELL_ORDER_REPRICING
+                                            if repricing_enabled and hasattr(self.config, 'SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT'):
+                                                repricing_level = self.config.SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT
+
                                         order_info = {
                                             'order_id': order_id,
                                             'side': order_side,
@@ -666,7 +683,11 @@ class AutonomousBot:
                                             'filled_percent': (filled_amount / order_amount * 100) if order_amount > 0 else 0,
                                             'distance_from_best': distance,
                                             'distance_percent': distance_pct,
-                                            'position_in_book': position_in_book
+                                            'position_in_book': position_in_book,
+                                            'my_shares': my_shares,
+                                            'ahead_volume_percent': ahead_volume_percent,
+                                            'repricing_enabled': repricing_enabled,
+                                            'repricing_level': repricing_level
                                         }
                                 except Exception as e:
                                     logger.debug(f"Could not fetch order details for heartbeat: {e}")
@@ -758,10 +779,20 @@ class AutonomousBot:
         from pathlib import Path
 
         # Try to read from log file
-        log_file = Path(self.config.get('LOG_FILE', 'opinion_farming_bot.log'))
+        log_file = Path(self.config.get('LOG_FILE', 'logs/bot.log'))
 
+        # If main log file doesn't exist, try to find the most recent rotated log
         if not log_file.exists():
-            return ["Log file not found"]
+            log_dir = log_file.parent
+            if log_dir.exists():
+                # Find all log files in the directory
+                log_files = sorted(log_dir.glob('bot*.log*'), key=lambda p: p.stat().st_mtime, reverse=True)
+                if log_files:
+                    log_file = log_files[0]  # Use the most recent log file
+                else:
+                    return ["Log file not found"]
+            else:
+                return ["Log file not found"]
 
         try:
             with open(log_file, 'r', encoding='utf-8') as f:

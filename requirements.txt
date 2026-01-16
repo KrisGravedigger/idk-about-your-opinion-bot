@@ -39,6 +39,7 @@ requests>=2.31.0
 # Required for GUI features and executable builds:
 
 packaging>=21.0         # Version comparison for update checker
+Pillow>=10.0.0          # Image processing for icon creation
 
 # Development Dependencies (Optional)
 # -----------------------------------

@@ -306,7 +306,8 @@ ENABLE_DYNAMIC_SELL_PRICE_ADJUSTMENT = True
 # =============================================================================
 
 # Log file path (relative to bot directory)
-LOG_FILE = "opinion_farming_bot.log"
+# Logs are stored in logs/ folder and automatically rotated daily at midnight
+LOG_FILE = "logs/bot.log"
 
 # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 # DEBUG = maximum verbosity (includes all API calls)

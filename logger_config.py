@@ -17,8 +17,11 @@ Usage:
 """
 
 import logging
+import logging.handlers
 import sys
+import os
 from datetime import datetime
+from pathlib import Path
 from config import LOG_FILE, LOG_LEVEL
 
 
@@ -124,12 +127,39 @@ def setup_logger(name: str) -> logging.Logger:
     console_handler.setFormatter(console_format)
     
     # =========================================================================
-    # FILE HANDLER
+    # FILE HANDLER (with daily rotation)
     # =========================================================================
     # Outputs to log file with full details (no colors)
-    file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    # Rotates logs daily at midnight, keeping logs organized by date
+
+    # Ensure log file is in logs directory
+    log_path = Path(LOG_FILE)
+    if log_path.parent == Path('.'):
+        # If LOG_FILE is just a filename, put it in logs/ directory
+        logs_dir = Path('logs')
+        logs_dir.mkdir(exist_ok=True)
+        log_filename = logs_dir / log_path.name
+    else:
+        # If LOG_FILE already has a directory, use it and ensure directory exists
+        log_filename = log_path
+        log_filename.parent.mkdir(parents=True, exist_ok=True)
+
+    # TimedRotatingFileHandler rotates logs at midnight each day
+    # when='midnight' - rotate at midnight
+    # interval=1 - every 1 day
+    # backupCount=30 - keep 30 days of logs (optional, 0=keep all)
+    file_handler = logging.handlers.TimedRotatingFileHandler(
+        filename=log_filename,
+        when='midnight',
+        interval=1,
+        backupCount=30,
+        encoding='utf-8'
+    )
     file_handler.setLevel(logging.DEBUG)  # File captures everything
-    
+
+    # Set suffix for rotated files to include date
+    file_handler.suffix = '%Y-%m-%d.log'
+
     file_format = logging.Formatter(
         fmt='%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
