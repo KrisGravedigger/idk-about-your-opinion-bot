@@ -435,6 +435,22 @@ class BuyHandler:
             self.bot.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.bot.state)
 
+            # Send Telegram notification for partial fill if applicable
+            if result.get('is_partial', False):
+                try:
+                    self.telegram.send_partial_fill(
+                        order_type='BUY',
+                        market_id=market_id,
+                        market_title=market_title,
+                        filled_amount=position.get('filled_amount', 0),
+                        order_amount=position.get('amount', position.get('filled_amount', 0)),  # Original order amount
+                        fill_percentage=result.get('fill_percentage', 0),
+                        price=position.get('avg_fill_price', 0),
+                        filled_usdt=position.get('filled_usdt', 0)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send partial fill notification: {e}")
+
             return True
 
         elif status in ['cancelled', 'canceled', 'expired', 'timeout', 'deteriorated']:

@@ -291,26 +291,46 @@ class BuyMonitor:
                 # CHECK: ORDER FILLED
                 # =============================================================
                 if status_enum == 'Finished' or status == 2:
-                    logger.info("")
-                    logger.info("=" * 50)
-                    logger.info("✅ BUY ORDER FILLED!")
-                    logger.info("=" * 50)
-                    
+                    # CRITICAL: 'Finished' means order is no longer active, but doesn't mean it's FULLY filled
+                    # It could be partially filled! Check filled_shares vs order_shares
+
                     # Extract fill data
                     filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order)
-                    
-                    logger.info(f"   Filled: {filled_amount:.4f} YES tokens")
+                    order_shares = safe_float(order.get('order_shares', 0))
+
+                    # Calculate fill percentage
+                    fill_pct = (filled_amount / order_shares * 100) if order_shares > 0 else 0
+
+                    # Determine if this is a full fill or partial fill
+                    is_partial = fill_pct < 99.0  # Allow 1% tolerance for rounding
+
+                    logger.info("")
+                    logger.info("=" * 50)
+                    if is_partial:
+                        logger.warning(f"⚠️  BUY ORDER PARTIALLY FILLED ({fill_pct:.1f}%)")
+                    else:
+                        logger.info("✅ BUY ORDER FILLED!")
+                    logger.info("=" * 50)
+                    logger.info(f"   Filled: {filled_amount:.4f} tokens")
                     logger.info(f"   Avg price: {format_price(avg_fill_price)}")
                     logger.info(f"   Total cost: ${filled_usdt:.2f}")
+
+                    if is_partial:
+                        logger.warning(f"   Original order: {order_shares:.4f} tokens")
+                        logger.warning(f"   Filled: {fill_pct:.1f}%")
+                        logger.warning(f"   Remaining: {order_shares - filled_amount:.4f} tokens")
+
                     logger.info("")
-                    
+
                     return {
                         'status': 'filled',
                         'filled_amount': filled_amount,
                         'avg_fill_price': avg_fill_price,
                         'filled_usdt': filled_usdt,
                         'fill_timestamp': get_timestamp(),
-                        'reason': None
+                        'reason': f'Partial fill ({fill_pct:.1f}%)' if is_partial else None,
+                        'is_partial': is_partial,
+                        'fill_percentage': fill_pct
                     }
                 
                 # =============================================================
