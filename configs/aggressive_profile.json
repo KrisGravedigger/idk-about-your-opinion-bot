@@ -35,7 +35,7 @@
   "buy_order_timeout_hours": 6,
   "sell_order_timeout_hours": 6,
   "log_level": "INFO",
-  "log_file": "opinion_farming_bot.log",
+  "log_file": "logs/idk_bot.log",
   "alert_on_order_filled": true,
   "alert_on_position_closed": true,
   "alert_on_error": true,

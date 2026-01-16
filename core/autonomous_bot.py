@@ -779,14 +779,14 @@ class AutonomousBot:
         from pathlib import Path
 
         # Try to read from log file
-        log_file = Path(self.config.get('LOG_FILE', 'logs/bot.log'))
+        log_file = Path(self.config.get('LOG_FILE', 'logs/idk_bot.log'))
 
         # If main log file doesn't exist, try to find the most recent rotated log
         if not log_file.exists():
             log_dir = log_file.parent
             if log_dir.exists():
-                # Find all log files in the directory
-                log_files = sorted(log_dir.glob('bot*.log*'), key=lambda p: p.stat().st_mtime, reverse=True)
+                # Find all log files in the directory (idk_bot*.log format)
+                log_files = sorted(log_dir.glob('idk_bot*.log*'), key=lambda p: p.stat().st_mtime, reverse=True)
                 if log_files:
                     log_file = log_files[0]  # Use the most recent log file
                 else:

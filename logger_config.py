@@ -157,8 +157,9 @@ def setup_logger(name: str) -> logging.Logger:
     )
     file_handler.setLevel(logging.DEBUG)  # File captures everything
 
-    # Set suffix for rotated files to include date
-    file_handler.suffix = '%Y-%m-%d.log'
+    # Set suffix for rotated files to include date in format: idk_bot_YYYYMMDD.log
+    file_handler.suffix = '%Y%m%d.log'
+    file_handler.namer = lambda name: name.replace('.log.', '_')
 
     file_format = logging.Formatter(
         fmt='%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s',

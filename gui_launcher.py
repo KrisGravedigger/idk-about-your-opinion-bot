@@ -107,6 +107,14 @@ class BotLauncherGUI:
         self.root.title(f"I Don't Kare about your opinion trading bot - Configuration & Launcher v{self.VERSION}")
         self.root.geometry("1400x900")  # Wider for two-column layout
 
+        # Set window icon if available
+        icon_path = Path("icon.ico")
+        if icon_path.exists():
+            try:
+                self.root.iconbitmap(icon_path)
+            except Exception as e:
+                print(f"Warning: Could not set window icon: {e}")
+
         # Initialize variables
         self.config_data: Dict[str, Any] = {}
         self.bot_process: Optional[subprocess.Popen] = None
@@ -1030,10 +1038,10 @@ class BotLauncherGUI:
         ToolTip(logging_frame.winfo_children()[-1], "Logging verbosity level.\n\nDEBUG: Very detailed (for troubleshooting)\nINFO: Standard operation (recommended)\nWARNING: Only warnings and errors\nERROR: Only errors\nCRITICAL: Only critical failures")
         
         ttk.Label(logging_frame, text="Log File:").grid(row=1, column=0, sticky='w', pady=5)
-        self.log_file_var = tk.StringVar(value="opinion_farming_bot.log")
+        self.log_file_var = tk.StringVar(value="logs/idk_bot.log")
         ttk.Entry(logging_frame, textvariable=self.log_file_var, width=30).grid(row=1, column=1, sticky='w', pady=5, padx=5)
         ttk.Button(logging_frame, text="Browse...", command=self.browse_log_file).grid(row=1, column=2, pady=5)
-        ToolTip(logging_frame.winfo_children()[-2], "Path to log file.\n\nDefault: opinion_farming_bot.log\nAll bot activity is logged here")
+        ToolTip(logging_frame.winfo_children()[-2], "Path to log file.\n\nDefault: logs/idk_bot.log\nLogs rotate daily: idk_bot_YYYYMMDD.log\nAll bot activity is logged here")
         
         # === Alerts Section ===
         alerts_frame = ttk.LabelFrame(scrollable_frame, text="Alert Notifications", padding=10)
@@ -1592,7 +1600,7 @@ class BotLauncherGUI:
         
         # Monitoring tab
         self.log_level_var.set(self.config_data.get('log_level', 'INFO'))
-        self.log_file_var.set(self.config_data.get('log_file', 'opinion_farming_bot.log'))
+        self.log_file_var.set(self.config_data.get('log_file', 'logs/idk_bot.log'))
         self.alert_order_filled_var.set(self.config_data.get('alert_on_order_filled', True))
         self.alert_position_closed_var.set(self.config_data.get('alert_on_position_closed', True))
         self.alert_error_var.set(self.config_data.get('alert_on_error', True))
@@ -1894,18 +1902,89 @@ Click Yes to open the download page."""
     def save_configuration(self):
         """Save configuration to bot_config.json and .env."""
         try:
-            # Check if bot is running and warn user
-            if self.bot_process and self.bot_process.poll() is None:
-                if not messagebox.askyesno(
-                    "Bot is Running",
-                    "⚠️ Warning: The bot is currently running!\n\n"
-                    "To apply new settings, you need to save configuration "
-                    "and restart the bot.\n\n"
-                    "Do you want to save the configuration now?",
-                    icon='warning'
-                ):
+            # Check if bot is running and offer save & restart option
+            bot_running = self.bot_process and self.bot_process.poll() is None
+            should_restart = False
+
+            if bot_running:
+                # Create custom dialog with three buttons
+                dialog = tk.Toplevel(self.root)
+                dialog.title("Bot is Running")
+                dialog.geometry("450x200")
+                dialog.resizable(False, False)
+                dialog.transient(self.root)
+                dialog.grab_set()
+
+                # Center the dialog
+                dialog.update_idletasks()
+                x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+                y = (dialog.winfo_screenheight() // 2) - (200 // 2)
+                dialog.geometry(f'450x200+{x}+{y}')
+
+                # Message
+                message_frame = ttk.Frame(dialog, padding=20)
+                message_frame.pack(fill='both', expand=True)
+
+                ttk.Label(
+                    message_frame,
+                    text="⚠️ Warning: The bot is currently running!",
+                    font=("TkDefaultFont", 10, "bold")
+                ).pack(pady=(0, 10))
+
+                ttk.Label(
+                    message_frame,
+                    text="To apply new settings, the bot needs to be restarted.\n\n"
+                         "What would you like to do?",
+                    justify='center'
+                ).pack(pady=(0, 20))
+
+                # Button frame
+                button_frame = ttk.Frame(dialog)
+                button_frame.pack(fill='x', padx=20, pady=(0, 20))
+
+                result = {'action': None}
+
+                def on_save_and_restart():
+                    result['action'] = 'restart'
+                    dialog.destroy()
+
+                def on_save_only():
+                    result['action'] = 'save'
+                    dialog.destroy()
+
+                def on_cancel():
+                    result['action'] = 'cancel'
+                    dialog.destroy()
+
+                ttk.Button(
+                    button_frame,
+                    text="💾🔄 Save & Restart Bot",
+                    command=on_save_and_restart,
+                    width=20
+                ).pack(side='left', padx=5)
+
+                ttk.Button(
+                    button_frame,
+                    text="💾 Save Only",
+                    command=on_save_only,
+                    width=15
+                ).pack(side='left', padx=5)
+
+                ttk.Button(
+                    button_frame,
+                    text="❌ Cancel",
+                    command=on_cancel,
+                    width=10
+                ).pack(side='left', padx=5)
+
+                # Wait for user to close dialog
+                self.root.wait_window(dialog)
+
+                if result['action'] == 'cancel':
                     self.update_status_bar("❌ Save cancelled")
                     return
+                elif result['action'] == 'restart':
+                    should_restart = True
 
             # Collect form data
             config_data = self.collect_form_data()
@@ -1931,10 +2010,17 @@ Click Yes to open the download page."""
             
             self.config_data = config_data
             self.config_changed = False
-            
-            messagebox.showinfo("Success", "Configuration saved successfully!\n\nbot_config.json - Bot settings\n.env - Credentials")
-            self.update_status_bar("✅ Configuration saved successfully")
-            
+
+            # Show success message
+            if should_restart:
+                messagebox.showinfo("Success", "Configuration saved successfully!\n\nbot_config.json - Bot settings\n.env - Credentials\n\nRestarting bot...")
+                self.update_status_bar("✅ Configuration saved - restarting bot...")
+                # Restart the bot
+                self.restart_bot()
+            else:
+                messagebox.showinfo("Success", "Configuration saved successfully!\n\nbot_config.json - Bot settings\n.env - Credentials")
+                self.update_status_bar("✅ Configuration saved successfully")
+
         except Exception as e:
             messagebox.showerror("Error Saving Configuration", f"Failed to save configuration:\n\n{str(e)}")
             self.update_status_bar(f"❌ Error saving configuration: {str(e)}")
