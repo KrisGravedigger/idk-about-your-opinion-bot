@@ -241,22 +241,6 @@ class SellHandler:
             self.bot.state['stage'] = 'COMPLETED'
             self.state_manager.save_state(self.bot.state)
 
-            # Send Telegram notification for partial fill if applicable
-            if result.get('is_partial', False):
-                try:
-                    self.telegram.send_partial_fill(
-                        order_type='SELL',
-                        market_id=position.get('market_id', 0),
-                        market_title=position.get('market_title', 'Unknown market'),
-                        filled_amount=result['filled_amount'],
-                        order_amount=position.get('filled_amount', result['filled_amount']),  # Original amount we tried to sell
-                        fill_percentage=result.get('fill_percentage', 0),
-                        price=result['avg_fill_price'],
-                        filled_usdt=result['filled_usdt']
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to send partial fill notification: {e}")
-
             return True
 
         elif status in ['cancelled', 'canceled', 'expired']:

@@ -454,57 +454,6 @@ class TelegramNotifier:
 """
         return self.send_message(message.strip())
 
-    def send_partial_fill(
-        self,
-        order_type: str,  # 'BUY' or 'SELL'
-        market_id: int,
-        market_title: str,
-        filled_amount: float,
-        order_amount: float,
-        fill_percentage: float,
-        price: float,
-        filled_usdt: float
-    ) -> bool:
-        """
-        Send partial fill notification.
-
-        Args:
-            order_type: Type of order ('BUY' or 'SELL')
-            market_id: Market ID
-            market_title: Market title
-            filled_amount: Amount filled (tokens)
-            order_amount: Original order amount (tokens)
-            fill_percentage: Percentage filled
-            price: Average fill price
-            filled_usdt: Total USDT value filled
-
-        Returns:
-            True if sent successfully
-        """
-        emoji = '🟡' if order_type == 'BUY' else '🟠'
-        remaining = order_amount - filled_amount
-
-        message = f"""
-{emoji} <b>{order_type} ORDER PARTIALLY FILLED</b>
-
-📊 Market: #{market_id}
-   {market_title[:80]}
-
-📦 <b>Fill Status:</b>
-   • Filled: {filled_amount:.2f} tokens ({fill_percentage:.1f}%)
-   • Remaining: {remaining:.2f} tokens
-   • Original order: {order_amount:.2f} tokens
-
-💰 <b>Transaction:</b>
-   • Price: ${price:.4f}
-   • Value: ${filled_usdt:.2f}
-
-ℹ️ Bot will proceed with filled amount
-
-⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
-        return self.send_message(message.strip())
-
     def test_connection(self) -> bool:
         """
         Test Telegram connection by sending a test message.
