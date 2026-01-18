@@ -127,10 +127,10 @@ def setup_logger(name: str) -> logging.Logger:
     console_handler.setFormatter(console_format)
     
     # =========================================================================
-    # FILE HANDLER (with daily rotation)
+    # FILE HANDLER (with date-based filename)
     # =========================================================================
     # Outputs to log file with full details (no colors)
-    # Rotates logs daily at midnight, keeping logs organized by date
+    # Uses date in filename to avoid Windows file locking issues during rotation
 
     # Ensure log file is in logs directory
     log_path = Path(LOG_FILE)
@@ -144,22 +144,20 @@ def setup_logger(name: str) -> logging.Logger:
         log_filename = log_path
         log_filename.parent.mkdir(parents=True, exist_ok=True)
 
-    # TimedRotatingFileHandler rotates logs at midnight each day
-    # when='midnight' - rotate at midnight
-    # interval=1 - every 1 day
-    # backupCount=30 - keep 30 days of logs (optional, 0=keep all)
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        filename=log_filename,
-        when='midnight',
-        interval=1,
-        backupCount=30,
+    # Add current date to filename: idk_bot.log -> idk_bot_YYYYMMDD.log
+    # This avoids Windows file locking issues - each day gets its own file
+    today_str = datetime.now().strftime('%Y%m%d')
+    log_stem = log_filename.stem  # e.g., "idk_bot"
+    log_suffix = log_filename.suffix  # e.g., ".log"
+    daily_log_filename = log_filename.parent / f"{log_stem}_{today_str}{log_suffix}"
+
+    # Use regular FileHandler (not TimedRotatingFileHandler) to avoid Windows issues
+    file_handler = logging.FileHandler(
+        filename=daily_log_filename,
+        mode='a',  # Append mode
         encoding='utf-8'
     )
     file_handler.setLevel(logging.DEBUG)  # File captures everything
-
-    # Set suffix for rotated files to include date in format: idk_bot_YYYYMMDD.log
-    file_handler.suffix = '%Y%m%d.log'
-    file_handler.namer = lambda name: name.replace('.log.', '_')
 
     file_format = logging.Formatter(
         fmt='%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s',
@@ -170,8 +168,49 @@ def setup_logger(name: str) -> logging.Logger:
     # Add handlers to logger
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
-    
+
+    # Optionally clean up old log files (keep last 30 days)
+    _cleanup_old_logs(log_filename.parent, log_stem, days_to_keep=30)
+
     return logger
+
+
+def _cleanup_old_logs(log_dir: Path, log_prefix: str, days_to_keep: int = 30):
+    """
+    Clean up old log files, keeping only the most recent ones.
+
+    Args:
+        log_dir: Directory containing log files
+        log_prefix: Prefix of log filenames (e.g., "idk_bot")
+        days_to_keep: Number of days of logs to retain
+    """
+    try:
+        from datetime import timedelta
+
+        if not log_dir.exists():
+            return
+
+        # Calculate cutoff date
+        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        cutoff_str = cutoff_date.strftime('%Y%m%d')
+
+        # Find and delete old log files
+        for log_file in log_dir.glob(f'{log_prefix}_*.log*'):
+            try:
+                # Extract date from filename (e.g., idk_bot_20260115.log -> 20260115)
+                filename = log_file.stem
+                if '_' in filename:
+                    date_part = filename.split('_')[-1]
+                    # Check if this date is older than cutoff
+                    if date_part.isdigit() and len(date_part) == 8 and date_part < cutoff_str:
+                        log_file.unlink()
+                        print(f"Cleaned up old log: {log_file.name}")
+            except Exception as e:
+                # Silently ignore errors deleting individual files
+                pass
+    except Exception:
+        # Don't let cleanup errors break logging
+        pass
 
 
 def log_section_header(logger: logging.Logger, title: str, char: str = "="):

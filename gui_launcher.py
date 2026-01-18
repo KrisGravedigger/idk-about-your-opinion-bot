@@ -1041,7 +1041,7 @@ class BotLauncherGUI:
         self.log_file_var = tk.StringVar(value="logs/idk_bot.log")
         ttk.Entry(logging_frame, textvariable=self.log_file_var, width=30).grid(row=1, column=1, sticky='w', pady=5, padx=5)
         ttk.Button(logging_frame, text="Browse...", command=self.browse_log_file).grid(row=1, column=2, pady=5)
-        ToolTip(logging_frame.winfo_children()[-2], "Path to log file.\n\nDefault: logs/idk_bot.log\nLogs rotate daily: idk_bot_YYYYMMDD.log\nAll bot activity is logged here")
+        ToolTip(logging_frame.winfo_children()[-2], "Path to log file (base name).\n\nDefault: logs/idk_bot.log\nActual file: logs/idk_bot_YYYYMMDD.log\nNew file created each day\nOld logs (>30 days) auto-deleted")
         
         # === Alerts Section ===
         alerts_frame = ttk.LabelFrame(scrollable_frame, text="Alert Notifications", padding=10)
