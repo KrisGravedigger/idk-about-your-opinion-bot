@@ -131,11 +131,11 @@ class BotLauncherGUI:
         main_container = ttk.Frame(self.root)
         main_container.pack(fill='both', expand=True)
 
-        # Left column: Configuration tabs and action buttons
+        # Left column: Configuration tabs and action buttons (fixed width)
         self.left_column = ttk.Frame(main_container)
-        self.left_column.pack(side='left', fill='both', expand=True, padx=(10, 5), pady=10)
+        self.left_column.pack(side='left', fill='y', expand=False, padx=(10, 5), pady=10)
 
-        # Right column: Bot launcher and log viewer
+        # Right column: Bot launcher and log viewer (expands to fill space)
         self.right_column = ttk.Frame(main_container)
         self.right_column.pack(side='right', fill='both', expand=True, padx=(5, 10), pady=10)
 
