@@ -435,6 +435,19 @@ class BuyHandler:
             self.bot.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.bot.state)
 
+            # Send Telegram notification about BUY fill
+            if self.bot.telegram:
+                try:
+                    self.bot.telegram.send_state_change(
+                        new_stage='BUY_FILLED',
+                        market_id=market_id,
+                        market_title=market_title,
+                        price=position.get('avg_fill_price', 0),
+                        amount=position.get('filled_usdt', 0)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram notification: {e}")
+
             return True
 
         elif status in ['cancelled', 'canceled', 'expired', 'timeout', 'deteriorated']:

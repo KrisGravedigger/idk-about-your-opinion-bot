@@ -241,6 +241,19 @@ class SellHandler:
             self.bot.state['stage'] = 'COMPLETED'
             self.state_manager.save_state(self.bot.state)
 
+            # Send Telegram notification about SELL fill
+            if self.telegram:
+                try:
+                    self.telegram.send_state_change(
+                        new_stage='SELL_FILLED',
+                        market_id=position.get('market_id', 0),
+                        market_title=position.get('market_title', 'Unknown market'),
+                        price=result['avg_fill_price'],
+                        amount=result['filled_usdt']
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram notification: {e}")
+
             return True
 
         elif status in ['cancelled', 'canceled', 'expired']:
