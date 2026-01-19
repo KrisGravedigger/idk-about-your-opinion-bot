@@ -333,6 +333,24 @@ class TelegramNotifier:
    • Distance: ${abs(distance_from_best):.4f} ({abs(distance_percent):.2f}%)
    • Volume ahead: {ahead_volume:.0f} shares
 """
+                # Add share analysis for SELL orders
+                if order_side == 'SELL':
+                    my_shares = order_info.get('my_shares', 0)
+                    ahead_volume_percent = order_info.get('ahead_volume_percent', 0)
+                    repricing_enabled = order_info.get('repricing_enabled', False)
+                    repricing_level = order_info.get('repricing_level')
+
+                    if my_shares > 0:
+                        message += f"   • My shares: {my_shares:.2f}\n"
+                        message += f"   • Ahead/My ratio: {ahead_volume_percent:.1f}%\n"
+
+                    # Add repricing info
+                    if repricing_enabled and repricing_level is not None:
+                        message += f"   • Repricing trigger: {repricing_level:.0f}%\n"
+                    elif repricing_enabled:
+                        message += "   • Repricing: enabled (no threshold set)\n"
+                    else:
+                        message += "   • Repricing: disabled\n"
 
                 # Add simple visualization of levels ahead
                 levels_ahead = position_in_book.get('levels_ahead', [])

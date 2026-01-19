@@ -955,7 +955,7 @@ class SellMonitor:
             logger.info(f"   Competing asks found: {len(competing_asks)}")
             if competing_asks and len(competing_asks) <= 5:
                 for i, ask in enumerate(competing_asks[:5]):
-                    logger.info(f"     Ask #{i+1}: price=${safe_float(ask.get('price', 0)):.4f}, shares={safe_float(ask.get('shares', 0)):.2f}")
+                    logger.info(f"     Ask #{i+1}: price=${safe_float(ask.get('price', 0)):.4f}, shares={safe_float(ask.get('size', 0)):.2f}")
 
             if not competing_asks:
                 # No better prices - check if we should return to higher price (dynamic adjustment)
@@ -964,7 +964,7 @@ class SellMonitor:
                 return None
 
             # Calculate total competing liquidity
-            total_competing_shares = sum(safe_float(ask.get('shares', 0)) for ask in competing_asks)
+            total_competing_shares = sum(safe_float(ask.get('size', 0)) for ask in competing_asks)
 
             # Calculate threshold
             threshold_shares = filled_amount * (self.reprice_threshold_pct / 100.0)
@@ -1063,7 +1063,7 @@ class SellMonitor:
             cumulative_shares = 0.0
 
             for ask in sorted_asks:
-                cumulative_shares += safe_float(ask.get('shares', 0))
+                cumulative_shares += safe_float(ask.get('size', 0))
                 if cumulative_shares >= target_shares:
                     target = safe_float(ask.get('price', 0))
                     logger.debug(f"Mode='liquidity_percent': targeting ${target:.4f} (captures {self.liq_target_pct}%)")
@@ -1115,7 +1115,7 @@ class SellMonitor:
 
         elif self.reprice_mode == 'liquidity_percent':
             # Check if liquidity dropped below return threshold
-            total_competing_shares = sum(safe_float(ask.get('shares', 0)) for ask in competing_asks)
+            total_competing_shares = sum(safe_float(ask.get('size', 0)) for ask in competing_asks)
             position = self.state.get('current_position', {})
             filled_amount = safe_float(position.get('filled_amount', 0))
 

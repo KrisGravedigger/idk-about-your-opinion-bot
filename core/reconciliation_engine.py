@@ -172,6 +172,10 @@ class ReconciliationEngine:
         self.tolerance_shares = 0.01  # Allow 0.01 share difference (rounding)
         self.api_lag_grace_seconds = 30  # Wait 30s for API to catch up
 
+        # Track recent notifications to prevent duplicates
+        self._recent_notifications: Dict[str, float] = {}  # {notification_key: timestamp}
+        self._notification_cooldown_seconds = 60  # Don't send same notification within 60s
+
         logger.debug("ReconciliationEngine initialized")
 
     def detect_discrepancy(self, state: Dict[str, Any]) -> Optional[Discrepancy]:
@@ -810,7 +814,31 @@ class ReconciliationEngine:
         discrepancy: Discrepancy,
         result: RecoveryResult
     ):
-        """Send Telegram notification about recovery."""
+        """Send Telegram notification about recovery (with duplicate prevention)."""
+        import time
+
+        # Create a unique key for this notification based on content
+        notification_key = f"{discrepancy.type.value}_{discrepancy.description}_{result.strategy.value}"
+
+        # Check if we recently sent this same notification
+        now = time.time()
+        if notification_key in self._recent_notifications:
+            last_sent = self._recent_notifications[notification_key]
+            time_since_last = now - last_sent
+
+            if time_since_last < self._notification_cooldown_seconds:
+                logger.debug(f"Skipping duplicate notification (sent {time_since_last:.0f}s ago)")
+                return
+
+        # Record this notification
+        self._recent_notifications[notification_key] = now
+
+        # Clean up old entries (older than cooldown period)
+        cutoff_time = now - self._notification_cooldown_seconds
+        self._recent_notifications = {
+            k: v for k, v in self._recent_notifications.items()
+            if v > cutoff_time
+        }
 
         status_emoji = "✅" if result.success else "❌"
         severity_emoji = "🚨" if discrepancy.severity == 'HIGH' else "⚠️"
@@ -830,6 +858,7 @@ class ReconciliationEngine:
 
         try:
             telegram_notifier.send_message(message)
+            logger.debug(f"Sent reconciliation notification: {notification_key}")
         except Exception as e:
             logger.warning(f"Failed to send Telegram notification: {e}")
 

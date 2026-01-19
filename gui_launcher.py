@@ -104,8 +104,16 @@ class BotLauncherGUI:
 
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(f"Opinion Trading Bot - Configuration & Launcher v{self.VERSION}")
+        self.root.title(f"I Don't Kare about your opinion trading bot - Configuration & Launcher v{self.VERSION}")
         self.root.geometry("1400x900")  # Wider for two-column layout
+
+        # Set window icon if available
+        icon_path = Path("icon.ico")
+        if icon_path.exists():
+            try:
+                self.root.iconbitmap(icon_path)
+            except Exception as e:
+                print(f"Warning: Could not set window icon: {e}")
 
         # Initialize variables
         self.config_data: Dict[str, Any] = {}
@@ -123,11 +131,11 @@ class BotLauncherGUI:
         main_container = ttk.Frame(self.root)
         main_container.pack(fill='both', expand=True)
 
-        # Left column: Configuration tabs and action buttons
+        # Left column: Configuration tabs and action buttons (fixed width)
         self.left_column = ttk.Frame(main_container)
-        self.left_column.pack(side='left', fill='both', expand=True, padx=(10, 5), pady=10)
+        self.left_column.pack(side='left', fill='y', expand=False, padx=(10, 5), pady=10)
 
-        # Right column: Bot launcher and log viewer
+        # Right column: Bot launcher and log viewer (expands to fill space)
         self.right_column = ttk.Frame(main_container)
         self.right_column.pack(side='right', fill='both', expand=True, padx=(5, 10), pady=10)
 
@@ -298,18 +306,19 @@ class BotLauncherGUI:
         ttk.Label(amount_frame, text="Capital Percentage (%):").grid(row=1, column=0, sticky='w', pady=5)
         self.capital_percentage_var = tk.DoubleVar(value=90.0)
         self.capital_percentage_scale = ttk.Scale(
-            amount_frame, 
-            from_=1, to=100, 
+            amount_frame,
+            from_=1, to=100,
             variable=self.capital_percentage_var,
             orient='horizontal',
-            length=200,
-            command=self.update_percentage_label
+            length=200
         )
-        self.capital_percentage_scale.grid(row=1, column=1, sticky='w', pady=5, padx=5)
-        
-        self.capital_percentage_label = ttk.Label(amount_frame, text="90%")
-        self.capital_percentage_label.grid(row=1, column=2, sticky='w', pady=5)
+        self.capital_percentage_scale.grid(row=1, column=1, sticky='ew', pady=5, padx=5)
+
+        # Editable entry field
+        self.capital_percentage_entry = ttk.Entry(amount_frame, textvariable=self.capital_percentage_var, width=8)
+        self.capital_percentage_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
         ToolTip(self.capital_percentage_scale, "Percentage of current balance to use per position.\n\nDefault: 90%\nRecommended: 80-95%\nExample: 90 = use 90% of balance")
+        ToolTip(self.capital_percentage_entry, "Percentage of current balance to use per position.\n\nDefault: 90%\nRecommended: 80-95%\nExample: 90 = use 90% of balance")
         
         # Auto Reinvest
         self.auto_reinvest_var = tk.BooleanVar(value=True)
@@ -663,14 +672,15 @@ class BotLauncherGUI:
             from_=-50, to=0,
             variable=self.stop_loss_trigger_var,
             orient='horizontal',
-            length=250,
-            command=self.update_stop_loss_label
+            length=250
         )
         self.stop_loss_scale.pack(side='left', fill='x', expand=True)
 
-        self.stop_loss_label = ttk.Label(sl_container, text="-10.0%", width=8)
-        self.stop_loss_label.pack(side='left', padx=(10, 0))
+        # Editable entry field
+        self.stop_loss_entry = ttk.Entry(sl_container, textvariable=self.stop_loss_trigger_var, width=8)
+        self.stop_loss_entry.pack(side='left', padx=(10, 0))
         ToolTip(self.stop_loss_scale, "Trigger stop-loss when position loses this %.\n\nDefault: -10%\nExample: -10 = sell if position down 10%\nRecommended: -5% to -15%")
+        ToolTip(self.stop_loss_entry, "Trigger stop-loss when position loses this %.\n\nDefault: -10%\nExample: -10 = sell if position down 10%\nRecommended: -5% to -15%")
         
         ttk.Label(stoploss_frame, text="Stop-Loss Aggressive Offset:").pack(anchor='w', pady=5)
         self.stop_loss_offset_var = tk.DoubleVar(value=0.001)
@@ -690,7 +700,7 @@ class BotLauncherGUI:
         cb_liquidity.pack(anchor='w', pady=5)
         ToolTip(cb_liquidity, "Cancel orders if liquidity drops significantly.\n\nDefault: Enabled\nProtects against illiquid markets")
         
-        # Bid Drop Threshold with slider and label on right
+        # Bid Drop Threshold with slider and editable entry on right
         bid_container = ttk.Frame(liquidity_frame)
         bid_container.pack(fill='x', pady=5)
 
@@ -706,12 +716,13 @@ class BotLauncherGUI:
         )
         bid_scale.pack(side='left', fill='x', expand=True)
 
-        liq_bid_label = ttk.Label(bid_container, text="25%", width=8)
-        liq_bid_label.pack(side='left', padx=(10, 0))
-        self.liquidity_bid_drop_var.trace_add('write', lambda *args: liq_bid_label.config(text=f"{self.liquidity_bid_drop_var.get():.0f}%"))
+        # Editable entry field
+        liq_bid_entry = ttk.Entry(bid_container, textvariable=self.liquidity_bid_drop_var, width=8)
+        liq_bid_entry.pack(side='left', padx=(10, 0))
         ToolTip(bid_scale, "Cancel if bid liquidity drops by this %.\n\nDefault: 25%\nHigher = more tolerant of liquidity changes")
+        ToolTip(liq_bid_entry, "Cancel if bid liquidity drops by this %.\n\nDefault: 25%\nHigher = more tolerant of liquidity changes")
         
-        # Spread Threshold with slider and label on right
+        # Spread Threshold with slider and editable entry on right
         spread_container = ttk.Frame(liquidity_frame)
         spread_container.pack(fill='x', pady=5)
 
@@ -727,10 +738,11 @@ class BotLauncherGUI:
         )
         spread_scale.pack(side='left', fill='x', expand=True)
 
-        liq_spread_label = ttk.Label(spread_container, text="15%", width=8)
-        liq_spread_label.pack(side='left', padx=(10, 0))
-        self.liquidity_spread_var.trace_add('write', lambda *args: liq_spread_label.config(text=f"{self.liquidity_spread_var.get():.0f}%"))
+        # Editable entry field
+        liq_spread_entry = ttk.Entry(spread_container, textvariable=self.liquidity_spread_var, width=8)
+        liq_spread_entry.pack(side='left', padx=(10, 0))
         ToolTip(spread_scale, "Cancel if spread increases by this %.\n\nDefault: 15%\nHigher = more tolerant of spread widening")
+        ToolTip(liq_spread_entry, "Cancel if spread increases by this %.\n\nDefault: 15%\nHigher = more tolerant of spread widening")
         
         # === Order Timeouts Section ===
         timeout_frame = ttk.LabelFrame(scrollable_frame, text="Order Timeouts", padding=10)
@@ -772,23 +784,23 @@ class BotLauncherGUI:
 
         self.sell_reprice_threshold_var = tk.DoubleVar(value=50.0)
 
-        # Entry field for direct input
-        self.sell_reprice_threshold_entry = ttk.Entry(
-            liq_threshold_container,
-            textvariable=self.sell_reprice_threshold_var,
-            width=10
-        )
-        self.sell_reprice_threshold_entry.pack(side='left', padx=5)
-
         # Scale for visual adjustment
         self.sell_reprice_threshold_scale = ttk.Scale(
             liq_threshold_container,
             from_=1, to=1000,
             variable=self.sell_reprice_threshold_var,
             orient='horizontal',
-            length=150
+            length=200
         )
         self.sell_reprice_threshold_scale.pack(side='left', fill='x', expand=True, padx=5)
+
+        # Entry field for direct input (on the right)
+        self.sell_reprice_threshold_entry = ttk.Entry(
+            liq_threshold_container,
+            textvariable=self.sell_reprice_threshold_var,
+            width=10
+        )
+        self.sell_reprice_threshold_entry.pack(side='left', padx=(10, 0))
 
         tooltip_text = (
             "Reprice when total shares at better prices reach this % of our order size.\n\n"
@@ -863,23 +875,23 @@ class BotLauncherGUI:
 
         self.liq_target_var = tk.DoubleVar(value=30.0)
 
-        # Entry field for direct input
-        self.liq_target_entry = ttk.Entry(
-            liq_target_container,
-            textvariable=self.liq_target_var,
-            width=10
-        )
-        self.liq_target_entry.pack(side='left', padx=5)
-
         # Scale for visual adjustment
         self.liq_target_scale = ttk.Scale(
             liq_target_container,
             from_=1, to=100,
             variable=self.liq_target_var,
             orient='horizontal',
-            length=120
+            length=200
         )
         self.liq_target_scale.pack(side='left', fill='x', expand=True, padx=5)
+
+        # Entry field for direct input (on the right)
+        self.liq_target_entry = ttk.Entry(
+            liq_target_container,
+            textvariable=self.liq_target_var,
+            width=10
+        )
+        self.liq_target_entry.pack(side='left', padx=(10, 0))
 
         tooltip_text = (
             "Target price level that captures this % of better liquidity.\n\n"
@@ -899,23 +911,23 @@ class BotLauncherGUI:
 
         self.liq_return_var = tk.DoubleVar(value=20.0)
 
-        # Entry field for direct input
-        self.liq_return_entry = ttk.Entry(
-            liq_return_container,
-            textvariable=self.liq_return_var,
-            width=10
-        )
-        self.liq_return_entry.pack(side='left', padx=5)
-
         # Scale for visual adjustment
         self.liq_return_scale = ttk.Scale(
             liq_return_container,
             from_=1, to=100,
             variable=self.liq_return_var,
             orient='horizontal',
-            length=120
+            length=200
         )
         self.liq_return_scale.pack(side='left', fill='x', expand=True, padx=5)
+
+        # Entry field for direct input (on the right)
+        self.liq_return_entry = ttk.Entry(
+            liq_return_container,
+            textvariable=self.liq_return_var,
+            width=10
+        )
+        self.liq_return_entry.pack(side='left', padx=(10, 0))
 
         tooltip_text = (
             "Return to higher price when better liquidity drops below this %.\n\n"
@@ -1026,10 +1038,10 @@ class BotLauncherGUI:
         ToolTip(logging_frame.winfo_children()[-1], "Logging verbosity level.\n\nDEBUG: Very detailed (for troubleshooting)\nINFO: Standard operation (recommended)\nWARNING: Only warnings and errors\nERROR: Only errors\nCRITICAL: Only critical failures")
         
         ttk.Label(logging_frame, text="Log File:").grid(row=1, column=0, sticky='w', pady=5)
-        self.log_file_var = tk.StringVar(value="opinion_farming_bot.log")
+        self.log_file_var = tk.StringVar(value="logs/idk_bot.log")
         ttk.Entry(logging_frame, textvariable=self.log_file_var, width=30).grid(row=1, column=1, sticky='w', pady=5, padx=5)
         ttk.Button(logging_frame, text="Browse...", command=self.browse_log_file).grid(row=1, column=2, pady=5)
-        ToolTip(logging_frame.winfo_children()[-2], "Path to log file.\n\nDefault: opinion_farming_bot.log\nAll bot activity is logged here")
+        ToolTip(logging_frame.winfo_children()[-2], "Path to log file (base name).\n\nDefault: logs/idk_bot.log\nActual file: logs/idk_bot_YYYYMMDD.log\nNew file created each day\nOld logs (>30 days) auto-deleted")
         
         # === Alerts Section ===
         alerts_frame = ttk.LabelFrame(scrollable_frame, text="Alert Notifications", padding=10)
@@ -1308,13 +1320,19 @@ class BotLauncherGUI:
         )
         self.stop_button.pack(side='left', padx=5)
         
-        ttk.Button(
-            button_frame, 
-            text="🔄 Restart", 
+        self.restart_button = ttk.Button(
+            button_frame,
+            text="🔄 Restart",
             command=self.restart_bot,
             width=15
-        ).pack(side='left', padx=5)
-        
+        )
+        self.restart_button.pack(side='left', padx=5)
+
+        # Info label for Restart button
+        restart_info = ttk.Label(button_frame, text="ℹ️ GUI settings override config.py",
+                                foreground="blue", font=("TkDefaultFont", 8, "italic"))
+        restart_info.pack(side='left', padx=5)
+
         # Status row
         status_frame = ttk.Frame(launcher_frame)
         status_frame.pack(fill='x', pady=5)
@@ -1414,19 +1432,24 @@ class BotLauncherGUI:
         """Create action buttons section."""
         action_frame = ttk.Frame(self.left_column)
         action_frame.pack(fill='x', padx=5, pady=5)
-        
+
         # Row 1: Main actions
         row1 = ttk.Frame(action_frame)
         row1.pack(fill='x', pady=2)
-        
+
         ttk.Button(row1, text="💾 Save Configuration", command=self.save_configuration, width=20).pack(side='left', padx=2)
         ttk.Button(row1, text="📤 Export", command=self.export_configuration, width=15).pack(side='left', padx=2)
         ttk.Button(row1, text="📥 Import", command=self.import_configuration, width=15).pack(side='left', padx=2)
-        
+
+        # Info label for Import button
+        import_info = ttk.Label(row1, text="ℹ️ After importing, save config and restart bot to apply changes",
+                               foreground="blue", font=("TkDefaultFont", 8, "italic"))
+        import_info.pack(side='left', padx=5)
+
         # Row 2: Advanced actions
         row2 = ttk.Frame(action_frame)
         row2.pack(fill='x', pady=2)
-        
+
         ttk.Button(row2, text="🔧 Test Configuration", command=self.test_configuration, width=20).pack(side='left', padx=2)
         ttk.Button(row2, text="📁 Manage Profiles", command=self.manage_profiles, width=20).pack(side='left', padx=2)
         
@@ -1577,7 +1600,7 @@ class BotLauncherGUI:
         
         # Monitoring tab
         self.log_level_var.set(self.config_data.get('log_level', 'INFO'))
-        self.log_file_var.set(self.config_data.get('log_file', 'opinion_farming_bot.log'))
+        self.log_file_var.set(self.config_data.get('log_file', 'logs/idk_bot.log'))
         self.alert_order_filled_var.set(self.config_data.get('alert_on_order_filled', True))
         self.alert_position_closed_var.set(self.config_data.get('alert_on_position_closed', True))
         self.alert_error_var.set(self.config_data.get('alert_on_error', True))
@@ -1879,14 +1902,98 @@ Click Yes to open the download page."""
     def save_configuration(self):
         """Save configuration to bot_config.json and .env."""
         try:
+            # Check if bot is running and offer save & restart option
+            bot_running = self.bot_process and self.bot_process.poll() is None
+            should_restart = False
+
+            if bot_running:
+                # Create custom dialog with three buttons
+                dialog = tk.Toplevel(self.root)
+                dialog.title("Bot is Running")
+                dialog.geometry("450x200")
+                dialog.resizable(False, False)
+                dialog.transient(self.root)
+                dialog.grab_set()
+
+                # Center the dialog
+                dialog.update_idletasks()
+                x = (dialog.winfo_screenwidth() // 2) - (450 // 2)
+                y = (dialog.winfo_screenheight() // 2) - (200 // 2)
+                dialog.geometry(f'450x200+{x}+{y}')
+
+                # Message
+                message_frame = ttk.Frame(dialog, padding=20)
+                message_frame.pack(fill='both', expand=True)
+
+                ttk.Label(
+                    message_frame,
+                    text="⚠️ Warning: The bot is currently running!",
+                    font=("TkDefaultFont", 10, "bold")
+                ).pack(pady=(0, 10))
+
+                ttk.Label(
+                    message_frame,
+                    text="To apply new settings, the bot needs to be restarted.\n\n"
+                         "What would you like to do?",
+                    justify='center'
+                ).pack(pady=(0, 20))
+
+                # Button frame
+                button_frame = ttk.Frame(dialog)
+                button_frame.pack(fill='x', padx=20, pady=(0, 20))
+
+                result = {'action': None}
+
+                def on_save_and_restart():
+                    result['action'] = 'restart'
+                    dialog.destroy()
+
+                def on_save_only():
+                    result['action'] = 'save'
+                    dialog.destroy()
+
+                def on_cancel():
+                    result['action'] = 'cancel'
+                    dialog.destroy()
+
+                ttk.Button(
+                    button_frame,
+                    text="💾🔄 Save & Restart Bot",
+                    command=on_save_and_restart,
+                    width=20
+                ).pack(side='left', padx=5)
+
+                ttk.Button(
+                    button_frame,
+                    text="💾 Save Only",
+                    command=on_save_only,
+                    width=15
+                ).pack(side='left', padx=5)
+
+                ttk.Button(
+                    button_frame,
+                    text="❌ Cancel",
+                    command=on_cancel,
+                    width=10
+                ).pack(side='left', padx=5)
+
+                # Wait for user to close dialog
+                self.root.wait_window(dialog)
+
+                if result['action'] == 'cancel':
+                    self.update_status_bar("❌ Save cancelled")
+                    return
+                elif result['action'] == 'restart':
+                    should_restart = True
+
             # Collect form data
             config_data = self.collect_form_data()
-            
+
             # Validate configuration
             if not validate_and_warn(config_data, validate_full_config, "Save configuration"):
                 self.update_status_bar("❌ Validation failed or cancelled - configuration not saved")
                 return
-            
+
             # Save bot configuration to JSON
             save_config_to_json(config_data, "bot_config.json")
             
@@ -1903,10 +2010,17 @@ Click Yes to open the download page."""
             
             self.config_data = config_data
             self.config_changed = False
-            
-            messagebox.showinfo("Success", "Configuration saved successfully!\n\nbot_config.json - Bot settings\n.env - Credentials")
-            self.update_status_bar("✅ Configuration saved successfully")
-            
+
+            # Show success message
+            if should_restart:
+                messagebox.showinfo("Success", "Configuration saved successfully!\n\nbot_config.json - Bot settings\n.env - Credentials\n\nRestarting bot...")
+                self.update_status_bar("✅ Configuration saved - restarting bot...")
+                # Restart the bot
+                self.restart_bot()
+            else:
+                messagebox.showinfo("Success", "Configuration saved successfully!\n\nbot_config.json - Bot settings\n.env - Credentials")
+                self.update_status_bar("✅ Configuration saved successfully")
+
         except Exception as e:
             messagebox.showerror("Error Saving Configuration", f"Failed to save configuration:\n\n{str(e)}")
             self.update_status_bar(f"❌ Error saving configuration: {str(e)}")
