@@ -570,6 +570,25 @@ class AutonomousBot:
                 outcome_side = position.get('outcome_side', 'UNKNOWN')
                 market_title = position.get('market_title', f'Market #{market_id}')
 
+                # If market_title is missing or is default value, fetch from API
+                if not market_title or market_title == f'Market #{market_id}':
+                    try:
+                        market_data = self.client.get_market(market_id)
+                        if market_data:
+                            # Try different possible keys for title
+                            market_title = market_data.get('title') or market_data.get('market_title') or market_data.get('name')
+                            if market_title:
+                                # Update position with real market title
+                                position['market_title'] = market_title
+                                self.state_manager.save_state(self.state)
+                                logger.debug(f"   ✅ Fetched market title: {market_title[:60]}")
+                            else:
+                                logger.debug(f"   ⚠️ Market title not found in API response")
+                                market_title = f'Market #{market_id}'
+                    except Exception as e:
+                        logger.debug(f"   Could not fetch market title: {e}")
+                        market_title = f'Market #{market_id}'
+
                 # DEBUG: Log which token we're fetching orderbook for
                 logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
                 logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
