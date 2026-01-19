@@ -268,8 +268,19 @@ class TelegramNotifier:
 📍 <b>Status:</b> {status_emoji} {stage}
 """
 
-        # Add outcome side (YES/NO) if in position
-        if outcome_side:
+        # Add market name and outcome side if available
+        if market_info:
+            market_id = market_info.get('market_id', 'N/A')
+            market_title = market_info.get('market_title', 'N/A')
+
+            # Truncate title if too long
+            if len(market_title) > 60:
+                market_title = market_title[:57] + "..."
+
+            message += f"\n📊 <b>Market:</b> #{market_id}\n   {market_title}\n"
+
+        # Add outcome side (YES/NO) if in position and not UNKNOWN
+        if outcome_side and outcome_side != 'UNKNOWN':
             side_emoji = '✅' if outcome_side == 'YES' else '❌'
             message += f"📌 <b>Market side:</b> {side_emoji} {outcome_side}\n"
 
@@ -280,19 +291,12 @@ class TelegramNotifier:
 """
 
         if market_info:
-            market_id = market_info.get('market_id', 'N/A')
-            market_title = market_info.get('market_title', 'N/A')
             spread = market_info.get('spread', 0)
             best_bid = market_info.get('best_bid', 0)
             best_ask = market_info.get('best_ask', 0)
 
-            # Truncate title if too long
-            if len(market_title) > 60:
-                market_title = market_title[:57] + "..."
-
             message += f"""
-📊 <b>Market:</b> #{market_id}
-   {market_title}
+📈 <b>Orderbook:</b>
    • Spread: ${spread:.4f}
    • Best bid: ${best_bid:.4f}
    • Best ask: ${best_ask:.4f}

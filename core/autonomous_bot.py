@@ -570,6 +570,54 @@ class AutonomousBot:
                 outcome_side = position.get('outcome_side', 'UNKNOWN')
                 market_title = position.get('market_title', f'Market #{market_id}')
 
+                # If market_title or outcome_side is missing, fetch from API
+                needs_market_data = (not market_title or market_title == f'Market #{market_id}' or
+                                    outcome_side == 'UNKNOWN')
+
+                if needs_market_data and token_id:
+                    try:
+                        market_data = self.client.get_market(market_id)
+                        if market_data:
+                            state_updated = False
+
+                            # Update market_title if needed
+                            if not market_title or market_title == f'Market #{market_id}':
+                                fetched_title = market_data.get('title') or market_data.get('market_title') or market_data.get('name')
+                                if fetched_title:
+                                    market_title = fetched_title
+                                    position['market_title'] = market_title
+                                    state_updated = True
+                                    logger.debug(f"   ✅ Fetched market title: {market_title[:60]}")
+                                else:
+                                    logger.debug(f"   ⚠️ Market title not found in API response")
+                                    market_title = f'Market #{market_id}'
+
+                            # Update outcome_side if UNKNOWN
+                            if outcome_side == 'UNKNOWN':
+                                yes_token_id = market_data.get('yes_token_id')
+                                no_token_id = market_data.get('no_token_id')
+
+                                if token_id == yes_token_id:
+                                    outcome_side = 'YES'
+                                    position['outcome_side'] = outcome_side
+                                    state_updated = True
+                                    logger.debug(f"   ✅ Determined outcome_side: YES")
+                                elif token_id == no_token_id:
+                                    outcome_side = 'NO'
+                                    position['outcome_side'] = outcome_side
+                                    state_updated = True
+                                    logger.debug(f"   ✅ Determined outcome_side: NO")
+                                else:
+                                    logger.debug(f"   ⚠️ Token ID doesn't match YES or NO token")
+
+                            # Save state if updated
+                            if state_updated:
+                                self.state_manager.save_state(self.state)
+                    except Exception as e:
+                        logger.debug(f"   Could not fetch market data: {e}")
+                        if not market_title or market_title == f'Market #{market_id}':
+                            market_title = f'Market #{market_id}'
+
                 # DEBUG: Log which token we're fetching orderbook for
                 logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
                 logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
