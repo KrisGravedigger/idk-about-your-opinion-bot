@@ -95,37 +95,37 @@ class SellMonitor:
     
     def monitor_until_filled(
         self,
-        order_id: str,
-        timeout_at: datetime
+        order_id: str
     ) -> Dict[str, Any]:
         """
-        Monitor order until filled, cancelled, expired, timeout, or stop-loss.
-        
+        Monitor SELL order until filled, cancelled, expired, deteriorated, or stop-loss triggered.
+
+        NOTE: SELL monitoring has NO timeout - orders stay active indefinitely for
+        market making rewards. Only repricing and stop-loss can change/cancel orders.
+
         Args:
             order_id: Order ID to monitor
-            timeout_at: Datetime when monitoring should timeout
-            
+
         Returns:
             Dictionary with structure:
             {
-                'status': 'filled' | 'timeout' | 'cancelled' | 'expired' | 'deteriorated' | 'stop_loss_triggered',
+                'status': 'filled' | 'cancelled' | 'expired' | 'deteriorated',
                 'filled_amount': float (tokens, if filled),
                 'avg_fill_price': float (if filled),
                 'filled_usdt': float (if filled),
                 'fill_timestamp': str (if filled),
                 'reason': str (if not filled)
             }
-        
+
         Example:
-            >>> timeout_at = datetime.now() + timedelta(hours=24)
-            >>> result = monitor.monitor_until_filled('ord_456', timeout_at)
-            >>> if result['status'] == 'stop_loss_triggered':
-            ...     print("Position closed at loss")
+            >>> result = monitor.monitor_until_filled('ord_456')
+            >>> if result['status'] == 'filled':
+            ...     print(f"Sold {result['filled_amount']} tokens")
         """
         logger.info("🔄 Starting SELL order monitoring")
         logger.info(f"   Order ID: {order_id}")
         logger.info(f"   Check interval: {self.check_interval}s")
-        logger.info(f"   Timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   No timeout - order stays active until filled")
         if self.enable_stop_loss:
             logger.info(f"   Stop-loss: {format_percent(self.stop_loss_trigger)}")
         logger.info("")
@@ -198,60 +198,7 @@ class SellMonitor:
             while True:
                 check_count += 1
                 check_time = datetime.now().strftime("%H:%M:%S")
-                
-                # =============================================================
-                # CHECK: TIMEOUT - EXTEND FOR MARKET MAKING BONUS
-                # =============================================================
-                if datetime.now() >= timeout_at:
-                    logger.warning("")
-                    logger.warning("=" * 70)
-                    logger.warning("⏰ SELL ORDER TIMEOUT - EXTENDING")
-                    logger.warning("=" * 70)
-                    logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
-                    logger.warning("")
-                    logger.info("   🎁 MARKET MAKING STRATEGY: Keeping order for bonus points")
-                    logger.info("   💡 Longer orders earn more points, regardless of price")
-                    logger.info("")
 
-                    # Get our order details for logging
-                    try:
-                        order = self.client.get_order(order_id)
-                        if order:
-                            our_price = safe_float(order.get('price', 0))
-                            logger.info(f"   Our ask price: ${our_price:.4f}")
-
-                            # Get current market orderbook for informational logging
-                            try:
-                                orderbook = self.client.get_market_orderbook(token_id)
-                                if orderbook and 'asks' in orderbook:
-                                    asks = orderbook.get('asks', [])
-                                    if asks:
-                                        best_ask = min(safe_float(ask.get('price', 999)) for ask in asks)
-                                        logger.info(f"   Market best ask: ${best_ask:.4f}")
-
-                                        price_diff_pct = abs(our_price - best_ask) / best_ask * 100 if best_ask > 0 else 0
-                                        if price_diff_pct > 0.1:
-                                            logger.info(f"   ℹ️  Note: Our price is {price_diff_pct:.2f}% higher than best ask")
-                                            logger.info("   ℹ️  But we're keeping order for market making bonus")
-                            except:
-                                pass  # Ignore errors in informational logging
-                    except:
-                        pass  # Ignore errors in informational logging
-
-                    logger.info("")
-                    logger.info(f"   📅 Extending timeout by {self.timeout_hours} hours")
-
-                    # Extend timeout
-                    from datetime import timedelta
-                    new_timeout = datetime.now() + timedelta(hours=self.timeout_hours)
-                    timeout_at = new_timeout
-
-                    logger.info(f"   New timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
-                    logger.info("   Continuing monitoring...")
-                    logger.info("")
-
-                    # Continue monitoring - don't return, just update timeout_at and continue loop
-                
                 # =============================================================
                 # CHECK: STOP-LOSS (if enabled)
                 # =============================================================

@@ -261,6 +261,64 @@ class ReconciliationEngine:
                     logger.warning(f"   ⚠️  Found {len(pending_orders)} orphaned pending order(s)!")
                     logger.warning(f"   First order: {side_enum} on market #{market_id}, status: {status_enum}")
 
+                    # CRITICAL: Check if this is orphaned SELL order with matching position
+                    # This happens when stop-loss executes but monitoring gets interrupted
+                    # We should RESUME monitoring, not cancel!
+                    if side_enum == 'Sell' and market_id > 0:
+                        logger.info("   🔍 Checking if this is orphaned stop-loss order with position...")
+
+                        try:
+                            # Check if we have position in the same market
+                            # Try YES first, then NO
+                            position_shares = None
+                            outcome_side_found = None
+
+                            for try_side in ['YES', 'NO']:
+                                try:
+                                    shares = self.client.get_position_shares(
+                                        market_id=market_id,
+                                        outcome_side=try_side
+                                    )
+                                    if shares and float(shares) > self.dust_threshold:
+                                        position_shares = float(shares)
+                                        outcome_side_found = try_side
+                                        break
+                                except:
+                                    continue
+
+                            if position_shares and position_shares > self.dust_threshold:
+                                # Found matching position! This is orphaned stop-loss order
+                                logger.info(f"   ✅ Found matching position: {position_shares:.4f} {outcome_side_found} shares")
+                                logger.info(f"   📊 This appears to be orphaned stop-loss order waiting to fill")
+                                logger.info(f"   🔄 Strategy: RESUME monitoring instead of cancelling")
+
+                                return Discrepancy(
+                                    type=DiscrepancyType.ORPHANED_ORDER,
+                                    severity='HIGH',
+                                    description=f"Orphaned SELL order with matching position - likely interrupted stop-loss",
+                                    state_data={'stage': stage},
+                                    api_data={
+                                        'order_id': order_id,
+                                        'market_id': market_id,
+                                        'status': status_enum,
+                                        'side': side_enum,
+                                        'total_orphaned': len(pending_orders),
+                                        'position_shares': position_shares,
+                                        'outcome_side': outcome_side_found,
+                                        'order_price': order.get('price', 0)
+                                    },
+                                    suggested_strategy=RecoveryStrategy.SYNC_FROM_API,  # Will resume monitoring
+                                    metadata={
+                                        'all_orders': pending_orders,
+                                        'is_stop_loss_order': True,
+                                        'resume_monitoring': True
+                                    }
+                                )
+                        except Exception as e:
+                            logger.debug(f"Could not check for matching position: {e}")
+                            # Fall through to normal orphaned order handling
+
+                    # Normal orphaned order (no matching position) - cancel and reset
                     return Discrepancy(
                         type=DiscrepancyType.ORPHANED_ORDER,
                         severity='HIGH',
@@ -448,12 +506,133 @@ class ReconciliationEngine:
 
         State is IDLE/COMPLETED but API shows we have a position.
         Adopt the position and prepare to sell it.
+
+        SPECIAL CASE: If metadata['resume_monitoring'] is True, this is an
+        orphaned stop-loss order. Resume monitoring instead of building from scratch.
         """
         actions = []
         state_changes = {}
 
         api_data = discrepancy.api_data
+        metadata = discrepancy.metadata or {}
         market_id = api_data['market_id']
+
+        # SPECIAL CASE: Orphaned stop-loss order - resume monitoring
+        if metadata.get('resume_monitoring'):
+            logger.info("   🔄 Resuming monitoring of orphaned stop-loss order...")
+
+            order_id = api_data.get('order_id')
+            position_shares = api_data.get('position_shares')
+            outcome = api_data.get('outcome_side')
+            order_price = api_data.get('order_price', 0)
+
+            if not order_id or not position_shares or not outcome:
+                return RecoveryResult(
+                    success=False,
+                    strategy=RecoveryStrategy.SYNC_FROM_API,
+                    actions_taken=actions,
+                    state_changes={},
+                    reason="Missing required data to resume monitoring"
+                )
+
+            try:
+                # Get market details
+                market = self.client.get_market_details(market_id)
+                if not market:
+                    return RecoveryResult(
+                        success=False,
+                        strategy=RecoveryStrategy.SYNC_FROM_API,
+                        actions_taken=actions,
+                        state_changes={},
+                        reason=f"Could not fetch market #{market_id} details"
+                    )
+
+                # Get token_id
+                token_id = market.get('yes_token_id') if outcome == 'YES' else market.get('no_token_id')
+                if not token_id:
+                    return RecoveryResult(
+                        success=False,
+                        strategy=RecoveryStrategy.SYNC_FROM_API,
+                        actions_taken=actions,
+                        state_changes={},
+                        reason=f"Could not get token_id for {outcome} outcome"
+                    )
+
+                # Try to get buy price from transaction history
+                avg_fill_price = None
+                market_txns = self.transaction_history.get_transactions_for_market(market_id)
+                if market_txns:
+                    buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
+                    if buy_txns:
+                        latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
+                        avg_fill_price = latest_buy.get('price', 0)
+
+                # If no transaction history, estimate from current orderbook
+                if not avg_fill_price:
+                    try:
+                        orderbook = self.client.get_market_orderbook(token_id)
+                        if orderbook and 'bids' in orderbook:
+                            bids = orderbook.get('bids', [])
+                            if bids:
+                                from utils import safe_float
+                                avg_fill_price = max(safe_float(bid.get('price', 0)) for bid in bids)
+                    except:
+                        avg_fill_price = order_price  # Fallback to order price
+
+                # Rebuild current_position
+                position = {
+                    'market_id': market_id,
+                    'token_id': token_id,
+                    'market_title': market.get('title', 'Unknown market'),
+                    'outcome_side': outcome,
+                    'filled_amount': position_shares,
+                    'avg_fill_price': avg_fill_price or order_price,
+                    'filled_usdt': (position_shares * (avg_fill_price or order_price)),
+                    'fill_timestamp': get_timestamp(),
+                    'sell_order_id': order_id,
+                    'sell_price': order_price,
+                    'stop_loss_triggered': True,  # Mark as stop-loss order
+                    'stop_loss_timestamp': get_timestamp()
+                }
+
+                state['current_position'] = position
+                state['stage'] = 'SELL_MONITORING'
+
+                actions.append(f"Resumed monitoring of stop-loss order {order_id}")
+                actions.append(f"Market #{market_id}: {position['market_title']}")
+                actions.append(f"Position: {position_shares:.4f} {outcome} shares")
+                actions.append(f"SELL order price: ${order_price:.4f}")
+                actions.append(f"Buy price (estimated): ${avg_fill_price:.4f}")
+
+                state_changes = {
+                    'stage': 'SELL_MONITORING',
+                    'current_position': 'restored',
+                    'sell_order_id': order_id
+                }
+
+                # Save state
+                self.state_manager.save_state(state)
+                actions.append("Saved updated state")
+
+                return RecoveryResult(
+                    success=True,
+                    strategy=RecoveryStrategy.SYNC_FROM_API,
+                    actions_taken=actions,
+                    state_changes=state_changes,
+                    reason="Resumed monitoring of orphaned stop-loss order"
+                )
+
+            except Exception as e:
+                logger.error(f"Error resuming stop-loss monitoring: {e}")
+                return RecoveryResult(
+                    success=False,
+                    strategy=RecoveryStrategy.SYNC_FROM_API,
+                    actions_taken=actions,
+                    state_changes={},
+                    reason=f"Error: {e}"
+                )
+
+        # NORMAL CASE: Phantom position - rebuild from scratch
         api_shares = api_data['shares']
         outcome = api_data['outcome']
 

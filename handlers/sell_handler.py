@@ -171,28 +171,14 @@ class SellHandler:
             logger.warning(f"⚠️ Could not verify SELL order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
 
-        # Calculate timeout based on when SELL order was originally placed
-        timeout_hours = self.config['SELL_ORDER_TIMEOUT_HOURS']
-
-        sell_placed_at_str = position.get('sell_placed_at')
-        if sell_placed_at_str:
-            try:
-                sell_placed_at = datetime.fromisoformat(sell_placed_at_str.replace('Z', '+00:00'))
-                timeout_at = sell_placed_at + timedelta(hours=timeout_hours)
-                logger.debug(f"Using sell_placed_at from state: {sell_placed_at_str}")
-                logger.debug(f"Timeout at: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
-            except Exception as e:
-                logger.warning(f"Could not parse sell_placed_at '{sell_placed_at_str}': {e}")
-                logger.info("Falling back to current time for timeout calculation")
-                timeout_at = datetime.now() + timedelta(hours=timeout_hours)
-        else:
-            logger.debug("No sell_placed_at in state, using current time for timeout")
-            timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+        # NOTE: SELL monitoring has no timeout - order stays active until filled
+        # Only repricing and stop-loss can change/cancel orders
+        # This maximizes market making rewards (longer orders = more points)
 
         # Create monitor and start monitoring
         monitor = SellMonitor(self.config, self.client, self.bot.state, heartbeat_callback=self.bot._check_and_send_heartbeat)
 
-        result = monitor.monitor_until_filled(sell_order_id, timeout_at)
+        result = monitor.monitor_until_filled(sell_order_id)
 
         status = result['status']
 
@@ -309,9 +295,11 @@ class SellHandler:
 
             return True
 
-        elif status in ['timeout', 'deteriorated']:
+        elif status == 'deteriorated':
+            # NOTE: 'timeout' status removed - SELL orders have no timeout
+            # Only 'deteriorated' (liquidity) can trigger this handler now
             logger.warning(f"SELL order {status}: {result.get('reason')}")
-            logger.info("Cancelling order and retrying with competitive price...")
+            logger.info("Cancelling order due to liquidity deterioration...")
 
             # Cancel order if still active
             try:
