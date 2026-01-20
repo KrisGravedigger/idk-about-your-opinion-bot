@@ -750,6 +750,29 @@ class AutonomousBot:
             logger.debug(f"Could not fetch balance for heartbeat: {e}")
             balance = 0.0
 
+        # Check if position is in stop-loss mode and calculate unrealized loss
+        stop_loss_info = None
+        if position and position.get('stop_loss_triggered'):
+            try:
+                avg_fill_price = position.get('avg_fill_price', 0)
+                if avg_fill_price > 0 and market_info:
+                    current_bid = market_info.get('best_bid', 0)
+                    if current_bid > 0:
+                        unrealized_loss_pct = ((current_bid - avg_fill_price) / avg_fill_price) * 100
+                        unrealized_loss_usdt = position.get('filled_amount', 0) * (current_bid - avg_fill_price)
+
+                        stop_loss_info = {
+                            'triggered': True,
+                            'avg_fill_price': avg_fill_price,
+                            'current_bid': current_bid,
+                            'unrealized_loss_pct': unrealized_loss_pct,
+                            'unrealized_loss_usdt': unrealized_loss_usdt,
+                            'stop_loss_timestamp': position.get('stop_loss_timestamp', 'Unknown')
+                        }
+                        logger.debug(f"💓 Heartbeat: Stop-loss detected - unrealized loss: {unrealized_loss_pct:.2f}%")
+            except Exception as e:
+                logger.debug(f"Could not calculate stop-loss info for heartbeat: {e}")
+
         # Send heartbeat
         self.telegram.send_heartbeat(
             stage=stage,
@@ -757,7 +780,8 @@ class AutonomousBot:
             order_info=order_info,
             balance=balance,
             position_value=position_value,
-            outcome_side=outcome_side
+            outcome_side=outcome_side,
+            stop_loss_info=stop_loss_info
         )
 
         self.last_heartbeat = now
