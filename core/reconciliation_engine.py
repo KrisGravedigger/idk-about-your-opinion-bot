@@ -509,6 +509,8 @@ class ReconciliationEngine:
 
         SPECIAL CASE: If metadata['resume_monitoring'] is True, this is an
         orphaned stop-loss order. Resume monitoring instead of building from scratch.
+
+        CRITICAL: Preserves existing avg_fill_price if present - NEVER overwrite it!
         """
         actions = []
         state_changes = {}
@@ -516,6 +518,14 @@ class ReconciliationEngine:
         api_data = discrepancy.api_data
         metadata = discrepancy.metadata or {}
         market_id = api_data['market_id']
+
+        # CRITICAL: Check if we already have avg_fill_price in state - preserve it!
+        existing_position = state.get('current_position', {})
+        existing_avg_fill_price = existing_position.get('avg_fill_price', 0)
+        if existing_avg_fill_price and existing_avg_fill_price > 0:
+            logger.warning(f"⚠️  PRESERVING existing avg_fill_price: ${existing_avg_fill_price:.4f}")
+            logger.warning("   This value will NOT be overwritten by recovery")
+            actions.append(f"Preserved existing avg_fill_price: ${existing_avg_fill_price:.4f}")
 
         # SPECIAL CASE: Orphaned stop-loss order - resume monitoring
         if metadata.get('resume_monitoring'):
@@ -558,26 +568,43 @@ class ReconciliationEngine:
                         reason=f"Could not get token_id for {outcome} outcome"
                     )
 
-                # Try to get buy price from transaction history
-                avg_fill_price = None
-                market_txns = self.transaction_history.get_transactions_for_market(market_id)
-                if market_txns:
-                    buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
-                    if buy_txns:
-                        latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
-                        avg_fill_price = latest_buy.get('price', 0)
+                # Try to get buy price - PRESERVE existing if available
+                if existing_avg_fill_price and existing_avg_fill_price > 0:
+                    # CRITICAL: Use existing value, don't calculate new one
+                    avg_fill_price = existing_avg_fill_price
+                    logger.info(f"   Using preserved avg_fill_price: ${avg_fill_price:.4f}")
+                else:
+                    # Calculate new avg_fill_price
+                    avg_fill_price = None
+                    market_txns = self.transaction_history.get_transactions_for_market(market_id)
 
-                # If no transaction history, estimate from current orderbook
-                if not avg_fill_price:
-                    try:
-                        orderbook = self.client.get_market_orderbook(token_id)
-                        if orderbook and 'bids' in orderbook:
-                            bids = orderbook.get('bids', [])
-                            if bids:
-                                from utils import safe_float
-                                avg_fill_price = max(safe_float(bid.get('price', 0)) for bid in bids)
-                    except:
-                        avg_fill_price = order_price  # Fallback to order price
+                    if market_txns:
+                        buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
+                        if buy_txns:
+                            latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
+                            avg_fill_price = latest_buy.get('price', 0)
+                            logger.info(f"   Found avg_fill_price from transaction history: ${avg_fill_price:.4f}")
+                        else:
+                            logger.warning(f"   No BUY transactions found for outcome={outcome}")
+                    else:
+                        logger.warning(f"   No transactions found for market #{market_id}")
+
+                    # If no transaction history, estimate from current orderbook
+                    if not avg_fill_price or avg_fill_price == 0:
+                        logger.warning("   ⚠️  FALLBACK: Using current orderbook for avg_fill_price")
+                        try:
+                            orderbook = self.client.get_market_orderbook(token_id)
+                            if orderbook and 'bids' in orderbook:
+                                bids = orderbook.get('bids', [])
+                                if bids:
+                                    from utils import safe_float
+                                    avg_fill_price = max(safe_float(bid.get('price', 0)) for bid in bids)
+                                    logger.warning(f"   Using current best bid: ${avg_fill_price:.4f}")
+                                    logger.warning("   ⚠️  P&L will be INACCURATE!")
+                        except Exception as e:
+                            logger.error(f"   Could not get orderbook: {e}")
+                            avg_fill_price = order_price  # Fallback to order price
+                            logger.warning(f"   Using order price as fallback: ${avg_fill_price:.4f}")
 
                 # Rebuild current_position
                 position = {
@@ -663,33 +690,51 @@ class ReconciliationEngine:
 
             actions.append(f"Got token_id: {token_id[:20]}...")
 
-            # 3. Try to get avg_price from transaction history
-            avg_price = None
-            market_txns = self.transaction_history.get_transactions_for_market(market_id)
+            # 3. Try to get avg_price - PRESERVE existing if available
+            if existing_avg_fill_price and existing_avg_fill_price > 0:
+                # CRITICAL: Use existing value, don't calculate new one
+                avg_price = existing_avg_fill_price
+                actions.append(f"Preserved existing avg_fill_price: ${avg_price:.4f}")
+                logger.info(f"   ✅ Using preserved avg_fill_price: ${avg_price:.4f}")
+            else:
+                # Calculate new avg_price from transaction history
+                avg_price = None
+                market_txns = self.transaction_history.get_transactions_for_market(market_id)
 
-            if market_txns:
-                # Find most recent BUY for this outcome
-                buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
-                if buy_txns:
-                    latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
-                    avg_price = latest_buy.get('price', 0)
-                    actions.append(f"Found avg_price from transaction history: ${avg_price:.4f}")
+                if market_txns:
+                    # Find most recent BUY for this outcome
+                    buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
+                    if buy_txns:
+                        latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
+                        avg_price = latest_buy.get('price', 0)
+                        actions.append(f"Found avg_price from transaction history: ${avg_price:.4f}")
+                        logger.info(f"   Transaction history: {len(buy_txns)} BUY(s) found, using latest")
+                    else:
+                        logger.warning(f"   No BUY transactions found for outcome={outcome} in market #{market_id}")
+                        actions.append(f"⚠️  No BUY transactions found for {outcome}")
+                else:
+                    logger.warning(f"   No transactions found for market #{market_id}")
+                    actions.append(f"⚠️  No transaction history for market #{market_id}")
 
-            # 4. If no transaction history, use current market price as estimate
-            if not avg_price or avg_price == 0:
-                try:
-                    orderbook = self.client.get_market_orderbook(token_id)
-                    if orderbook and 'bids' in orderbook:
-                        bids = orderbook.get('bids', [])
-                        if bids:
-                            best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
-                            avg_price = best_bid
-                            actions.append(f"Using current market bid as avg_price: ${avg_price:.4f}")
-                            actions.append("⚠️  This is estimate - P&L may be inaccurate")
-                except Exception as e:
-                    logger.warning(f"Could not get market price: {e}")
-                    avg_price = 0.01  # Fallback
-                    actions.append(f"⚠️  Using fallback avg_price: ${avg_price:.4f}")
+                # 4. If no transaction history, use current market price as estimate
+                if not avg_price or avg_price == 0:
+                    logger.warning("   ⚠️  FALLBACK: No transaction history, using current orderbook")
+                    try:
+                        orderbook = self.client.get_market_orderbook(token_id)
+                        if orderbook and 'bids' in orderbook:
+                            bids = orderbook.get('bids', [])
+                            if bids:
+                                best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+                                avg_price = best_bid
+                                actions.append(f"⚠️  Using current market bid as estimate: ${avg_price:.4f}")
+                                actions.append("⚠️  P&L WILL BE INACCURATE - this is just estimate!")
+                                logger.warning(f"   Best bid from orderbook: ${avg_price:.4f}")
+                                logger.warning("   ⚠️  P&L calculations will be WRONG!")
+                    except Exception as e:
+                        logger.error(f"Could not get market price: {e}")
+                        avg_price = 0.01  # Fallback
+                        actions.append(f"⚠️  Using fallback avg_price: ${avg_price:.4f}")
+                        logger.error("   Using hardcoded fallback: $0.01")
 
             # 5. Rebuild position in state
             filled_usdt = api_shares * avg_price
