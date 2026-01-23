@@ -443,7 +443,8 @@ class BuyHandler:
                         market_id=market_id,
                         market_title=market_title,
                         price=position.get('avg_fill_price', 0),
-                        amount=position.get('filled_usdt', 0)
+                        amount=position.get('filled_usdt', 0),
+                        shares=position.get('filled_amount', 0)
                     )
                 except Exception as e:
                     logger.warning(f"Failed to send Telegram notification: {e}")

@@ -249,7 +249,8 @@ class SellHandler:
                             market_id=position.get('market_id', 0),
                             market_title=position.get('market_title', 'Unknown market'),
                             price=result['avg_fill_price'],
-                            amount=result['filled_usdt']
+                            amount=result['filled_usdt'],
+                            shares=result['filled_amount']
                         )
                 except Exception as e:
                     logger.warning(f"Failed to send Telegram notification: {e}")

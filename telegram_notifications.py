@@ -409,7 +409,9 @@ class TelegramNotifier:
         amount: Optional[float] = None,
         spread: Optional[float] = None,
         best_bid: Optional[float] = None,
-        best_ask: Optional[float] = None
+        best_ask: Optional[float] = None,
+        shares: Optional[float] = None,
+        shares_total: Optional[float] = None
     ) -> bool:
         """
         Send notification for state change (e.g., BUY_PLACED, SELL_PLACED).
@@ -423,6 +425,8 @@ class TelegramNotifier:
             spread: Market spread (if applicable)
             best_bid: Best bid price (if applicable)
             best_ask: Best ask price (if applicable)
+            shares: Shares filled (for BUY_FILLED, SELL_FILLED)
+            shares_total: Total shares in order (for partial fills)
 
         Returns:
             True if sent successfully
@@ -446,10 +450,28 @@ class TelegramNotifier:
             title_short = market_title[:80] + "..." if len(market_title) > 80 else market_title
             message += f"   {title_short}\n\n"
 
-        if price is not None:
-            message += f"💵 Price: ${price:.4f}\n"
-        if amount is not None:
-            message += f"💰 Amount: ${amount:.2f}\n"
+        # For filled stages, show shares and total USDT
+        if new_stage in ['BUY_FILLED', 'SELL_FILLED']:
+            if shares is not None:
+                # Show shares with partial fill indicator if applicable
+                if shares_total is not None and shares_total > 0 and abs(shares - shares_total) > 0.01:
+                    # Partial fill
+                    fill_percent = (shares / shares_total * 100) if shares_total > 0 else 0
+                    message += f"📊 Filled: {shares:.2f}/{shares_total:.2f} shares ({fill_percent:.1f}%)\n"
+                else:
+                    # Full fill
+                    message += f"📊 Filled: {shares:.2f} shares\n"
+
+            if price is not None:
+                message += f"💵 Price: ${price:.4f}\n"
+            if amount is not None:
+                message += f"💰 Total: ${amount:.2f}\n"
+        else:
+            # For other stages (BUY_PLACED, SELL_PLACED, etc.)
+            if price is not None:
+                message += f"💵 Price: ${price:.4f}\n"
+            if amount is not None:
+                message += f"💰 Amount: ${amount:.2f}\n"
 
         # Add orderbook info if available (for BUY_PLACED, SELL_PLACED)
         if spread is not None and best_bid is not None and best_ask is not None:

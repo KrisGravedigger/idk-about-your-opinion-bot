@@ -340,10 +340,20 @@ class ReconciliationEngine:
         # CASE 1: State is IDLE/COMPLETED but API shows position
         if stage in ['IDLE', 'COMPLETED']:
             if api_shares is not None and api_shares > self.dust_threshold:
+                # Determine severity based on share count
+                # Small positions (5-20 shares) are likely dust from previous trades - LOW severity
+                # Larger positions are unexpected - HIGH severity
+                if api_shares < 20:
+                    severity = 'LOW'
+                    description = f"State is {stage} but API shows {api_shares:.4f} dust shares in market #{market_id} (likely leftover from previous trade)"
+                else:
+                    severity = 'HIGH'
+                    description = f"State is {stage} but API shows {api_shares:.4f} shares in market #{market_id}"
+
                 return Discrepancy(
                     type=DiscrepancyType.PHANTOM_POSITION,
-                    severity='HIGH',
-                    description=f"State is {stage} but API shows {api_shares:.4f} shares in market #{market_id}",
+                    severity=severity,
+                    description=description,
                     state_data={'stage': stage, 'market_id': market_id, 'shares': 0},
                     api_data={'market_id': market_id, 'shares': api_shares, 'outcome': outcome_side},
                     suggested_strategy=RecoveryStrategy.SYNC_FROM_API
@@ -354,8 +364,13 @@ class ReconciliationEngine:
         # When a SELL order is active, shares are frozen in the order and won't appear in get_position_shares()
         # This would incorrectly trigger MISSING_POSITION discrepancy
         if stage == 'BUY_FILLED':
-            if api_shares is not None:
-                # Check if shares match (within tolerance)
+            # IMPORTANT: BUY_FILLED stage runs BEFORE handler processes the fill
+            # So state_shares may be 0 (or stale) but api_shares will be the actual position
+            # Only flag as discrepancy if state has been processed (state_shares > 0) and differs from API
+            # If state_shares is 0, this is expected - the handler will update it
+
+            if state_shares > 0 and api_shares is not None:
+                # State has been processed with share count - verify it matches API
                 shares_diff = abs(state_shares - api_shares)
 
                 if api_shares < self.dust_threshold and state_shares > self.dust_threshold:
@@ -383,6 +398,11 @@ class ReconciliationEngine:
                         suggested_strategy=RecoveryStrategy.UPDATE_SHARES,
                         metadata={'shares_diff': shares_diff, 'actual_outcome_side': actual_outcome_side}
                     )
+
+            elif state_shares == 0 and api_shares is not None and api_shares > 0:
+                # This is expected - fill just happened, state not yet updated by handler
+                logger.debug(f"   Stage BUY_FILLED: State not yet updated (expected). API: {api_shares:.4f} shares")
+                logger.debug(f"   Handler will update state momentarily - no action needed")
 
         elif stage in ['SELL_PLACED', 'SELL_MONITORING']:
             # SELL order active - shares are frozen in the order
@@ -547,7 +567,7 @@ class ReconciliationEngine:
 
             try:
                 # Get market details
-                market = self.client.get_market_details(market_id)
+                market = self.client.get_market(market_id)
                 if not market:
                     return RecoveryResult(
                         success=False,
@@ -666,7 +686,7 @@ class ReconciliationEngine:
         try:
             # 1. Get market details
             actions.append(f"Fetching market #{market_id} details")
-            market = self.client.get_market_details(market_id)
+            market = self.client.get_market(market_id)
 
             if not market:
                 return RecoveryResult(
@@ -1040,6 +1060,11 @@ class ReconciliationEngine:
     ):
         """Send Telegram notification about recovery (with duplicate prevention)."""
         import time
+
+        # Skip notifications for LOW severity issues (dust positions, expected state transitions)
+        if discrepancy.severity == 'LOW':
+            logger.debug(f"Skipping Telegram notification for LOW severity: {discrepancy.description}")
+            return
 
         # Create a unique key for this notification based on content
         notification_key = f"{discrepancy.type.value}_{discrepancy.description}_{result.strategy.value}"
