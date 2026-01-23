@@ -95,37 +95,37 @@ class SellMonitor:
     
     def monitor_until_filled(
         self,
-        order_id: str,
-        timeout_at: datetime
+        order_id: str
     ) -> Dict[str, Any]:
         """
-        Monitor order until filled, cancelled, expired, timeout, or stop-loss.
-        
+        Monitor SELL order until filled, cancelled, expired, deteriorated, or stop-loss triggered.
+
+        NOTE: SELL monitoring has NO timeout - orders stay active indefinitely for
+        market making rewards. Only repricing and stop-loss can change/cancel orders.
+
         Args:
             order_id: Order ID to monitor
-            timeout_at: Datetime when monitoring should timeout
-            
+
         Returns:
             Dictionary with structure:
             {
-                'status': 'filled' | 'timeout' | 'cancelled' | 'expired' | 'deteriorated' | 'stop_loss_triggered',
+                'status': 'filled' | 'cancelled' | 'expired' | 'deteriorated',
                 'filled_amount': float (tokens, if filled),
                 'avg_fill_price': float (if filled),
                 'filled_usdt': float (if filled),
                 'fill_timestamp': str (if filled),
                 'reason': str (if not filled)
             }
-        
+
         Example:
-            >>> timeout_at = datetime.now() + timedelta(hours=24)
-            >>> result = monitor.monitor_until_filled('ord_456', timeout_at)
-            >>> if result['status'] == 'stop_loss_triggered':
-            ...     print("Position closed at loss")
+            >>> result = monitor.monitor_until_filled('ord_456')
+            >>> if result['status'] == 'filled':
+            ...     print(f"Sold {result['filled_amount']} tokens")
         """
         logger.info("🔄 Starting SELL order monitoring")
         logger.info(f"   Order ID: {order_id}")
         logger.info(f"   Check interval: {self.check_interval}s")
-        logger.info(f"   Timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   No timeout - order stays active until filled")
         if self.enable_stop_loss:
             logger.info(f"   Stop-loss: {format_percent(self.stop_loss_trigger)}")
         logger.info("")
@@ -198,127 +198,13 @@ class SellMonitor:
             while True:
                 check_count += 1
                 check_time = datetime.now().strftime("%H:%M:%S")
-                
-                # =============================================================
-                # CHECK: TIMEOUT - REEVALUATE PRICE COMPETITIVENESS
-                # =============================================================
-                if datetime.now() >= timeout_at:
-                    logger.warning("")
-                    logger.warning("=" * 70)
-                    logger.warning("⏰ SELL ORDER TIMEOUT - REEVALUATING")
-                    logger.warning("=" * 70)
-                    logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
-                    logger.warning("")
-                    logger.info("   🔍 Checking if our price is still competitive...")
 
-                    # Get our order details
-                    order = self.client.get_order(order_id)
-                    if not order:
-                        logger.error("   ❌ Could not fetch order - canceling")
-                        return {
-                            'status': 'timeout',
-                            'filled_amount': None,
-                            'avg_fill_price': None,
-                            'filled_usdt': None,
-                            'fill_timestamp': None,
-                            'reason': f'Order pending for {self.timeout_hours} hours - could not verify price'
-                        }
-
-                    our_price = safe_float(order.get('price', 0))
-                    logger.info(f"   Our ask price: ${our_price:.4f}")
-
-                    # Get current market orderbook
-                    try:
-                        orderbook = self.client.get_market_orderbook(token_id)
-                        if not orderbook or 'asks' not in orderbook:
-                            logger.warning("   ⚠️  Could not fetch orderbook - canceling to be safe")
-                            return {
-                                'status': 'timeout',
-                                'filled_amount': None,
-                                'avg_fill_price': None,
-                                'filled_usdt': None,
-                                'fill_timestamp': None,
-                                'reason': f'Order pending for {self.timeout_hours} hours - could not verify market'
-                            }
-
-                        asks = orderbook.get('asks', [])
-                        if not asks:
-                            logger.warning("   ⚠️  No asks in orderbook - market may be illiquid")
-                            return {
-                                'status': 'timeout',
-                                'filled_amount': None,
-                                'avg_fill_price': None,
-                                'filled_usdt': None,
-                                'fill_timestamp': None,
-                                'reason': f'Order pending for {self.timeout_hours} hours - no liquidity'
-                            }
-
-                        # Find best ask (lowest price)
-                        best_ask = min(safe_float(ask.get('price', 999)) for ask in asks)
-                        logger.info(f"   Market best ask: ${best_ask:.4f}")
-
-                        # Check if our price is competitive (within 0.1% of best ask)
-                        # We allow tiny margin for floating point and bonus for being first at price
-                        price_diff_pct = abs(our_price - best_ask) / best_ask * 100 if best_ask > 0 else 999
-
-                        if price_diff_pct <= 0.1:  # Within 0.1% - we're competitive
-                            logger.info("")
-                            logger.info("   ✅ OUR PRICE IS COMPETITIVE!")
-                            logger.info(f"   Price difference: {price_diff_pct:.3f}% (< 0.1% threshold)")
-                            logger.info("")
-                            logger.info("   🎁 BONUS: Keeping order for market making incentive")
-                            logger.info(f"   📅 Extending timeout by {self.timeout_hours} hours")
-                            logger.info("")
-
-                            # Extend timeout
-                            from datetime import timedelta
-                            new_timeout = datetime.now() + timedelta(hours=self.timeout_hours)
-                            timeout_at = new_timeout
-
-                            logger.info(f"   New timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
-                            logger.info("   Continuing monitoring...")
-                            logger.info("")
-
-                            # Continue monitoring - don't return, just update timeout_at and continue loop
-
-                        else:
-                            # Our price is NOT competitive - cancel and retry
-                            logger.warning("")
-                            logger.warning("   ❌ OUR PRICE IS NOT COMPETITIVE")
-                            logger.warning(f"   Our ask: ${our_price:.4f}")
-                            logger.warning(f"   Best ask: ${best_ask:.4f}")
-                            logger.warning(f"   Difference: {price_diff_pct:.2f}%")
-                            logger.warning("")
-                            logger.warning("   Strategy: Cancel and place more aggressive order")
-                            logger.warning("")
-
-                            return {
-                                'status': 'timeout',
-                                'filled_amount': None,
-                                'avg_fill_price': None,
-                                'filled_usdt': None,
-                                'fill_timestamp': None,
-                                'reason': f'Order pending for {self.timeout_hours} hours - price not competitive (best: ${best_ask:.4f}, ours: ${our_price:.4f})'
-                            }
-
-                    except Exception as e:
-                        logger.error(f"   ❌ Error checking price competitiveness: {e}")
-                        logger.warning("   Canceling order to be safe")
-                        return {
-                            'status': 'timeout',
-                            'filled_amount': None,
-                            'avg_fill_price': None,
-                            'filled_usdt': None,
-                            'fill_timestamp': None,
-                            'reason': f'Order pending for {self.timeout_hours} hours - error: {e}'
-                        }
-                
                 # =============================================================
                 # CHECK: STOP-LOSS (if enabled)
                 # =============================================================
                 if self.enable_stop_loss and check_count % 3 == 0:  # Check every 3rd iteration
                     should_stop, unrealized_loss_pct = self.check_stop_loss(buy_price)
-                    
+
                     if should_stop:
                         logger.warning("")
                         logger.warning("=" * 50)
@@ -328,25 +214,36 @@ class SellMonitor:
                         logger.warning(f"   Unrealized loss: {format_percent(unrealized_loss_pct)}")
                         logger.warning(f"   Threshold: {format_percent(self.stop_loss_trigger)}")
                         logger.warning("")
-                        
+
                         # Execute stop-loss: cancel and place aggressive limit
-                        success = self.execute_stop_loss(order_id)
-                        
-                        if success:
+                        result = self.execute_stop_loss(order_id)
+
+                        if result.get('success'):
+                            # Successfully placed aggressive order - continue monitoring it
+                            new_order_id = result.get('new_order_id')
+                            new_price = result.get('new_price')
+
                             logger.info("✅ Stop-loss executed successfully")
-                            logger.info("   Aggressive limit order placed")
+                            logger.info(f"   New aggressive order placed: {new_order_id}")
+                            logger.info(f"   New price: {format_price(new_price)}")
                             logger.info("")
-                            
-                            return {
-                                'status': 'stop_loss_triggered',
-                                'filled_amount': None,
-                                'avg_fill_price': None,
-                                'filled_usdt': None,
-                                'fill_timestamp': None,
-                                'reason': f'Stop-loss triggered at {format_percent(unrealized_loss_pct)} loss'
-                            }
+
+                            # Update tracking variables to monitor new order
+                            order_id = new_order_id
+                            sell_price = new_price
+
+                            # CRITICAL: Continue monitoring the new order until it fills
+                            # Do NOT return or reset position - order must fill first
+                            logger.info("🔄 Continuing monitoring of aggressive stop-loss order...")
+                            logger.info("")
+
+                            # Continue the main monitoring loop with new order
+                            continue
+
                         else:
+                            # Stop-loss execution failed - continue monitoring original order
                             logger.error("❌ Stop-loss execution failed")
+                            logger.error(f"   Reason: {result.get('reason', 'Unknown')}")
                             logger.warning("   Continuing to monitor original order")
                             logger.warning("")
                 
@@ -653,151 +550,136 @@ class SellMonitor:
         
         return (should_trigger, unrealized_loss_pct)
     
-    def execute_stop_loss(self, order_id: str) -> bool:
+    def execute_stop_loss(self, order_id: str) -> dict:
         """
         Execute stop-loss: cancel order and place aggressive limit.
-        
+
         Steps:
         1. Cancel existing limit order
         2. Get fresh orderbook
         3. Place aggressive limit: best_bid + STOP_LOSS_AGGRESSIVE_OFFSET
-        
+
         This is NOT a market order - it's an aggressive limit to minimize slippage
         while still getting filled quickly.
-        
+
+        NOTE: This function does NOT wait for the new order to fill. The caller
+        should continue monitoring the new order until it fills.
+
         Args:
             order_id: Order ID to cancel
-            
+
         Returns:
-            True if stop-loss executed successfully, False otherwise
-        
+            Dict with new order info: {'success': True, 'new_order_id': '...', 'new_price': 0.123}
+            or {'success': False, 'reason': '...'} on failure
+
         Example:
             >>> # Current best_bid = $0.080
             >>> # Offset = $0.001
             >>> # Aggressive limit = $0.081 (slightly above best bid)
-            >>> success = monitor.execute_stop_loss('ord_456')
+            >>> result = monitor.execute_stop_loss('ord_456')
+            >>> if result['success']:
+            ...     new_order_id = result['new_order_id']
         """
         try:
             # Step 1: Cancel existing order
             logger.info("   Cancelling existing SELL order...")
             cancel_success = self.client.cancel_order(order_id)
-            
+
             if not cancel_success:
                 logger.error("   Failed to cancel order")
-                return False
-            
+                return {'success': False, 'reason': 'Failed to cancel existing order'}
+
             logger.info("   ✓ Order cancelled")
             time.sleep(1)  # Brief pause
-            
+
             # Step 2: Get fresh orderbook
             position = self.state.get('current_position', {})
             token_id = position.get('token_id')
             market_id = position.get('market_id')
-            
+
             orderbook = self.client.get_market_orderbook(token_id)
-            
+
             if not orderbook or 'bids' not in orderbook:
                 logger.error("   Failed to fetch orderbook")
-                return False
-            
+                return {'success': False, 'reason': 'Failed to fetch orderbook'}
+
             bids = orderbook.get('bids', [])
             if not bids:
                 logger.error("   Empty orderbook")
-                return False
-            
+                return {'success': False, 'reason': 'Empty orderbook - no bids'}
+
             # Get best bid (unsorted)
             best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
-            
+
             # Step 3: Calculate aggressive limit price
             aggressive_price = best_bid + self.stop_loss_offset
             aggressive_price = round_price(aggressive_price)
-            
+
             logger.info(f"   Placing aggressive limit order...")
             logger.info(f"   Best bid: {format_price(best_bid)}")
             logger.info(f"   Aggressive price: {format_price(aggressive_price)}")
-            
+
             # Get amount from state
             position = self.state.get('current_position', {})
             amount_tokens = safe_float(position.get('filled_amount', 0))
-            
+
             if amount_tokens <= 0:
                 logger.error("   Invalid token amount in state")
-                return False
-            
-            # Place aggressive limit order using client directly
-            # NOTE: In real implementation, use OrderManager with correct method
-            # For now, create mock-compatible implementation
+                return {'success': False, 'reason': 'Invalid token amount in state'}
+
+            # Place aggressive limit order using OrderManager
             try:
-                # Try to use OrderManager if it has the right method
                 from order_manager import OrderManager
                 order_manager = OrderManager(self.client)
-                
-                # Check if we're in test mode (mock client)
-                if hasattr(self.client, 'place_sell_order'):
-                    # Mock client
-                    new_order_id = self.client.place_sell_order(
-                        market_id=market_id,
-                        token_id=token_id,
-                        amount_tokens=amount_tokens,
-                        price=aggressive_price
-                    )
-                else:
-                    # Real client - use OrderManager's actual method
-                    # This will be implemented when we integrate with real OrderManager
-                    logger.error("   Stop-loss order placement not yet implemented for production")
-                    return False
-                
-                if not new_order_id:
+                outcome_side = position.get('outcome_side', 'YES')
+
+                result = order_manager.place_sell(
+                    market_id=market_id,
+                    token_id=token_id,
+                    price=aggressive_price,
+                    amount_tokens=amount_tokens,
+                    outcome_side=outcome_side
+                )
+
+                if not result:
                     logger.error("   Failed to place aggressive limit order")
-                    return False
+                    return {'success': False, 'reason': 'Failed to place new order'}
+
+                new_order_id = result.get('order_id', result.get('orderId', 'unknown'))
+
             except Exception as e:
                 logger.error(f"   Failed to place order: {e}")
-                return False
-            
+                return {'success': False, 'reason': f'Exception placing order: {e}'}
+
             logger.info(f"   ✓ Aggressive limit order placed: {new_order_id}")
+            logger.info("")
+            logger.info("   ⏳ IMPORTANT: Order placed but NOT yet filled")
+            logger.info("   📊 Continuing monitoring until order fills")
+            logger.info("")
 
             # Update state with new order
-            self.state['sell_order_id'] = new_order_id
-            self.state['sell_price'] = aggressive_price
-            self.state['stop_loss_triggered'] = True
-            self.state['stop_loss_timestamp'] = get_timestamp()
+            position['sell_order_id'] = new_order_id
+            position['sell_price'] = aggressive_price
+            position['stop_loss_triggered'] = True
+            position['stop_loss_timestamp'] = get_timestamp()
 
-            # CRITICAL: Wait for aggressive order to fill (max 30s)
-            # Otherwise bot moves to SCANNING while order fills in background
-            logger.info("   ⏳ Waiting for aggressive order to fill (max 30s)...")
+            # Save state
+            from core.state_manager import StateManager
+            state_file = self.config.get('STATE_FILE', 'state.json')
+            state_manager = StateManager(state_file)
+            state_manager.save_state(self.state)
 
-            for attempt in range(6):  # 6 attempts * 5s = 30s
-                time.sleep(5)
+            # Return new order info so caller can continue monitoring
+            return {
+                'success': True,
+                'new_order_id': new_order_id,
+                'new_price': aggressive_price,
+                'unrealized_loss_pct': None  # Will be set by caller
+            }
 
-                # Check position to see if tokens were sold
-                try:
-                    outcome_side = position.get('outcome_side', 'YES')
-                    remaining_shares = self.client.get_position_shares(
-                        market_id=market_id,
-                        outcome_side=outcome_side
-                    )
-                    remaining = float(remaining_shares)
-
-                    logger.info(f"   Check #{attempt + 1}: {remaining:.4f} tokens remaining")
-
-                    # If position is dust (<1.0), order filled
-                    if remaining < 1.0:
-                        logger.info("   ✅ Aggressive order filled!")
-                        logger.info(f"   Remaining dust: {remaining:.4f} tokens")
-                        return True
-
-                except Exception as e:
-                    logger.warning(f"   Could not check position: {e}")
-
-            # After 30s, assume it filled (or will fill soon)
-            logger.warning("   ⚠️ Timed out waiting for fill (30s)")
-            logger.warning("   Assuming order filled or will fill soon")
-
-            return True
-            
         except Exception as e:
             logger.error(f"   Error executing stop-loss: {e}")
-            return False
+            return {'success': False, 'reason': f'Exception: {e}'}
     
     def _extract_fill_data(self, order: Dict[str, Any]) -> Tuple[float, float, float]:
         """
