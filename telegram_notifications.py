@@ -235,7 +235,8 @@ class TelegramNotifier:
         order_info: Optional[Dict[str, Any]] = None,
         balance: float = 0,
         position_value: float = 0,
-        outcome_side: Optional[str] = None
+        outcome_side: Optional[str] = None,
+        stop_loss_info: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Send periodic heartbeat update.
@@ -247,6 +248,7 @@ class TelegramNotifier:
             balance: Available USDT balance
             position_value: Current position value in USDT
             outcome_side: Market outcome side (YES/NO) if in position
+            stop_loss_info: Stop-loss information if triggered (unrealized loss, etc.)
 
         Returns:
             True if sent successfully
@@ -268,8 +270,19 @@ class TelegramNotifier:
 📍 <b>Status:</b> {status_emoji} {stage}
 """
 
-        # Add outcome side (YES/NO) if in position
-        if outcome_side:
+        # Add market name and outcome side if available
+        if market_info:
+            market_id = market_info.get('market_id', 'N/A')
+            market_title = market_info.get('market_title', 'N/A')
+
+            # Truncate title if too long
+            if len(market_title) > 60:
+                market_title = market_title[:57] + "..."
+
+            message += f"\n📊 <b>Market:</b> #{market_id}\n   {market_title}\n"
+
+        # Add outcome side (YES/NO) if in position and not UNKNOWN
+        if outcome_side and outcome_side != 'UNKNOWN':
             side_emoji = '✅' if outcome_side == 'YES' else '❌'
             message += f"📌 <b>Market side:</b> {side_emoji} {outcome_side}\n"
 
@@ -279,20 +292,36 @@ class TelegramNotifier:
    • Position value: ${position_value:.2f}
 """
 
+        # Add CRITICAL stop-loss warning if triggered
+        if stop_loss_info and stop_loss_info.get('triggered'):
+            unrealized_loss_pct = stop_loss_info.get('unrealized_loss_pct', 0)
+            unrealized_loss_usdt = stop_loss_info.get('unrealized_loss_usdt', 0)
+            avg_fill_price = stop_loss_info.get('avg_fill_price', 0)
+            current_bid = stop_loss_info.get('current_bid', 0)
+
+            # Color code based on severity
+            if unrealized_loss_pct <= -15:
+                warning_emoji = '🚨🚨🚨'  # Critical
+            elif unrealized_loss_pct <= -10:
+                warning_emoji = '⚠️⚠️'  # High
+            else:
+                warning_emoji = '⚠️'  # Moderate
+
+            message += f"""
+{warning_emoji} <b>STOP-LOSS ACTIVE</b>
+   • Buy price: ${avg_fill_price:.4f}
+   • Current bid: ${current_bid:.4f}
+   • Unrealized loss: <b>{unrealized_loss_pct:.2f}%</b> (${unrealized_loss_usdt:.2f})
+   • Waiting for aggressive order to fill...
+"""
+
         if market_info:
-            market_id = market_info.get('market_id', 'N/A')
-            market_title = market_info.get('market_title', 'N/A')
             spread = market_info.get('spread', 0)
             best_bid = market_info.get('best_bid', 0)
             best_ask = market_info.get('best_ask', 0)
 
-            # Truncate title if too long
-            if len(market_title) > 60:
-                market_title = market_title[:57] + "..."
-
             message += f"""
-📊 <b>Market:</b> #{market_id}
-   {market_title}
+📈 <b>Orderbook:</b>
    • Spread: ${spread:.4f}
    • Best bid: ${best_bid:.4f}
    • Best ask: ${best_ask:.4f}
@@ -333,6 +362,24 @@ class TelegramNotifier:
    • Distance: ${abs(distance_from_best):.4f} ({abs(distance_percent):.2f}%)
    • Volume ahead: {ahead_volume:.0f} shares
 """
+                # Add share analysis for SELL orders
+                if order_side == 'SELL':
+                    my_shares = order_info.get('my_shares', 0)
+                    ahead_volume_percent = order_info.get('ahead_volume_percent', 0)
+                    repricing_enabled = order_info.get('repricing_enabled', False)
+                    repricing_level = order_info.get('repricing_level')
+
+                    if my_shares > 0:
+                        message += f"   • My shares: {my_shares:.2f}\n"
+                        message += f"   • Ahead/My ratio: {ahead_volume_percent:.1f}%\n"
+
+                    # Add repricing info
+                    if repricing_enabled and repricing_level is not None:
+                        message += f"   • Repricing trigger: {repricing_level:.0f}%\n"
+                    elif repricing_enabled:
+                        message += "   • Repricing: enabled (no threshold set)\n"
+                    else:
+                        message += "   • Repricing: disabled\n"
 
                 # Add simple visualization of levels ahead
                 levels_ahead = position_in_book.get('levels_ahead', [])

@@ -570,6 +570,54 @@ class AutonomousBot:
                 outcome_side = position.get('outcome_side', 'UNKNOWN')
                 market_title = position.get('market_title', f'Market #{market_id}')
 
+                # If market_title or outcome_side is missing, fetch from API
+                needs_market_data = (not market_title or market_title == f'Market #{market_id}' or
+                                    outcome_side == 'UNKNOWN')
+
+                if needs_market_data and token_id:
+                    try:
+                        market_data = self.client.get_market(market_id)
+                        if market_data:
+                            state_updated = False
+
+                            # Update market_title if needed
+                            if not market_title or market_title == f'Market #{market_id}':
+                                fetched_title = market_data.get('title') or market_data.get('market_title') or market_data.get('name')
+                                if fetched_title:
+                                    market_title = fetched_title
+                                    position['market_title'] = market_title
+                                    state_updated = True
+                                    logger.debug(f"   ✅ Fetched market title: {market_title[:60]}")
+                                else:
+                                    logger.debug(f"   ⚠️ Market title not found in API response")
+                                    market_title = f'Market #{market_id}'
+
+                            # Update outcome_side if UNKNOWN
+                            if outcome_side == 'UNKNOWN':
+                                yes_token_id = market_data.get('yes_token_id')
+                                no_token_id = market_data.get('no_token_id')
+
+                                if token_id == yes_token_id:
+                                    outcome_side = 'YES'
+                                    position['outcome_side'] = outcome_side
+                                    state_updated = True
+                                    logger.debug(f"   ✅ Determined outcome_side: YES")
+                                elif token_id == no_token_id:
+                                    outcome_side = 'NO'
+                                    position['outcome_side'] = outcome_side
+                                    state_updated = True
+                                    logger.debug(f"   ✅ Determined outcome_side: NO")
+                                else:
+                                    logger.debug(f"   ⚠️ Token ID doesn't match YES or NO token")
+
+                            # Save state if updated
+                            if state_updated:
+                                self.state_manager.save_state(self.state)
+                    except Exception as e:
+                        logger.debug(f"   Could not fetch market data: {e}")
+                        if not market_title or market_title == f'Market #{market_id}':
+                            market_title = f'Market #{market_id}'
+
                 # DEBUG: Log which token we're fetching orderbook for
                 logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
                 logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
@@ -657,6 +705,23 @@ class AutonomousBot:
                                             # Find our position in asks
                                             position_in_book = self._find_order_position_in_book(our_price, asks, 'asks')
 
+                                        # Calculate shares (for sell orders)
+                                        my_shares = 0
+                                        ahead_volume_percent = 0
+                                        if order_side == 'SELL' and our_price > 0:
+                                            my_shares = order_amount / our_price
+                                            ahead_volume = position_in_book.get('ahead_volume', 0)
+                                            if my_shares > 0:
+                                                ahead_volume_percent = (ahead_volume / my_shares) * 100
+
+                                        # Get repricing info (for sell orders)
+                                        repricing_enabled = False
+                                        repricing_level = None
+                                        if order_side == 'SELL' and hasattr(self.config, 'ENABLE_SELL_ORDER_REPRICING'):
+                                            repricing_enabled = self.config.ENABLE_SELL_ORDER_REPRICING
+                                            if repricing_enabled and hasattr(self.config, 'SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT'):
+                                                repricing_level = self.config.SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT
+
                                         order_info = {
                                             'order_id': order_id,
                                             'side': order_side,
@@ -666,7 +731,11 @@ class AutonomousBot:
                                             'filled_percent': (filled_amount / order_amount * 100) if order_amount > 0 else 0,
                                             'distance_from_best': distance,
                                             'distance_percent': distance_pct,
-                                            'position_in_book': position_in_book
+                                            'position_in_book': position_in_book,
+                                            'my_shares': my_shares,
+                                            'ahead_volume_percent': ahead_volume_percent,
+                                            'repricing_enabled': repricing_enabled,
+                                            'repricing_level': repricing_level
                                         }
                                 except Exception as e:
                                     logger.debug(f"Could not fetch order details for heartbeat: {e}")
@@ -681,6 +750,29 @@ class AutonomousBot:
             logger.debug(f"Could not fetch balance for heartbeat: {e}")
             balance = 0.0
 
+        # Check if position is in stop-loss mode and calculate unrealized loss
+        stop_loss_info = None
+        if position and position.get('stop_loss_triggered'):
+            try:
+                avg_fill_price = position.get('avg_fill_price', 0)
+                if avg_fill_price > 0 and market_info:
+                    current_bid = market_info.get('best_bid', 0)
+                    if current_bid > 0:
+                        unrealized_loss_pct = ((current_bid - avg_fill_price) / avg_fill_price) * 100
+                        unrealized_loss_usdt = position.get('filled_amount', 0) * (current_bid - avg_fill_price)
+
+                        stop_loss_info = {
+                            'triggered': True,
+                            'avg_fill_price': avg_fill_price,
+                            'current_bid': current_bid,
+                            'unrealized_loss_pct': unrealized_loss_pct,
+                            'unrealized_loss_usdt': unrealized_loss_usdt,
+                            'stop_loss_timestamp': position.get('stop_loss_timestamp', 'Unknown')
+                        }
+                        logger.debug(f"💓 Heartbeat: Stop-loss detected - unrealized loss: {unrealized_loss_pct:.2f}%")
+            except Exception as e:
+                logger.debug(f"Could not calculate stop-loss info for heartbeat: {e}")
+
         # Send heartbeat
         self.telegram.send_heartbeat(
             stage=stage,
@@ -688,7 +780,8 @@ class AutonomousBot:
             order_info=order_info,
             balance=balance,
             position_value=position_value,
-            outcome_side=outcome_side
+            outcome_side=outcome_side,
+            stop_loss_info=stop_loss_info
         )
 
         self.last_heartbeat = now
@@ -758,10 +851,20 @@ class AutonomousBot:
         from pathlib import Path
 
         # Try to read from log file
-        log_file = Path(self.config.get('LOG_FILE', 'opinion_farming_bot.log'))
+        log_file = Path(self.config.get('LOG_FILE', 'logs/idk_bot.log'))
 
+        # If main log file doesn't exist, try to find the most recent rotated log
         if not log_file.exists():
-            return ["Log file not found"]
+            log_dir = log_file.parent
+            if log_dir.exists():
+                # Find all log files in the directory (idk_bot*.log format)
+                log_files = sorted(log_dir.glob('idk_bot*.log*'), key=lambda p: p.stat().st_mtime, reverse=True)
+                if log_files:
+                    log_file = log_files[0]  # Use the most recent log file
+                else:
+                    return ["Log file not found"]
+            else:
+                return ["Log file not found"]
 
         try:
             with open(log_file, 'r', encoding='utf-8') as f:

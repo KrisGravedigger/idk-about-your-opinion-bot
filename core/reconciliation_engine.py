@@ -172,6 +172,10 @@ class ReconciliationEngine:
         self.tolerance_shares = 0.01  # Allow 0.01 share difference (rounding)
         self.api_lag_grace_seconds = 30  # Wait 30s for API to catch up
 
+        # Track recent notifications to prevent duplicates
+        self._recent_notifications: Dict[str, float] = {}  # {notification_key: timestamp}
+        self._notification_cooldown_seconds = 60  # Don't send same notification within 60s
+
         logger.debug("ReconciliationEngine initialized")
 
     def detect_discrepancy(self, state: Dict[str, Any]) -> Optional[Discrepancy]:
@@ -257,6 +261,64 @@ class ReconciliationEngine:
                     logger.warning(f"   ⚠️  Found {len(pending_orders)} orphaned pending order(s)!")
                     logger.warning(f"   First order: {side_enum} on market #{market_id}, status: {status_enum}")
 
+                    # CRITICAL: Check if this is orphaned SELL order with matching position
+                    # This happens when stop-loss executes but monitoring gets interrupted
+                    # We should RESUME monitoring, not cancel!
+                    if side_enum == 'Sell' and market_id > 0:
+                        logger.info("   🔍 Checking if this is orphaned stop-loss order with position...")
+
+                        try:
+                            # Check if we have position in the same market
+                            # Try YES first, then NO
+                            position_shares = None
+                            outcome_side_found = None
+
+                            for try_side in ['YES', 'NO']:
+                                try:
+                                    shares = self.client.get_position_shares(
+                                        market_id=market_id,
+                                        outcome_side=try_side
+                                    )
+                                    if shares and float(shares) > self.dust_threshold:
+                                        position_shares = float(shares)
+                                        outcome_side_found = try_side
+                                        break
+                                except:
+                                    continue
+
+                            if position_shares and position_shares > self.dust_threshold:
+                                # Found matching position! This is orphaned stop-loss order
+                                logger.info(f"   ✅ Found matching position: {position_shares:.4f} {outcome_side_found} shares")
+                                logger.info(f"   📊 This appears to be orphaned stop-loss order waiting to fill")
+                                logger.info(f"   🔄 Strategy: RESUME monitoring instead of cancelling")
+
+                                return Discrepancy(
+                                    type=DiscrepancyType.ORPHANED_ORDER,
+                                    severity='HIGH',
+                                    description=f"Orphaned SELL order with matching position - likely interrupted stop-loss",
+                                    state_data={'stage': stage},
+                                    api_data={
+                                        'order_id': order_id,
+                                        'market_id': market_id,
+                                        'status': status_enum,
+                                        'side': side_enum,
+                                        'total_orphaned': len(pending_orders),
+                                        'position_shares': position_shares,
+                                        'outcome_side': outcome_side_found,
+                                        'order_price': order.get('price', 0)
+                                    },
+                                    suggested_strategy=RecoveryStrategy.SYNC_FROM_API,  # Will resume monitoring
+                                    metadata={
+                                        'all_orders': pending_orders,
+                                        'is_stop_loss_order': True,
+                                        'resume_monitoring': True
+                                    }
+                                )
+                        except Exception as e:
+                            logger.debug(f"Could not check for matching position: {e}")
+                            # Fall through to normal orphaned order handling
+
+                    # Normal orphaned order (no matching position) - cancel and reset
                     return Discrepancy(
                         type=DiscrepancyType.ORPHANED_ORDER,
                         severity='HIGH',
@@ -444,12 +506,160 @@ class ReconciliationEngine:
 
         State is IDLE/COMPLETED but API shows we have a position.
         Adopt the position and prepare to sell it.
+
+        SPECIAL CASE: If metadata['resume_monitoring'] is True, this is an
+        orphaned stop-loss order. Resume monitoring instead of building from scratch.
+
+        CRITICAL: Preserves existing avg_fill_price if present - NEVER overwrite it!
         """
         actions = []
         state_changes = {}
 
         api_data = discrepancy.api_data
+        metadata = discrepancy.metadata or {}
         market_id = api_data['market_id']
+
+        # CRITICAL: Check if we already have avg_fill_price in state - preserve it!
+        existing_position = state.get('current_position', {})
+        existing_avg_fill_price = existing_position.get('avg_fill_price', 0)
+        if existing_avg_fill_price and existing_avg_fill_price > 0:
+            logger.warning(f"⚠️  PRESERVING existing avg_fill_price: ${existing_avg_fill_price:.4f}")
+            logger.warning("   This value will NOT be overwritten by recovery")
+            actions.append(f"Preserved existing avg_fill_price: ${existing_avg_fill_price:.4f}")
+
+        # SPECIAL CASE: Orphaned stop-loss order - resume monitoring
+        if metadata.get('resume_monitoring'):
+            logger.info("   🔄 Resuming monitoring of orphaned stop-loss order...")
+
+            order_id = api_data.get('order_id')
+            position_shares = api_data.get('position_shares')
+            outcome = api_data.get('outcome_side')
+            order_price = api_data.get('order_price', 0)
+
+            if not order_id or not position_shares or not outcome:
+                return RecoveryResult(
+                    success=False,
+                    strategy=RecoveryStrategy.SYNC_FROM_API,
+                    actions_taken=actions,
+                    state_changes={},
+                    reason="Missing required data to resume monitoring"
+                )
+
+            try:
+                # Get market details
+                market = self.client.get_market_details(market_id)
+                if not market:
+                    return RecoveryResult(
+                        success=False,
+                        strategy=RecoveryStrategy.SYNC_FROM_API,
+                        actions_taken=actions,
+                        state_changes={},
+                        reason=f"Could not fetch market #{market_id} details"
+                    )
+
+                # Get token_id
+                token_id = market.get('yes_token_id') if outcome == 'YES' else market.get('no_token_id')
+                if not token_id:
+                    return RecoveryResult(
+                        success=False,
+                        strategy=RecoveryStrategy.SYNC_FROM_API,
+                        actions_taken=actions,
+                        state_changes={},
+                        reason=f"Could not get token_id for {outcome} outcome"
+                    )
+
+                # Try to get buy price - PRESERVE existing if available
+                if existing_avg_fill_price and existing_avg_fill_price > 0:
+                    # CRITICAL: Use existing value, don't calculate new one
+                    avg_fill_price = existing_avg_fill_price
+                    logger.info(f"   Using preserved avg_fill_price: ${avg_fill_price:.4f}")
+                else:
+                    # Calculate new avg_fill_price
+                    avg_fill_price = None
+                    market_txns = self.transaction_history.get_transactions_for_market(market_id)
+
+                    if market_txns:
+                        buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
+                        if buy_txns:
+                            latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
+                            avg_fill_price = latest_buy.get('price', 0)
+                            logger.info(f"   Found avg_fill_price from transaction history: ${avg_fill_price:.4f}")
+                        else:
+                            logger.warning(f"   No BUY transactions found for outcome={outcome}")
+                    else:
+                        logger.warning(f"   No transactions found for market #{market_id}")
+
+                    # If no transaction history, estimate from current orderbook
+                    if not avg_fill_price or avg_fill_price == 0:
+                        logger.warning("   ⚠️  FALLBACK: Using current orderbook for avg_fill_price")
+                        try:
+                            orderbook = self.client.get_market_orderbook(token_id)
+                            if orderbook and 'bids' in orderbook:
+                                bids = orderbook.get('bids', [])
+                                if bids:
+                                    from utils import safe_float
+                                    avg_fill_price = max(safe_float(bid.get('price', 0)) for bid in bids)
+                                    logger.warning(f"   Using current best bid: ${avg_fill_price:.4f}")
+                                    logger.warning("   ⚠️  P&L will be INACCURATE!")
+                        except Exception as e:
+                            logger.error(f"   Could not get orderbook: {e}")
+                            avg_fill_price = order_price  # Fallback to order price
+                            logger.warning(f"   Using order price as fallback: ${avg_fill_price:.4f}")
+
+                # Rebuild current_position
+                position = {
+                    'market_id': market_id,
+                    'token_id': token_id,
+                    'market_title': market.get('title', 'Unknown market'),
+                    'outcome_side': outcome,
+                    'filled_amount': position_shares,
+                    'avg_fill_price': avg_fill_price or order_price,
+                    'filled_usdt': (position_shares * (avg_fill_price or order_price)),
+                    'fill_timestamp': get_timestamp(),
+                    'sell_order_id': order_id,
+                    'sell_price': order_price,
+                    'stop_loss_triggered': True,  # Mark as stop-loss order
+                    'stop_loss_timestamp': get_timestamp()
+                }
+
+                state['current_position'] = position
+                state['stage'] = 'SELL_MONITORING'
+
+                actions.append(f"Resumed monitoring of stop-loss order {order_id}")
+                actions.append(f"Market #{market_id}: {position['market_title']}")
+                actions.append(f"Position: {position_shares:.4f} {outcome} shares")
+                actions.append(f"SELL order price: ${order_price:.4f}")
+                actions.append(f"Buy price (estimated): ${avg_fill_price:.4f}")
+
+                state_changes = {
+                    'stage': 'SELL_MONITORING',
+                    'current_position': 'restored',
+                    'sell_order_id': order_id
+                }
+
+                # Save state
+                self.state_manager.save_state(state)
+                actions.append("Saved updated state")
+
+                return RecoveryResult(
+                    success=True,
+                    strategy=RecoveryStrategy.SYNC_FROM_API,
+                    actions_taken=actions,
+                    state_changes=state_changes,
+                    reason="Resumed monitoring of orphaned stop-loss order"
+                )
+
+            except Exception as e:
+                logger.error(f"Error resuming stop-loss monitoring: {e}")
+                return RecoveryResult(
+                    success=False,
+                    strategy=RecoveryStrategy.SYNC_FROM_API,
+                    actions_taken=actions,
+                    state_changes={},
+                    reason=f"Error: {e}"
+                )
+
+        # NORMAL CASE: Phantom position - rebuild from scratch
         api_shares = api_data['shares']
         outcome = api_data['outcome']
 
@@ -480,33 +690,51 @@ class ReconciliationEngine:
 
             actions.append(f"Got token_id: {token_id[:20]}...")
 
-            # 3. Try to get avg_price from transaction history
-            avg_price = None
-            market_txns = self.transaction_history.get_transactions_for_market(market_id)
+            # 3. Try to get avg_price - PRESERVE existing if available
+            if existing_avg_fill_price and existing_avg_fill_price > 0:
+                # CRITICAL: Use existing value, don't calculate new one
+                avg_price = existing_avg_fill_price
+                actions.append(f"Preserved existing avg_fill_price: ${avg_price:.4f}")
+                logger.info(f"   ✅ Using preserved avg_fill_price: ${avg_price:.4f}")
+            else:
+                # Calculate new avg_price from transaction history
+                avg_price = None
+                market_txns = self.transaction_history.get_transactions_for_market(market_id)
 
-            if market_txns:
-                # Find most recent BUY for this outcome
-                buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
-                if buy_txns:
-                    latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
-                    avg_price = latest_buy.get('price', 0)
-                    actions.append(f"Found avg_price from transaction history: ${avg_price:.4f}")
+                if market_txns:
+                    # Find most recent BUY for this outcome
+                    buy_txns = [t for t in market_txns if t['type'] == 'BUY' and t['outcome'] == outcome]
+                    if buy_txns:
+                        latest_buy = sorted(buy_txns, key=lambda x: x.get('timestamp', ''), reverse=True)[0]
+                        avg_price = latest_buy.get('price', 0)
+                        actions.append(f"Found avg_price from transaction history: ${avg_price:.4f}")
+                        logger.info(f"   Transaction history: {len(buy_txns)} BUY(s) found, using latest")
+                    else:
+                        logger.warning(f"   No BUY transactions found for outcome={outcome} in market #{market_id}")
+                        actions.append(f"⚠️  No BUY transactions found for {outcome}")
+                else:
+                    logger.warning(f"   No transactions found for market #{market_id}")
+                    actions.append(f"⚠️  No transaction history for market #{market_id}")
 
-            # 4. If no transaction history, use current market price as estimate
-            if not avg_price or avg_price == 0:
-                try:
-                    orderbook = self.client.get_market_orderbook(token_id)
-                    if orderbook and 'bids' in orderbook:
-                        bids = orderbook.get('bids', [])
-                        if bids:
-                            best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
-                            avg_price = best_bid
-                            actions.append(f"Using current market bid as avg_price: ${avg_price:.4f}")
-                            actions.append("⚠️  This is estimate - P&L may be inaccurate")
-                except Exception as e:
-                    logger.warning(f"Could not get market price: {e}")
-                    avg_price = 0.01  # Fallback
-                    actions.append(f"⚠️  Using fallback avg_price: ${avg_price:.4f}")
+                # 4. If no transaction history, use current market price as estimate
+                if not avg_price or avg_price == 0:
+                    logger.warning("   ⚠️  FALLBACK: No transaction history, using current orderbook")
+                    try:
+                        orderbook = self.client.get_market_orderbook(token_id)
+                        if orderbook and 'bids' in orderbook:
+                            bids = orderbook.get('bids', [])
+                            if bids:
+                                best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+                                avg_price = best_bid
+                                actions.append(f"⚠️  Using current market bid as estimate: ${avg_price:.4f}")
+                                actions.append("⚠️  P&L WILL BE INACCURATE - this is just estimate!")
+                                logger.warning(f"   Best bid from orderbook: ${avg_price:.4f}")
+                                logger.warning("   ⚠️  P&L calculations will be WRONG!")
+                    except Exception as e:
+                        logger.error(f"Could not get market price: {e}")
+                        avg_price = 0.01  # Fallback
+                        actions.append(f"⚠️  Using fallback avg_price: ${avg_price:.4f}")
+                        logger.error("   Using hardcoded fallback: $0.01")
 
             # 5. Rebuild position in state
             filled_usdt = api_shares * avg_price
@@ -810,7 +1038,31 @@ class ReconciliationEngine:
         discrepancy: Discrepancy,
         result: RecoveryResult
     ):
-        """Send Telegram notification about recovery."""
+        """Send Telegram notification about recovery (with duplicate prevention)."""
+        import time
+
+        # Create a unique key for this notification based on content
+        notification_key = f"{discrepancy.type.value}_{discrepancy.description}_{result.strategy.value}"
+
+        # Check if we recently sent this same notification
+        now = time.time()
+        if notification_key in self._recent_notifications:
+            last_sent = self._recent_notifications[notification_key]
+            time_since_last = now - last_sent
+
+            if time_since_last < self._notification_cooldown_seconds:
+                logger.debug(f"Skipping duplicate notification (sent {time_since_last:.0f}s ago)")
+                return
+
+        # Record this notification
+        self._recent_notifications[notification_key] = now
+
+        # Clean up old entries (older than cooldown period)
+        cutoff_time = now - self._notification_cooldown_seconds
+        self._recent_notifications = {
+            k: v for k, v in self._recent_notifications.items()
+            if v > cutoff_time
+        }
 
         status_emoji = "✅" if result.success else "❌"
         severity_emoji = "🚨" if discrepancy.severity == 'HIGH' else "⚠️"
@@ -830,6 +1082,7 @@ class ReconciliationEngine:
 
         try:
             telegram_notifier.send_message(message)
+            logger.debug(f"Sent reconciliation notification: {notification_key}")
         except Exception as e:
             logger.warning(f"Failed to send Telegram notification: {e}")
 

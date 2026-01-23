@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from logger_config import setup_logger
-from utils import format_price, format_usdt, get_timestamp
+from utils import format_price, format_usdt, get_timestamp, round_price
 from monitoring.buy_monitor import BuyMonitor
 
 logger = setup_logger(__name__)
@@ -435,6 +435,19 @@ class BuyHandler:
             self.bot.state['stage'] = 'BUY_FILLED'
             self.state_manager.save_state(self.bot.state)
 
+            # Send Telegram notification about BUY fill
+            if self.bot.telegram:
+                try:
+                    self.bot.telegram.send_state_change(
+                        new_stage='BUY_FILLED',
+                        market_id=market_id,
+                        market_title=market_title,
+                        price=position.get('avg_fill_price', 0),
+                        amount=position.get('filled_usdt', 0)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram notification: {e}")
+
             return True
 
         elif status in ['cancelled', 'canceled', 'expired', 'timeout', 'deteriorated']:
@@ -583,6 +596,28 @@ class BuyHandler:
 
             # Calculate SELL price
             sell_price = self.pricing.calculate_sell_price(best_bid, best_ask)
+
+            # Apply minimum price floor to prevent selling below buy price
+            # This is critical when retrying after order cancellation
+            buy_price = position.get('avg_fill_price', 0)
+            if buy_price > 0:
+                # Calculate minimum allowed price based on config
+                allow_below_buy = self.config.get('ALLOW_SELL_BELOW_BUY_PRICE', False)
+                max_reduction_pct = self.config.get('MAX_SELL_PRICE_REDUCTION_PCT', 5.0)
+
+                if not allow_below_buy:
+                    min_allowed_price = buy_price
+                else:
+                    # Allow reduction up to max_reduction_pct below buy price
+                    min_allowed_price = buy_price * (1 - max_reduction_pct / 100.0)
+                    min_allowed_price = round_price(min_allowed_price)
+
+                # Enforce floor
+                if sell_price < min_allowed_price:
+                    logger.warning(f"⚠️  Calculated SELL price {format_price(sell_price)} is below minimum floor {format_price(min_allowed_price)}")
+                    logger.warning(f"   Buy price: {format_price(buy_price)}, Allow below: {allow_below_buy}, Max reduction: {max_reduction_pct}%")
+                    logger.info(f"   Adjusting to floor: {format_price(min_allowed_price)}")
+                    sell_price = min_allowed_price
 
             logger.info(f"   SELL price: {format_price(sell_price)}")
 

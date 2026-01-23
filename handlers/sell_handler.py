@@ -171,28 +171,14 @@ class SellHandler:
             logger.warning(f"⚠️ Could not verify SELL order status: {e}")
             logger.info("   Proceeding with normal monitoring (may fail if order doesn't exist)")
 
-        # Calculate timeout based on when SELL order was originally placed
-        timeout_hours = self.config['SELL_ORDER_TIMEOUT_HOURS']
-
-        sell_placed_at_str = position.get('sell_placed_at')
-        if sell_placed_at_str:
-            try:
-                sell_placed_at = datetime.fromisoformat(sell_placed_at_str.replace('Z', '+00:00'))
-                timeout_at = sell_placed_at + timedelta(hours=timeout_hours)
-                logger.debug(f"Using sell_placed_at from state: {sell_placed_at_str}")
-                logger.debug(f"Timeout at: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
-            except Exception as e:
-                logger.warning(f"Could not parse sell_placed_at '{sell_placed_at_str}': {e}")
-                logger.info("Falling back to current time for timeout calculation")
-                timeout_at = datetime.now() + timedelta(hours=timeout_hours)
-        else:
-            logger.debug("No sell_placed_at in state, using current time for timeout")
-            timeout_at = datetime.now() + timedelta(hours=timeout_hours)
+        # NOTE: SELL monitoring has no timeout - order stays active until filled
+        # Only repricing and stop-loss can change/cancel orders
+        # This maximizes market making rewards (longer orders = more points)
 
         # Create monitor and start monitoring
         monitor = SellMonitor(self.config, self.client, self.bot.state, heartbeat_callback=self.bot._check_and_send_heartbeat)
 
-        result = monitor.monitor_until_filled(sell_order_id, timeout_at)
+        result = monitor.monitor_until_filled(sell_order_id)
 
         status = result['status']
 
@@ -241,6 +227,33 @@ class SellHandler:
             self.bot.state['stage'] = 'COMPLETED'
             self.state_manager.save_state(self.bot.state)
 
+            # Send Telegram notification about SELL fill
+            # Check if this was a stop-loss order
+            if self.telegram:
+                try:
+                    if position.get('stop_loss_triggered', False):
+                        # This was a stop-loss order - send stop-loss notification
+                        logger.info("📨 Sending stop-loss notification to Telegram...")
+                        self.telegram.send_stop_loss(
+                            market_id=position.get('market_id', 0),
+                            market_title=position.get('market_title', 'Unknown market'),
+                            current_price=result['avg_fill_price'],
+                            buy_price=position.get('avg_fill_price', 0),
+                            pnl_percent=float(pnl.pnl_percent),
+                            action='filled'
+                        )
+                    else:
+                        # Normal SELL order - send regular notification
+                        self.telegram.send_state_change(
+                            new_stage='SELL_FILLED',
+                            market_id=position.get('market_id', 0),
+                            market_title=position.get('market_title', 'Unknown market'),
+                            price=result['avg_fill_price'],
+                            amount=result['filled_usdt']
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram notification: {e}")
+
             return True
 
         elif status in ['cancelled', 'canceled', 'expired']:
@@ -261,38 +274,32 @@ class SellHandler:
             return True
 
         elif status == 'stop_loss_triggered':
-            logger.warning(f"🛑 Stop-loss triggered: {result.get('reason')}")
-            logger.info("Position closed at loss - finding new market...")
+            # DEPRECATED: This status is no longer returned by SellMonitor
+            # Stop-loss orders are now monitored until filled, then return status='filled'
+            # This code is kept as fallback in case of unexpected behavior
+            logger.error("❌ UNEXPECTED: Received deprecated 'stop_loss_triggered' status")
+            logger.error(f"   Reason: {result.get('reason')}")
+            logger.error("   This should not happen - stop-loss orders should be monitored until filled")
+            logger.error("   Treating as monitoring error - will retry SELL order")
 
-            # Send Telegram notification
-            current_price = result.get('current_price', 0)
-            buy_price = position.get('avg_fill_price', 0)
-            pnl_percent = result.get('pnl_percent', 0)
+            # Go back to BUY_FILLED to retry SELL
+            self.bot.state['stage'] = 'BUY_FILLED'
 
-            self.telegram.send_stop_loss(
-                market_id=position.get('market_id', 0),
-                market_title=position.get('market_title', 'Unknown market'),
-                current_price=current_price,
-                buy_price=buy_price,
-                pnl_percent=pnl_percent,
-                action='triggered'
-            )
+            # Clear old SELL data
+            if 'sell_order_id' in position:
+                del position['sell_order_id']
+            if 'sell_price' in position:
+                del position['sell_price']
 
-            # Update statistics (record as loss)
-            stats = self.bot.state['statistics']
-            stats['losses'] += 1
-            stats['consecutive_losses'] += 1
-
-            # Reset position
-            self.state_manager.reset_position(self.bot.state)
-            self.bot.state['stage'] = 'SCANNING'
             self.state_manager.save_state(self.bot.state)
 
             return True
 
-        elif status in ['timeout', 'deteriorated']:
+        elif status == 'deteriorated':
+            # NOTE: 'timeout' status removed - SELL orders have no timeout
+            # Only 'deteriorated' (liquidity) can trigger this handler now
             logger.warning(f"SELL order {status}: {result.get('reason')}")
-            logger.info("Cancelling order and retrying with competitive price...")
+            logger.info("Cancelling order due to liquidity deterioration...")
 
             # Cancel order if still active
             try:
