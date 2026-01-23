@@ -25,6 +25,13 @@ from pathlib import Path
 from config import LOG_FILE, LOG_LEVEL
 
 
+# =========================================================================
+# LOG ROTATION TRACKING
+# =========================================================================
+# Track the current log date globally to enable midnight rotation
+_current_log_date = datetime.now().strftime('%Y%m%d')
+
+
 class PrintHandler(logging.Handler):
     """
     Custom logging handler that uses print() instead of stream.write().
@@ -211,6 +218,104 @@ def _cleanup_old_logs(log_dir: Path, log_prefix: str, days_to_keep: int = 30):
     except Exception:
         # Don't let cleanup errors break logging
         pass
+
+
+def rotate_logs_if_date_changed():
+    """
+    Check if date has changed and rotate log files if needed.
+
+    This function is called periodically (e.g., from heartbeat) to detect
+    midnight transitions. When date changes, all file handlers are updated
+    to write to new files with the current date.
+
+    IMPORTANT: This function is designed to be called from the bot's heartbeat
+    (typically once per hour), so log rotation happens within 1 hour of midnight.
+
+    Returns:
+        bool: True if logs were rotated, False otherwise
+    """
+    global _current_log_date
+
+    try:
+        # Check if date has changed
+        today_str = datetime.now().strftime('%Y%m%d')
+
+        if today_str == _current_log_date:
+            # Date hasn't changed - no rotation needed
+            return False
+
+        # Date changed! Rotate all loggers
+        logger_debug = logging.getLogger('logger_config')
+        logger_debug.info(f"📅 Date changed from {_current_log_date} to {today_str} - rotating log files...")
+
+        # Update global date tracker
+        old_date = _current_log_date
+        _current_log_date = today_str
+
+        # Get base log filename from config
+        log_path = Path(LOG_FILE)
+        if log_path.parent == Path('.'):
+            logs_dir = Path('logs')
+            logs_dir.mkdir(exist_ok=True)
+            log_filename = logs_dir / log_path.name
+        else:
+            log_filename = log_path
+            log_filename.parent.mkdir(parents=True, exist_ok=True)
+
+        log_stem = log_filename.stem
+        log_suffix = log_filename.suffix
+        new_log_filename = log_filename.parent / f"{log_stem}_{today_str}{log_suffix}"
+
+        # Iterate through all active loggers and update their file handlers
+        rotated_count = 0
+        for logger_name in logging.Logger.manager.loggerDict:
+            logger_obj = logging.getLogger(logger_name)
+
+            # Skip loggers with no handlers
+            if not logger_obj.handlers:
+                continue
+
+            # Find and replace FileHandlers
+            for handler in logger_obj.handlers[:]:  # Copy list to avoid modification during iteration
+                if isinstance(handler, logging.FileHandler):
+                    # Found a file handler - rotate it
+                    try:
+                        # Store formatter and level before closing
+                        old_formatter = handler.formatter
+                        old_level = handler.level
+
+                        # Close old handler
+                        handler.close()
+                        logger_obj.removeHandler(handler)
+
+                        # Create new handler with new filename
+                        new_handler = logging.FileHandler(
+                            filename=new_log_filename,
+                            mode='a',
+                            encoding='utf-8'
+                        )
+                        new_handler.setLevel(old_level)
+                        new_handler.setFormatter(old_formatter)
+
+                        # Add new handler to logger
+                        logger_obj.addHandler(new_handler)
+
+                        rotated_count += 1
+
+                    except Exception as e:
+                        logger_debug.warning(f"Could not rotate handler for logger '{logger_name}': {e}")
+
+        logger_debug.info(f"✅ Log rotation complete: {rotated_count} file handler(s) rotated to {new_log_filename.name}")
+
+        # Clean up old logs (keep last 30 days)
+        _cleanup_old_logs(log_filename.parent, log_stem, days_to_keep=30)
+
+        return True
+
+    except Exception as e:
+        # Don't let rotation errors break the bot
+        print(f"⚠️ Error during log rotation: {e}")
+        return False
 
 
 def log_section_header(logger: logging.Logger, title: str, char: str = "="):

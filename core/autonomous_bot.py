@@ -542,6 +542,13 @@ class AutonomousBot:
     def _send_heartbeat_now(self):
         """Send heartbeat immediately (called by _check_and_send_heartbeat or on startup)."""
         from datetime import datetime
+        from logger_config import rotate_logs_if_date_changed
+
+        # Check if date changed and rotate logs if needed (happens at most once per hour)
+        try:
+            rotate_logs_if_date_changed()
+        except Exception as e:
+            logger.debug(f"Log rotation check failed: {e}")
 
         now = datetime.now()
 
