@@ -412,7 +412,23 @@ class ReconciliationEngine:
             logger.debug(f"   State: {state_shares:.4f} shares, API available: {api_shares:.4f} (rest frozen in order)")
 
         # CASE 3: Invalid state data
-        if stage in ['BUY_FILLED', 'SELL_PLACED', 'SELL_MONITORING']:
+        # CRITICAL FIX: Do NOT check state_shares for BUY_FILLED stage!
+        # BUY_FILLED is a transitional stage where handler processes the fill
+        # State may have shares=0 briefly while handler is setting up the position
+        # Only check market_id validity for BUY_FILLED
+        if stage == 'BUY_FILLED':
+            # Only check if market_id is invalid
+            if market_id in [0, None]:
+                return Discrepancy(
+                    type=DiscrepancyType.INVALID_STATE,
+                    severity='HIGH',
+                    description=f"State has invalid market_id: {market_id}",
+                    state_data={'stage': stage, 'market_id': market_id, 'shares': state_shares},
+                    api_data={},
+                    suggested_strategy=RecoveryStrategy.RESET_TO_IDLE
+                )
+        elif stage in ['SELL_PLACED', 'SELL_MONITORING']:
+            # For SELL stages, both market_id and shares must be valid
             if market_id in [0, None] or state_shares == 0:
                 return Discrepancy(
                     type=DiscrepancyType.INVALID_STATE,
