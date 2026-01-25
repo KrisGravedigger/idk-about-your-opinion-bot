@@ -85,10 +85,11 @@ class MarketSelector:
 
                 if market_details:
                     # Extract correct token_id based on outcome_side
+                    # FIXED: Use .get() for dictionary access, not getattr()
                     if outcome_side_enum.lower() == 'yes':
-                        token_id = getattr(market_details, 'yes_token_id', '')
+                        token_id = market_details.get('yes_token_id', '')
                     else:
-                        token_id = getattr(market_details, 'no_token_id', '')
+                        token_id = market_details.get('no_token_id', '')
 
                     logger.info(f"   ✅ Recovered token_id: {token_id[:20] if token_id else 'EMPTY'}...")
                 else:

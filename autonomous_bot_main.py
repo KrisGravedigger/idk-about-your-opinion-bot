@@ -603,8 +603,8 @@ def main():
                             'token_id': token_id,
                             'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
                             'filled_amount': shares,
-                            'avg_fill_price': 0.31,
-                            'filled_usdt': shares * 0.31,
+                            'avg_fill_price': None,  # Will be calculated by reconciliation from transaction history
+                            'filled_usdt': None,  # Will be calculated by reconciliation
                             'fill_timestamp': get_timestamp(),
                             'sell_order_id': existing_sell_order.get('order_id'),
                             'sell_price': float(existing_sell_order.get('price', 0)),
@@ -619,8 +619,8 @@ def main():
                             'outcome_side': outcome_side_enum.upper(),  # CRITICAL: Set outcome_side from API
                             'market_title': getattr(market_data, 'title', f"Market #{market_id}") if market_data else f"Market #{market_id}",
                             'filled_amount': shares,
-                            'avg_fill_price': pos.get('avg_price', 0.01),
-                            'filled_usdt': shares * pos.get('avg_price', 0.01),
+                            'avg_fill_price': None,  # Will be calculated by reconciliation from transaction history
+                            'filled_usdt': None,  # Will be calculated by reconciliation
                             'fill_timestamp': get_timestamp()
                         }
                     bot.state_manager.save_state(bot.state)
