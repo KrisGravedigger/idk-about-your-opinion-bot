@@ -485,7 +485,67 @@ class BuyHandler:
         position = self.bot.state['current_position']
         market_id = position['market_id']
         token_id = position.get('token_id')
-        filled_amount = position['filled_amount']
+
+        # CRITICAL: Use .get() to handle case where filled_amount is missing
+        # This can happen if state is reconstructed by reconciliation or reset between stages
+        filled_amount = position.get('filled_amount', 0)
+
+        if filled_amount == 0:
+            # filled_amount is missing - attempt recovery from API
+            logger.warning("⚠️ filled_amount missing from state, attempting recovery...")
+
+            try:
+                outcome_side = position.get('outcome_side', 'YES')
+
+                if not market_id:
+                    logger.error("❌ Cannot recover - market_id is missing")
+                    logger.info("   Resetting to SCANNING")
+                    self.state_manager.reset_position(self.bot.state)
+                    self.bot.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.bot.state)
+                    return False
+
+                # Try to get position from API
+                shares = self.client.get_position_shares(market_id, outcome_side)
+                filled_amount = float(shares) if shares else 0
+
+                if filled_amount > 0:
+                    logger.info(f"✅ Recovered filled_amount from API: {filled_amount:.4f} tokens")
+                    position['filled_amount'] = filled_amount
+
+                    # Also try to recover avg_fill_price if missing
+                    if not position.get('avg_fill_price') or position.get('avg_fill_price') <= 0.02:
+                        logger.info("   Also attempting to recover avg_fill_price...")
+                        try:
+                            recalculated_price = self._calculate_avg_fill_price(position, filled_amount)
+                            position['avg_fill_price'] = recalculated_price
+                            position['filled_usdt'] = filled_amount * recalculated_price
+                            logger.info(f"   ✅ Recovered avg_fill_price: ${recalculated_price:.4f}")
+                        except ValueError as e:
+                            logger.error(f"   ❌ Could not recover avg_fill_price: {e}")
+                            logger.info("   Resetting to SCANNING")
+                            self.state_manager.reset_position(self.bot.state)
+                            self.bot.state['stage'] = 'SCANNING'
+                            self.state_manager.save_state(self.bot.state)
+                            return False
+
+                    # Save recovered state
+                    self.state_manager.save_state(self.bot.state)
+                else:
+                    logger.error("❌ Cannot recover filled_amount - no position found in API")
+                    logger.info("   Resetting to SCANNING")
+                    self.state_manager.reset_position(self.bot.state)
+                    self.bot.state['stage'] = 'SCANNING'
+                    self.state_manager.save_state(self.bot.state)
+                    return False
+
+            except Exception as e:
+                logger.error(f"❌ Failed to recover filled_amount: {e}")
+                logger.info("   Resetting to SCANNING")
+                self.state_manager.reset_position(self.bot.state)
+                self.bot.state['stage'] = 'SCANNING'
+                self.state_manager.save_state(self.bot.state)
+                return False
 
         # CRITICAL: Validate and fix avg_fill_price if suspicious
         # This handles cases where state.json has 0.01$ from failed recovery
