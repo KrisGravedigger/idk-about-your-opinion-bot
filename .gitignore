@@ -192,6 +192,10 @@ experiments/
 sandbox/
 scratch/
 playground/
+scripts/
+
+# API documentation (local reference)
+docs/api docs/
 
 # ============================================================================
 # VERSION FOLDERS
