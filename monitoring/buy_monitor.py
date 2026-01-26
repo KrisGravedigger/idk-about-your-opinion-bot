@@ -142,12 +142,15 @@ class BuyMonitor:
         check_count = 0
         last_liquidity_check = 0
         LIQUIDITY_CHECK_INTERVAL = 5  # Check every 5th iteration
-        
+        extended_timeout = False  # Track if we've extended timeout for partial fill
+        original_timeout = timeout_at  # Save original timeout
+        expected_shares = None  # Track expected shares for full fill detection
+
         try:
             while True:
                 check_count += 1
                 check_time = datetime.now().strftime("%H:%M:%S")
-                
+
                 # =============================================================
                 # CHECK: TIMEOUT
                 # =============================================================
@@ -156,7 +159,11 @@ class BuyMonitor:
                     logger.warning("=" * 50)
                     logger.warning("⏰ BUY ORDER TIMEOUT")
                     logger.warning("=" * 50)
-                    logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
+
+                    if not extended_timeout:
+                        logger.warning(f"   Order has been pending for {self.timeout_hours} hours")
+                    else:
+                        logger.warning(f"   Order has been pending for {self.timeout_hours * 2} hours (including extension)")
                     logger.warning("")
 
                     # CRITICAL: Check if order has partial fill before canceling
@@ -165,35 +172,89 @@ class BuyMonitor:
                         order_check = self.client.get_order(order_id)
                         if order_check:
                             filled_shares = safe_float(order_check.get('filled_shares', 0))
+                            total_shares = safe_float(order_check.get('shares', 0))
                             filled_amount_usdt = safe_float(order_check.get('filled_amount', 0))
                             status_enum = order_check.get('status_enum', 'unknown')
 
                             logger.info(f"   Order status: {status_enum}")
-                            logger.info(f"   Filled shares: {filled_shares:.4f}")
+                            logger.info(f"   Filled shares: {filled_shares:.4f} / {total_shares:.4f}")
                             logger.info(f"   Filled amount: ${filled_amount_usdt:.2f}")
                             logger.info("")
 
-                            # If order has ANY fill (even partial), treat it as filled
-                            # Bot will sell whatever was filled
-                            if filled_shares > 0:
-                                logger.warning("⚠️  Order has PARTIAL FILL - will proceed to SELL")
-                                logger.warning(f"   Filled: {filled_shares:.4f} tokens")
-                                logger.warning("")
+                            # Check if order has partial fill
+                            if filled_shares > 0 and filled_shares < total_shares:
+                                # PARTIAL FILL DETECTED
 
-                                # Extract full fill data
+                                if not extended_timeout:
+                                    # FIRST TIMEOUT - Extend by same duration as initial timeout
+                                    logger.warning(f"⚠️  Order has PARTIAL FILL - extending timeout by {self.timeout_hours} hours")
+                                    logger.warning(f"   Filled: {filled_shares:.4f} / {total_shares:.4f} tokens ({filled_shares/total_shares*100:.1f}%)")
+                                    logger.warning(f"   Will wait {self.timeout_hours} more hours for full fill")
+                                    logger.warning("")
+
+                                    # Extend timeout by same duration as initial timeout
+                                    timeout_at = datetime.now() + timedelta(hours=self.timeout_hours)
+                                    extended_timeout = True
+                                    expected_shares = total_shares
+
+                                    logger.info(f"✅ Extended timeout until: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                                    logger.info(f"   Continuing to monitor for full fill...")
+                                    logger.info("")
+
+                                    # Continue monitoring - don't return
+                                    continue
+
+                                else:
+                                    # EXTENDED TIMEOUT REACHED - Give up on full fill
+                                    logger.warning("⚠️  Extended timeout reached - order still partially filled")
+                                    logger.warning(f"   Filled: {filled_shares:.4f} / {total_shares:.4f} tokens ({filled_shares/total_shares*100:.1f}%)")
+                                    logger.warning(f"   Canceling remaining order and proceeding with partial fill")
+                                    logger.warning("")
+
+                                    # Cancel remaining order
+                                    try:
+                                        self.client.cancel_order(order_id)
+                                        logger.info(f"✅ Cancelled remaining order part")
+                                    except Exception as cancel_err:
+                                        logger.warning(f"⚠️  Could not cancel order: {cancel_err}")
+                                        logger.warning(f"   Proceeding anyway - order may fill later")
+
+                                    # Extract fill data and proceed to SELL
+                                    filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order_check)
+
+                                    return {
+                                        'status': 'filled',
+                                        'filled_amount': filled_amount,
+                                        'avg_fill_price': avg_fill_price,
+                                        'filled_usdt': filled_usdt,
+                                        'fill_timestamp': get_timestamp(),
+                                        'reason': f'Partial fill after {self.timeout_hours * 2}h (extended timeout)'
+                                    }
+
+                            elif filled_shares >= total_shares:
+                                # FULLY FILLED (may have happened during extended timeout)
+                                if extended_timeout:
+                                    logger.info("✅ Order FULLY FILLED during extended timeout period!")
+                                    logger.info(f"   Filled: {filled_shares:.4f} / {total_shares:.4f} tokens")
+                                    logger.info("")
+
+                                # Extract fill data and proceed normally
                                 filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order_check)
 
                                 return {
-                                    'status': 'filled',  # Treat partial fill as filled
+                                    'status': 'filled',
                                     'filled_amount': filled_amount,
                                     'avg_fill_price': avg_fill_price,
                                     'filled_usdt': filled_usdt,
                                     'fill_timestamp': get_timestamp(),
-                                    'reason': f'Partial fill after {self.timeout_hours}h timeout'
+                                    'reason': 'Full fill' + (' during extended timeout' if extended_timeout else '')
                                 }
+
                             else:
+                                # NO FILL AT ALL
                                 logger.warning("   No fill detected - order will be canceled")
                                 logger.warning("")
+
                     except Exception as e:
                         logger.error(f"⚠️  Could not check order for partial fill: {e}")
                         logger.warning("   Proceeding with timeout (may lose partial fill!)")
@@ -207,7 +268,7 @@ class BuyMonitor:
                         'avg_fill_price': None,
                         'filled_usdt': None,
                         'fill_timestamp': None,
-                        'reason': f'Order pending for {self.timeout_hours} hours without fill'
+                        'reason': f'Order pending for {self.timeout_hours}h without fill' + (' (extended timeout not triggered)' if extended_timeout else '')
                     }
                 
                 # =============================================================
