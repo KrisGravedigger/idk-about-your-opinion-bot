@@ -209,10 +209,8 @@ def main():
         'buy_order_timeout_hours': config.BUY_ORDER_TIMEOUT_HOURS,
         'sell_order_timeout_hours': config.SELL_ORDER_TIMEOUT_HOURS,
 
-        # Liquidity
+        # Liquidity monitoring (uses stop-loss threshold)
         'liquidity_auto_cancel': config.LIQUIDITY_AUTO_CANCEL,
-        'liquidity_bid_drop_threshold': config.LIQUIDITY_BID_DROP_THRESHOLD,
-        'liquidity_spread_threshold': config.LIQUIDITY_SPREAD_THRESHOLD,
 
         # Stop-loss
         'enable_stop_loss': config.ENABLE_STOP_LOSS,
@@ -275,10 +273,8 @@ def main():
         'BUY_ORDER_TIMEOUT_HOURS': config.BUY_ORDER_TIMEOUT_HOURS,
         'SELL_ORDER_TIMEOUT_HOURS': config.SELL_ORDER_TIMEOUT_HOURS,
 
-        # Liquidity
+        # Liquidity monitoring (uses stop-loss threshold)
         'LIQUIDITY_AUTO_CANCEL': config.LIQUIDITY_AUTO_CANCEL,
-        'LIQUIDITY_BID_DROP_THRESHOLD': config.LIQUIDITY_BID_DROP_THRESHOLD,
-        'LIQUIDITY_SPREAD_THRESHOLD': config.LIQUIDITY_SPREAD_THRESHOLD,
 
         # Stop-loss
         'ENABLE_STOP_LOSS': config.ENABLE_STOP_LOSS,

@@ -52,8 +52,7 @@ def test_1_good_liquidity():
     
     config = {
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     # Mock orderbook with good liquidity
@@ -103,8 +102,7 @@ def test_2_bid_drop_deterioration():
     
     config = {
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     # Mock orderbook with bid collapse
@@ -155,8 +153,7 @@ def test_3_spread_deterioration():
     
     config = {
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     # Mock orderbook with wide spread
@@ -205,8 +202,7 @@ def test_4_unsorted_orderbook():
     
     config = {
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     # Mock UNSORTED orderbook
@@ -253,8 +249,7 @@ def test_5_empty_orderbook():
     
     config = {
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     # Mock empty orderbook
@@ -295,8 +290,7 @@ def test_6_edge_case_zero_initial_bid():
     
     config = {
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     orderbook = {
