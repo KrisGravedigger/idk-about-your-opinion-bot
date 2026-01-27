@@ -535,14 +535,14 @@ class MarketScanner:
         yes_spread_pct = ((yes_best_ask - yes_best_bid) / yes_best_bid) * 100 if yes_best_bid > 0 else 0
         no_spread_pct = ((no_best_ask - no_best_bid) / no_best_bid) * 100 if no_best_bid > 0 else 0
 
-        # Get threshold from config
-        max_spread = config.MAX_SPREAD_THRESHOLD
+        # Get max entry spread threshold from config
+        max_entry_spread = config.MAX_ENTRY_SPREAD_PERCENT
 
         # Check if either outcome has spread exceeding threshold
-        if yes_spread_pct > max_spread or no_spread_pct > max_spread:
-            logger.debug(f"❌ REJECTED: Spread too wide")
+        if yes_spread_pct > max_entry_spread or no_spread_pct > max_entry_spread:
+            logger.debug(f"❌ REJECTED: Spread too wide for entry")
             logger.debug(f"   YES spread: {yes_spread_pct:.1f}%, NO spread: {no_spread_pct:.1f}%")
-            logger.debug(f"   Threshold: {max_spread:.1f}%")
+            logger.debug(f"   Max entry spread: {max_entry_spread:.1f}%")
             logger.debug("")
             return None
 

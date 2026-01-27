@@ -43,32 +43,29 @@ class LiquidityChecker:
     def __init__(self, config: Dict[str, Any], client):
         """
         Initialize Liquidity Checker.
-        
+
         Args:
-            config: Configuration dictionary with liquidity thresholds
+            config: Configuration dictionary with stop-loss threshold
             client: OpinionClient instance (must have get_market_orderbook method)
-        
+
         Example:
-            >>> from config import (LIQUIDITY_BID_DROP_THRESHOLD, ...)
+            >>> from config import STOP_LOSS_TRIGGER_PERCENT, LIQUIDITY_AUTO_CANCEL
             >>> config = {
             ...     'LIQUIDITY_AUTO_CANCEL': True,
-            ...     'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-            ...     'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+            ...     'STOP_LOSS_TRIGGER_PERCENT': -15.0
             ... }
             >>> checker = LiquidityChecker(config, client)
         """
         self.config = config
         self.client = client
-        
+
         # Extract config values
         self.auto_cancel = config['LIQUIDITY_AUTO_CANCEL']
-        self.bid_drop_threshold = config['LIQUIDITY_BID_DROP_THRESHOLD']
-        self.spread_threshold = config['LIQUIDITY_SPREAD_THRESHOLD']
-        
+        # Use stop-loss threshold (convert negative to positive for comparison)
+        self.stop_loss_threshold = abs(config['STOP_LOSS_TRIGGER_PERCENT'])
+
         logger.debug(
-            f"LiquidityChecker initialized: "
-            f"bid_drop<{self.bid_drop_threshold}%, "
-            f"spread<{self.spread_threshold}%"
+            f"LiquidityChecker initialized: stop_loss<{self.stop_loss_threshold}%"
         )
     
     def check_liquidity(
@@ -187,10 +184,10 @@ class LiquidityChecker:
         #
         # Spread widening is NOT a reason to cancel - it's just illiquidity.
         # Only a true price crash (bid drop from entry price) triggers stop-loss.
-        if bid_drop_pct < -self.bid_drop_threshold:
+        if bid_drop_pct < -self.stop_loss_threshold:
             deterioration_reason = (
                 f"Bid dropped {format_percent(abs(bid_drop_pct))} from buy price "
-                f"(threshold: {format_percent(self.bid_drop_threshold)})"
+                f"(stop-loss threshold: {format_percent(self.stop_loss_threshold)})"
             )
             logger.warning(f"⚠️  {deterioration_reason}")
         else:
@@ -201,7 +198,7 @@ class LiquidityChecker:
                     f"   Note: Spread widened from {format_percent(initial_spread_pct)} "
                     f"to {format_percent(current_spread_pct)}, but price is stable (no action)"
                 )
-            elif current_spread_pct > self.spread_threshold:
+            elif current_spread_pct > 20.0:  # Just for logging - not used for decisions
                 logger.debug(
                     f"   Note: Spread is wide ({format_percent(current_spread_pct)}), "
                     f"but this is normal for illiquid markets (no action)"
