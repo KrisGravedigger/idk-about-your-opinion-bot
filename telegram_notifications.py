@@ -358,7 +358,6 @@ class TelegramNotifier:
             # For SELL orders, show how long the order has been active
             if order_side == 'SELL' and sell_placed_timestamp:
                 try:
-                    from datetime import datetime
                     # Parse timestamp format: "2025-01-27 10:45:30"
                     placed_dt = datetime.strptime(sell_placed_timestamp, "%Y-%m-%d %H:%M:%S")
                     now_dt = datetime.now()
