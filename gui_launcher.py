@@ -446,7 +446,27 @@ class BotLauncherGUI:
         self.min_orderbook_var = tk.IntVar(value=1)
         ttk.Spinbox(filters_frame, from_=1, to=20, textvariable=self.min_orderbook_var, width=10).grid(row=2, column=1, sticky='w', pady=5, padx=5)
         ToolTip(filters_frame.winfo_children()[-1], "Minimum number of orders in orderbook.\n\nDefault: 1\nHigher = more liquid markets only")
-        
+
+        # Max Spread Threshold (NEW)
+        ttk.Label(filters_frame, text="Max Spread Threshold (%):").grid(row=3, column=0, sticky='w', pady=5)
+        self.max_spread_threshold_var = tk.DoubleVar(value=20.0)
+        ttk.Entry(filters_frame, textvariable=self.max_spread_threshold_var, width=10).grid(row=3, column=1, sticky='w', pady=5, padx=5)
+        tooltip_text = (
+            "Maximum spread allowed when SELECTING markets (entry filter).\n"
+            "Markets with spread > this value are excluded from scanning.\n\n"
+            "CONNECTION TO STOP-LOSS:\n"
+            "If you enter a market with 20% spread, and stop-loss is -15%,\n"
+            "the spread itself could be mistaken for a price drop.\n"
+            "This parameter prevents that by blocking high-spread markets.\n\n"
+            "Different from 'Spread Threshold' in Risk tab:\n"
+            "• Max Spread Threshold = blocks entry (here in Market tab)\n"
+            "• Spread Threshold = detects deterioration (in Risk tab)\n\n"
+            "Default: 20.0%\n"
+            "Lower = only enter liquid markets\n"
+            "Higher = allow illiquid markets (risky)"
+        )
+        ToolTip(filters_frame.winfo_children()[-1], tooltip_text)
+
         # === Probability Range Section ===
         prob_frame = ttk.LabelFrame(scrollable_frame, text="Outcome Probability Range", padding=10)
         prob_frame.pack(fill='x', padx=10, pady=5)
@@ -1514,7 +1534,7 @@ class BotLauncherGUI:
             'CAPITAL_MODE', 'CAPITAL_PERCENTAGE', 'CAPITAL_AMOUNT_USDT',
             'AUTO_REINVEST', 'MIN_BALANCE_TO_CONTINUE_USDT', 'MIN_POSITION_SIZE_USDT',
             'DUST_THRESHOLD', 'SCORING_PROFILE', 'BONUS_MARKETS_FILE', 'BONUS_MULTIPLIER',
-            'MIN_ORDERBOOK_ORDERS', 'OUTCOME_MIN_PROBABILITY', 'OUTCOME_MAX_PROBABILITY',
+            'MIN_ORDERBOOK_ORDERS', 'MAX_SPREAD_THRESHOLD', 'OUTCOME_MIN_PROBABILITY', 'OUTCOME_MAX_PROBABILITY',
             'MIN_HOURS_UNTIL_CLOSE', 'MAX_HOURS_UNTIL_CLOSE',
             'SPREAD_THRESHOLD_1', 'SPREAD_THRESHOLD_2', 'SPREAD_THRESHOLD_3',
             'IMPROVEMENT_TINY', 'IMPROVEMENT_SMALL', 'IMPROVEMENT_MEDIUM', 'IMPROVEMENT_WIDE',
@@ -1555,6 +1575,7 @@ class BotLauncherGUI:
         self.bonus_file_var.set(self.config_data.get('bonus_markets_file', ''))
         self.bonus_multiplier_var.set(self.config_data.get('bonus_multiplier', 1.0))
         self.min_orderbook_var.set(self.config_data.get('min_orderbook_orders', 1))
+        self.max_spread_threshold_var.set(self.config_data.get('max_spread_threshold', 20.0))
         self.outcome_min_prob_var.set(self.config_data.get('outcome_min_probability', 0.20))
         self.outcome_max_prob_var.set(self.config_data.get('outcome_max_probability', 0.90))
         self.min_hours_var.set(str(self.config_data.get('min_hours_until_close', '') if self.config_data.get('min_hours_until_close') else ''))
@@ -1829,6 +1850,7 @@ Click Yes to open the download page."""
         data['bonus_markets_file'] = self.bonus_file_var.get() if self.bonus_file_var.get() else None
         data['bonus_multiplier'] = self.bonus_multiplier_var.get()
         data['min_orderbook_orders'] = self.min_orderbook_var.get()
+        data['max_spread_threshold'] = self.max_spread_threshold_var.get()
         data['outcome_min_probability'] = self.outcome_min_prob_var.get()
         data['outcome_max_probability'] = self.outcome_max_prob_var.get()
         

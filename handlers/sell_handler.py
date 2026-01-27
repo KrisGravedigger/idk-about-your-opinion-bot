@@ -297,20 +297,18 @@ class SellHandler:
             return True
 
         elif status == 'deteriorated':
-            # NOTE: 'timeout' status removed - SELL orders have no timeout
-            # Only 'deteriorated' (liquidity) can trigger this handler now
-            logger.warning(f"SELL order {status}: {result.get('reason')}")
-            logger.info("Cancelling order due to liquidity deterioration...")
+            # STOP-LOSS TRIGGERED: Price crashed below threshold
+            # This is the ONLY deterioration scenario now (spread widening is ignored)
+            logger.error("⚠️ STOP-LOSS TRIGGERED: Price crashed significantly")
+            logger.warning(f"   Reason: {result.get('reason')}")
+            logger.info("   Cancelling limit order and placing aggressive sell order...")
 
-            # Cancel order if still active
+            # Cancel the limit order
             try:
                 self.client.cancel_order(sell_order_id)
-                logger.info("Order cancelled")
-            except:
-                pass
-
-            # Go back to BUY_FILLED to place new SELL with competitive price
-            self.bot.state['stage'] = 'BUY_FILLED'
+                logger.info("   Limit order cancelled")
+            except Exception as e:
+                logger.warning(f"   Failed to cancel order: {e}")
 
             # Clear old SELL data
             if 'sell_order_id' in position:
@@ -318,8 +316,27 @@ class SellHandler:
             if 'sell_price' in position:
                 del position['sell_price']
 
-            self.state_manager.save_state(self.bot.state)
+            # Mark that stop-loss was triggered
+            # This tells BUY_FILLED handler to use aggressive pricing (best bid)
+            position['stop_loss_triggered'] = True
 
+            # Send Telegram notification about stop-loss
+            if self.telegram:
+                try:
+                    self.telegram.send_stop_loss(
+                        market_id=position.get('market_id', 0),
+                        market_title=position.get('market_title', 'Unknown market'),
+                        current_price=result.get('current_bid', 0),
+                        buy_price=position.get('avg_fill_price', 0),
+                        pnl_percent=((result.get('current_bid', 0) / position.get('avg_fill_price', 1)) - 1) * 100,
+                        action='triggered'
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram notification: {e}")
+
+            # Go back to BUY_FILLED to place aggressive sell order
+            self.bot.state['stage'] = 'BUY_FILLED'
+            self.state_manager.save_state(self.bot.state)
             return True
 
         else:

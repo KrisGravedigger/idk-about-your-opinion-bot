@@ -655,8 +655,36 @@ class BuyHandler:
 
             logger.info(f"   Bid: {format_price(best_bid)} | Ask: {format_price(best_ask)}")
 
-            # Calculate SELL price
-            sell_price = self.pricing.calculate_sell_price(best_bid, best_ask)
+            # Calculate and store initial spread for liquidity monitoring
+            # This helps differentiate between:
+            # - Wide spread at entry (normal for illiquid markets)
+            # - Spread widening after entry (liquidity deteriorating)
+            if best_bid > 0:
+                initial_spread_pct = ((best_ask - best_bid) / best_bid) * 100
+                position['initial_spread_pct'] = initial_spread_pct
+                position['initial_best_bid'] = best_bid
+                logger.debug(f"   Initial spread: {initial_spread_pct:.1f}%")
+
+            # Store timestamp when SELL order is placed
+            # Used for showing "order age" in Telegram notifications
+            position['sell_placed_timestamp'] = get_timestamp()
+            logger.debug(f"   SELL order timestamp: {position['sell_placed_timestamp']}")
+
+            # Check if stop-loss was triggered (need to exit quickly)
+            stop_loss_triggered = position.get('stop_loss_triggered', False)
+
+            if stop_loss_triggered:
+                # Stop-loss scenario: Use aggressive pricing to exit position quickly
+                # Place sell order at best bid (instant fill) or slightly above
+                logger.warning("⚠️ Stop-loss triggered - using aggressive pricing to exit position")
+                sell_price = best_bid  # Sell at best bid for quick fill
+                logger.info(f"   Using best bid for quick exit: {format_price(sell_price)}")
+
+                # Clear the flag after using it
+                position['stop_loss_triggered'] = False
+            else:
+                # Normal scenario: Use market-making pricing strategy
+                sell_price = self.pricing.calculate_sell_price(best_bid, best_ask)
 
             # Apply minimum price floor to prevent selling below buy price
             # This is critical when retrying after order cancellation

@@ -213,6 +213,22 @@ FILL_CHECK_INTERVAL_SECONDS = 9
 # LIQUIDITY MONITORING
 # =============================================================================
 
+# Maximum spread allowed when ENTERING a market (market selection filter)
+# Markets with spread > threshold will be excluded from scanning
+# This prevents entering illiquid markets that could trigger false stop-loss
+#
+# IMPORTANT: This is different from LIQUIDITY_SPREAD_THRESHOLD:
+# - MAX_SPREAD_THRESHOLD: Used during market selection (blocks entry)
+# - LIQUIDITY_SPREAD_THRESHOLD: Used during order monitoring (detects deterioration)
+#
+# Connection to Stop-Loss:
+# If you enter a market with 20% spread, and stop-loss is -15%, the spread
+# itself could be mistaken for a price drop. This parameter prevents that by
+# blocking high-spread markets from the start.
+#
+# Example: 20.0 means markets with spread > 20% will be filtered out
+MAX_SPREAD_THRESHOLD = 20.0
+
 # Automatically cancel orders if liquidity deteriorates significantly?
 # True = cancel and find new market if conditions worsen
 # False = let order sit even if liquidity drops
@@ -432,6 +448,11 @@ def validate_config():
             )
 
     # Validate liquidity thresholds
+    if MAX_SPREAD_THRESHOLD < 1 or MAX_SPREAD_THRESHOLD > 100:
+        errors.append(
+            f"MAX_SPREAD_THRESHOLD must be 1-100, got {MAX_SPREAD_THRESHOLD}"
+        )
+
     if SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT < 1 or SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT > 1000:
         errors.append(
             f"SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT must be 1-1000, got {SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT}"

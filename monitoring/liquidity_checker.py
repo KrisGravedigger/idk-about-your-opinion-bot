@@ -72,19 +72,23 @@ class LiquidityChecker:
         )
     
     def check_liquidity(
-        self, 
-        market_id: int, 
-        token_id: int, 
-        initial_best_bid: float
+        self,
+        market_id: int,
+        token_id: int,
+        initial_best_bid: float,
+        buy_price: Optional[float] = None,
+        initial_spread_pct: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Check if liquidity has deteriorated significantly.
-        
+
         Args:
             market_id: Market ID (for logging)
             token_id: Token ID to fetch orderbook
-            initial_best_bid: Initial best bid price when order was placed
-            
+            initial_best_bid: Initial best bid price when order was placed (for compatibility)
+            buy_price: Actual price paid for position (used for stop-loss calculation)
+            initial_spread_pct: Initial spread percentage when order was placed
+
         Returns:
             Dictionary with structure:
             {
@@ -92,22 +96,22 @@ class LiquidityChecker:
                 'current_best_bid': float,       # Current best bid price
                 'current_best_ask': float,       # Current best ask price
                 'current_spread_pct': float,     # Current spread percentage
-                'bid_drop_pct': float,           # Bid drop from initial (negative = worse)
+                'bid_drop_pct': float,           # Bid drop from BUY PRICE (negative = worse)
                 'deterioration_reason': str|None # Explanation if deteriorated
             }
-        
+
         Example:
             >>> # Good liquidity
-            >>> result = checker.check_liquidity(813, 1626, 0.066)
+            >>> result = checker.check_liquidity(813, 1626, 0.066, buy_price=0.072, initial_spread_pct=12.0)
             >>> result['ok']
             True
-            
-            >>> # Bad liquidity (bid dropped 30%)
-            >>> result = checker.check_liquidity(813, 1626, 0.100)
+
+            >>> # Bad liquidity (price dropped 30% from buy price)
+            >>> result = checker.check_liquidity(813, 1626, 0.100, buy_price=0.150, initial_spread_pct=10.0)
             >>> result['ok']
             False
             >>> result['deterioration_reason']
-            'Bid dropped 30.0% (threshold: 25.0%)'
+            'Bid dropped 33.3% from buy price (threshold: -25.0%)'
         """
         logger.debug(
             f"Checking liquidity for market {market_id}, "
@@ -147,43 +151,61 @@ class LiquidityChecker:
         # Note: Opinion.trade orderbook may not be sorted, so use max/min
         current_best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
         current_best_ask = min(safe_float(ask.get('price', 0)) for ask in asks)
-        
-        # Calculate bid drop percentage (negative = worse)
-        if initial_best_bid > 0:
-            bid_drop_pct = ((current_best_bid - initial_best_bid) / initial_best_bid) * 100
-        else:
-            bid_drop_pct = 0.0
-        
+
         # Calculate current spread percentage
         if current_best_bid > 0:
             current_spread_pct = ((current_best_ask - current_best_bid) / current_best_bid) * 100
         else:
             current_spread_pct = 0.0
-        
+
+        # Calculate bid drop from BUY PRICE (for stop-loss detection)
+        # This is the TRUE price drop that matters to the trader
+        reference_price = buy_price if buy_price and buy_price > 0 else initial_best_bid
+
+        if reference_price > 0:
+            bid_drop_pct = ((current_best_bid - reference_price) / reference_price) * 100
+        else:
+            bid_drop_pct = 0.0
+
         logger.debug(
             f"   Current bid: {format_price(current_best_bid)} "
-            f"(drop: {format_percent(bid_drop_pct)})"
+            f"(drop from buy price: {format_percent(bid_drop_pct)})"
         )
         logger.debug(f"   Current spread: {format_percent(current_spread_pct)}")
-        
+
         # Check deterioration conditions
         deterioration_reason = None
-        
-        # Check 1: Bid dropped too much (negative drop = price decrease)
+
+        # ONLY CHECK: TRUE STOP-LOSS - Bid dropped below buy price by threshold
+        # This is a real price crash that requires exiting the position
+        #
+        # NOTE: We do NOT check spread widening anymore!
+        # Rationale: If market has wide spread but stable price, we should:
+        # - Keep the order active (don't cancel)
+        # - Wait for timeout (8h default)
+        # - After timeout, repricing can adjust if needed
+        #
+        # Spread widening is NOT a reason to cancel - it's just illiquidity.
+        # Only a true price crash (bid drop from entry price) triggers stop-loss.
         if bid_drop_pct < -self.bid_drop_threshold:
             deterioration_reason = (
-                f"Bid dropped {format_percent(abs(bid_drop_pct))} "
+                f"Bid dropped {format_percent(abs(bid_drop_pct))} from buy price "
                 f"(threshold: {format_percent(self.bid_drop_threshold)})"
             )
             logger.warning(f"⚠️  {deterioration_reason}")
-        
-        # Check 2: Spread too wide
-        elif current_spread_pct > self.spread_threshold:
-            deterioration_reason = (
-                f"Spread widened to {format_percent(current_spread_pct)} "
-                f"(threshold: {format_percent(self.spread_threshold)})"
-            )
-            logger.warning(f"⚠️  {deterioration_reason}")
+        else:
+            # Liquidity is acceptable (no price crash)
+            # Log spread info for debugging, but don't trigger deterioration
+            if initial_spread_pct is not None and current_spread_pct > initial_spread_pct * 1.5:
+                logger.debug(
+                    f"   Note: Spread widened from {format_percent(initial_spread_pct)} "
+                    f"to {format_percent(current_spread_pct)}, but price is stable (no action)"
+                )
+            elif current_spread_pct > self.spread_threshold:
+                logger.debug(
+                    f"   Note: Spread is wide ({format_percent(current_spread_pct)}), "
+                    f"but this is normal for illiquid markets (no action)"
+                )
         
         # Determine if liquidity is OK
         liquidity_ok = (deterioration_reason is None)

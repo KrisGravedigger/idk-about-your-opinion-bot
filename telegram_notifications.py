@@ -236,7 +236,8 @@ class TelegramNotifier:
         balance: float = 0,
         position_value: float = 0,
         outcome_side: Optional[str] = None,
-        stop_loss_info: Optional[Dict[str, Any]] = None
+        stop_loss_info: Optional[Dict[str, Any]] = None,
+        sell_placed_timestamp: Optional[str] = None
     ) -> bool:
         """
         Send periodic heartbeat update.
@@ -244,6 +245,12 @@ class TelegramNotifier:
         Args:
             stage: Current bot stage
             market_info: Current market information (spread, orderbook, etc.)
+            order_info: Order details (price, amount, position in book, etc.)
+            balance: Current USDT balance
+            position_value: Current position value in USDT
+            outcome_side: YES or NO
+            stop_loss_info: Stop-loss status info
+            sell_placed_timestamp: Timestamp when SELL order was placed (for elapsed time)
             order_info: Current order details (price, amounts, position in book)
             balance: Available USDT balance
             position_value: Current position value in USDT
@@ -347,6 +354,31 @@ class TelegramNotifier:
    • Amount: ${order_amount:.2f}
    • Filled: ${filled_amount:.2f} ({filled_percent:.1f}%)
 """
+
+            # For SELL orders, show how long the order has been active
+            if order_side == 'SELL' and sell_placed_timestamp:
+                try:
+                    from datetime import datetime
+                    # Parse timestamp format: "2025-01-27 10:45:30"
+                    placed_dt = datetime.strptime(sell_placed_timestamp, "%Y-%m-%d %H:%M:%S")
+                    now_dt = datetime.now()
+                    elapsed = now_dt - placed_dt
+
+                    # Format elapsed time
+                    total_seconds = int(elapsed.total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+
+                    if hours > 0:
+                        elapsed_str = f"{hours}h {minutes}m"
+                    else:
+                        elapsed_str = f"{minutes}m"
+
+                    message += f"   • Active for: ⏱️ <b>{elapsed_str}</b>\n"
+                except Exception as e:
+                    # If timestamp parsing fails, don't crash - just skip this info
+                    pass
+
 
             # Add orderbook position info
             pos = position_in_book.get('position', 0)
@@ -479,6 +511,10 @@ class TelegramNotifier:
             message += f"   • Spread: ${spread:.4f}\n"
             message += f"   • Best bid: ${best_bid:.4f}\n"
             message += f"   • Best ask: ${best_ask:.4f}\n"
+
+        # For SELL stages, add a note that elapsed time will be shown in heartbeats
+        if new_stage in ['SELL_PLACED', 'SELL_MONITORING']:
+            message += "\n💡 <i>Heartbeats will show how long this order is active</i>"
 
         message += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
