@@ -172,7 +172,7 @@ class BuyMonitor:
                         order_check = self.client.get_order(order_id)
                         if order_check:
                             filled_shares = safe_float(order_check.get('filled_shares', 0))
-                            total_shares = safe_float(order_check.get('shares', 0))
+                            total_shares = safe_float(order_check.get('order_shares') or order_check.get('shares', 0))
                             filled_amount_usdt = safe_float(order_check.get('filled_amount', 0))
                             status_enum = order_check.get('status_enum', 'unknown')
 
