@@ -353,8 +353,6 @@ def test_stop_loss_logic():
                 'STOP_LOSS_TRIGGER_PERCENT': config_module.STOP_LOSS_TRIGGER_PERCENT,
                 'STOP_LOSS_AGGRESSIVE_OFFSET': config_module.STOP_LOSS_AGGRESSIVE_OFFSET,
                 'LIQUIDITY_AUTO_CANCEL': config_module.LIQUIDITY_AUTO_CANCEL,
-                'LIQUIDITY_BID_DROP_THRESHOLD': config_module.LIQUIDITY_BID_DROP_THRESHOLD,
-                'LIQUIDITY_SPREAD_THRESHOLD': config_module.LIQUIDITY_SPREAD_THRESHOLD,
             }
 
             print(f"Creating SellMonitor with simulated position:")

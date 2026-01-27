@@ -446,7 +446,28 @@ class BotLauncherGUI:
         self.min_orderbook_var = tk.IntVar(value=1)
         ttk.Spinbox(filters_frame, from_=1, to=20, textvariable=self.min_orderbook_var, width=10).grid(row=2, column=1, sticky='w', pady=5, padx=5)
         ToolTip(filters_frame.winfo_children()[-1], "Minimum number of orders in orderbook.\n\nDefault: 1\nHigher = more liquid markets only")
-        
+
+        # Max Entry Spread
+        ttk.Label(filters_frame, text="Max Entry Spread (%):").grid(row=3, column=0, sticky='w', pady=5)
+        self.max_entry_spread_var = tk.DoubleVar(value=20.0)
+        ttk.Entry(filters_frame, textvariable=self.max_entry_spread_var, width=10).grid(row=3, column=1, sticky='w', pady=5, padx=5)
+        tooltip_text = (
+            "Maximum spread allowed when ENTERING markets (market selection filter).\n"
+            "Markets with spread > this value are excluded from scanning.\n\n"
+            "CONNECTION TO STOP-LOSS:\n"
+            "If you enter a market with 20% spread, and stop-loss is -15%,\n"
+            "the spread itself could be mistaken for a price drop.\n"
+            "This parameter prevents that by blocking high-spread markets.\n\n"
+            "How it works:\n"
+            "• Before placing BUY order, scanner checks market spread\n"
+            "• If spread > threshold, market is rejected\n"
+            "• Only affects entry - does NOT cancel existing orders\n\n"
+            "Default: 20.0%\n"
+            "Lower = only enter liquid markets (safer)\n"
+            "Higher = allow illiquid markets (riskier)"
+        )
+        ToolTip(filters_frame.winfo_children()[-1], tooltip_text)
+
         # === Probability Range Section ===
         prob_frame = ttk.LabelFrame(scrollable_frame, text="Outcome Probability Range", padding=10)
         prob_frame.pack(fill='x', padx=10, pady=5)
@@ -690,7 +711,7 @@ class BotLauncherGUI:
         # === Liquidity Protection Section ===
         liquidity_frame = ttk.LabelFrame(scrollable_frame, text="Liquidity Protection", padding=10)
         liquidity_frame.pack(fill='x', padx=10, pady=5)
-        
+
         self.liquidity_auto_cancel_var = tk.BooleanVar(value=True)
         cb_liquidity = ttk.Checkbutton(
             liquidity_frame,
@@ -698,52 +719,19 @@ class BotLauncherGUI:
             variable=self.liquidity_auto_cancel_var
         )
         cb_liquidity.pack(anchor='w', pady=5)
-        ToolTip(cb_liquidity, "Cancel orders if liquidity drops significantly.\n\nDefault: Enabled\nProtects against illiquid markets")
-        
-        # Bid Drop Threshold with slider and editable entry on right
-        bid_container = ttk.Frame(liquidity_frame)
-        bid_container.pack(fill='x', pady=5)
 
-        ttk.Label(bid_container, text="Bid Drop Threshold (%):").pack(side='left', padx=(0, 10))
-
-        self.liquidity_bid_drop_var = tk.DoubleVar(value=25.0)
-        bid_scale = ttk.Scale(
-            bid_container,
-            from_=0, to=100,
-            variable=self.liquidity_bid_drop_var,
-            orient='horizontal',
-            length=250
+        tooltip_text = (
+            "Cancel orders if stop-loss is triggered.\n\n"
+            "How it works:\n"
+            "• Monitors price drop from your BUY price\n"
+            "• If current bid drops below Stop-Loss Trigger threshold, cancels order\n"
+            "• Places aggressive sell order to exit position quickly\n\n"
+            "Note: Spread widening does NOT trigger cancellation.\n"
+            "Only true price crashes trigger stop-loss.\n\n"
+            "Default: Enabled"
         )
-        bid_scale.pack(side='left', fill='x', expand=True)
+        ToolTip(cb_liquidity, tooltip_text)
 
-        # Editable entry field
-        liq_bid_entry = ttk.Entry(bid_container, textvariable=self.liquidity_bid_drop_var, width=8)
-        liq_bid_entry.pack(side='left', padx=(10, 0))
-        ToolTip(bid_scale, "Cancel if bid liquidity drops by this %.\n\nDefault: 25%\nHigher = more tolerant of liquidity changes")
-        ToolTip(liq_bid_entry, "Cancel if bid liquidity drops by this %.\n\nDefault: 25%\nHigher = more tolerant of liquidity changes")
-        
-        # Spread Threshold with slider and editable entry on right
-        spread_container = ttk.Frame(liquidity_frame)
-        spread_container.pack(fill='x', pady=5)
-
-        ttk.Label(spread_container, text="Spread Threshold (%):").pack(side='left', padx=(0, 10))
-
-        self.liquidity_spread_var = tk.DoubleVar(value=15.0)
-        spread_scale = ttk.Scale(
-            spread_container,
-            from_=0, to=100,
-            variable=self.liquidity_spread_var,
-            orient='horizontal',
-            length=250
-        )
-        spread_scale.pack(side='left', fill='x', expand=True)
-
-        # Editable entry field
-        liq_spread_entry = ttk.Entry(spread_container, textvariable=self.liquidity_spread_var, width=8)
-        liq_spread_entry.pack(side='left', padx=(10, 0))
-        ToolTip(spread_scale, "Cancel if spread increases by this %.\n\nDefault: 15%\nHigher = more tolerant of spread widening")
-        ToolTip(liq_spread_entry, "Cancel if spread increases by this %.\n\nDefault: 15%\nHigher = more tolerant of spread widening")
-        
         # === Order Timeouts Section ===
         timeout_frame = ttk.LabelFrame(scrollable_frame, text="Order Timeouts", padding=10)
         timeout_frame.pack(fill='x', padx=10, pady=5)
@@ -1514,13 +1502,13 @@ class BotLauncherGUI:
             'CAPITAL_MODE', 'CAPITAL_PERCENTAGE', 'CAPITAL_AMOUNT_USDT',
             'AUTO_REINVEST', 'MIN_BALANCE_TO_CONTINUE_USDT', 'MIN_POSITION_SIZE_USDT',
             'DUST_THRESHOLD', 'SCORING_PROFILE', 'BONUS_MARKETS_FILE', 'BONUS_MULTIPLIER',
-            'MIN_ORDERBOOK_ORDERS', 'OUTCOME_MIN_PROBABILITY', 'OUTCOME_MAX_PROBABILITY',
+            'MIN_ORDERBOOK_ORDERS', 'MAX_ENTRY_SPREAD_PERCENT', 'OUTCOME_MIN_PROBABILITY', 'OUTCOME_MAX_PROBABILITY',
             'MIN_HOURS_UNTIL_CLOSE', 'MAX_HOURS_UNTIL_CLOSE',
             'SPREAD_THRESHOLD_1', 'SPREAD_THRESHOLD_2', 'SPREAD_THRESHOLD_3',
             'IMPROVEMENT_TINY', 'IMPROVEMENT_SMALL', 'IMPROVEMENT_MEDIUM', 'IMPROVEMENT_WIDE',
             'SAFETY_MARGIN_CENTS', 'PRICE_DECIMALS', 'AMOUNT_DECIMALS',
             'ENABLE_STOP_LOSS', 'STOP_LOSS_TRIGGER_PERCENT', 'STOP_LOSS_AGGRESSIVE_OFFSET',
-            'LIQUIDITY_AUTO_CANCEL', 'LIQUIDITY_BID_DROP_THRESHOLD', 'LIQUIDITY_SPREAD_THRESHOLD',
+            'LIQUIDITY_AUTO_CANCEL',
             'BUY_ORDER_TIMEOUT_HOURS', 'SELL_ORDER_TIMEOUT_HOURS',
             'ENABLE_SELL_ORDER_REPRICING', 'SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT',
             'ALLOW_SELL_BELOW_BUY_PRICE', 'MAX_SELL_PRICE_REDUCTION_PCT',
@@ -1555,6 +1543,7 @@ class BotLauncherGUI:
         self.bonus_file_var.set(self.config_data.get('bonus_markets_file', ''))
         self.bonus_multiplier_var.set(self.config_data.get('bonus_multiplier', 1.0))
         self.min_orderbook_var.set(self.config_data.get('min_orderbook_orders', 1))
+        self.max_entry_spread_var.set(self.config_data.get('max_entry_spread_percent', 20.0))
         self.outcome_min_prob_var.set(self.config_data.get('outcome_min_probability', 0.20))
         self.outcome_max_prob_var.set(self.config_data.get('outcome_max_probability', 0.90))
         self.min_hours_var.set(str(self.config_data.get('min_hours_until_close', '') if self.config_data.get('min_hours_until_close') else ''))
@@ -1578,8 +1567,6 @@ class BotLauncherGUI:
         self.stop_loss_trigger_var.set(self.config_data.get('stop_loss_trigger_percent', -10.0))
         self.stop_loss_offset_var.set(self.config_data.get('stop_loss_aggressive_offset', 0.001))
         self.liquidity_auto_cancel_var.set(self.config_data.get('liquidity_auto_cancel', True))
-        self.liquidity_bid_drop_var.set(self.config_data.get('liquidity_bid_drop_threshold', 25.0))
-        self.liquidity_spread_var.set(self.config_data.get('liquidity_spread_threshold', 15.0))
         self.buy_timeout_var.set(self.config_data.get('buy_order_timeout_hours', 8.0))
         self.sell_timeout_var.set(self.config_data.get('sell_order_timeout_hours', 8.0))
 
@@ -1829,6 +1816,7 @@ Click Yes to open the download page."""
         data['bonus_markets_file'] = self.bonus_file_var.get() if self.bonus_file_var.get() else None
         data['bonus_multiplier'] = self.bonus_multiplier_var.get()
         data['min_orderbook_orders'] = self.min_orderbook_var.get()
+        data['max_entry_spread_percent'] = self.max_entry_spread_var.get()
         data['outcome_min_probability'] = self.outcome_min_prob_var.get()
         data['outcome_max_probability'] = self.outcome_max_prob_var.get()
         
@@ -1868,8 +1856,6 @@ Click Yes to open the download page."""
         data['stop_loss_trigger_percent'] = self.stop_loss_trigger_var.get()
         data['stop_loss_aggressive_offset'] = self.stop_loss_offset_var.get()
         data['liquidity_auto_cancel'] = self.liquidity_auto_cancel_var.get()
-        data['liquidity_bid_drop_threshold'] = self.liquidity_bid_drop_var.get()
-        data['liquidity_spread_threshold'] = self.liquidity_spread_var.get()
         data['buy_order_timeout_hours'] = self.buy_timeout_var.get()
         data['sell_order_timeout_hours'] = self.sell_timeout_var.get()
 

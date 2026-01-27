@@ -780,6 +780,11 @@ class AutonomousBot:
             except Exception as e:
                 logger.debug(f"Could not calculate stop-loss info for heartbeat: {e}")
 
+        # Extract sell_placed_timestamp for SELL stages (to show order age)
+        sell_placed_timestamp = None
+        if stage in ['SELL_PLACED', 'SELL_MONITORING']:
+            sell_placed_timestamp = position.get('sell_placed_timestamp')
+
         # Send heartbeat
         self.telegram.send_heartbeat(
             stage=stage,
@@ -788,7 +793,8 @@ class AutonomousBot:
             balance=balance,
             position_value=position_value,
             outcome_side=outcome_side,
-            stop_loss_info=stop_loss_info
+            stop_loss_info=stop_loss_info,
+            sell_placed_timestamp=sell_placed_timestamp
         )
 
         self.last_heartbeat = now

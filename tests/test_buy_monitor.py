@@ -68,8 +68,7 @@ def test_1_order_fills_immediately():
         'FILL_CHECK_INTERVAL_SECONDS': 1,  # Fast for testing
         'BUY_ORDER_TIMEOUT_HOURS': 1,
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     state = {
@@ -125,8 +124,7 @@ def test_2_order_fills_after_pending():
         'FILL_CHECK_INTERVAL_SECONDS': 0.1,  # Very fast for testing
         'BUY_ORDER_TIMEOUT_HOURS': 1,
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     state = {
@@ -177,8 +175,7 @@ def test_3_order_cancelled():
         'FILL_CHECK_INTERVAL_SECONDS': 1,
         'BUY_ORDER_TIMEOUT_HOURS': 1,
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     state = {
@@ -221,8 +218,7 @@ def test_4_order_expired():
         'FILL_CHECK_INTERVAL_SECONDS': 1,
         'BUY_ORDER_TIMEOUT_HOURS': 1,
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     state = {
@@ -264,8 +260,7 @@ def test_5_monitor_timeout():
         'FILL_CHECK_INTERVAL_SECONDS': 0.1,
         'BUY_ORDER_TIMEOUT_HOURS': 1,
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     state = {
@@ -311,8 +306,7 @@ def test_6_extract_from_trades():
         'FILL_CHECK_INTERVAL_SECONDS': 1,
         'BUY_ORDER_TIMEOUT_HOURS': 1,
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
     }
     
     state = {

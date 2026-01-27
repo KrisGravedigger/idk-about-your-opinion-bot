@@ -351,8 +351,7 @@ def get_test_config(scenario='normal'):
         
         # Liquidity
         'LIQUIDITY_AUTO_CANCEL': True,
-        'LIQUIDITY_BID_DROP_THRESHOLD': 25.0,
-        'LIQUIDITY_SPREAD_THRESHOLD': 15.0,
+        'STOP_LOSS_TRIGGER_PERCENT': -15.0,
         
         # Stop-loss
         'ENABLE_STOP_LOSS': True,
