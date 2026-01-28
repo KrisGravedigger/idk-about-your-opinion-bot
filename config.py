@@ -254,6 +254,17 @@ STOP_LOSS_TRIGGER_PERCENT = -10.0
 # This is NOT a market order, but an aggressive limit near best bid
 STOP_LOSS_AGGRESSIVE_OFFSET = 0.001  # 0.1¢ above best bid
 
+# Flash crash protection - spread filter
+# Don't trigger stop-loss if spread exceeds this % (prevents false triggers during liquidity drains)
+# Example: 10.0 = ignore stop-loss if spread > 10% (likely flash crash, not real market move)
+STOP_LOSS_SPREAD_FILTER_PCT = 10.0
+
+# Flash crash protection - confirmation delay
+# Require bad price for N consecutive checks before triggering stop-loss
+# Each check is 9 seconds apart (FILL_CHECK_INTERVAL_SECONDS)
+# Example: 3 = require 3 consecutive bad checks (27 seconds) before triggering
+STOP_LOSS_CONFIRMATION_CHECKS = 3
+
 # =============================================================================
 # SELL ORDER REPRICING CONTROL
 # =============================================================================
