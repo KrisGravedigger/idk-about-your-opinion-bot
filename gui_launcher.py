@@ -686,7 +686,51 @@ class BotLauncherGUI:
         self.stop_loss_offset_var = tk.DoubleVar(value=0.001)
         ttk.Entry(stoploss_frame, textvariable=self.stop_loss_offset_var, width=10).pack(anchor='w', pady=5)
         ToolTip(stoploss_frame.winfo_children()[-1], "Price offset for aggressive stop-loss exit.\n\nDefault: 0.001\nEnsures quick exit in emergency")
-        
+
+        # Flash crash protection - Spread Filter
+        sl_spread_container = ttk.Frame(stoploss_frame)
+        sl_spread_container.pack(fill='x', pady=5)
+
+        ttk.Label(sl_spread_container, text="SL Spread Filter (%):").pack(side='left', padx=(0, 10))
+
+        self.stop_loss_spread_filter_var = tk.DoubleVar(value=10.0)
+        sl_spread_scale = ttk.Scale(
+            sl_spread_container,
+            from_=0, to=50,
+            variable=self.stop_loss_spread_filter_var,
+            orient='horizontal',
+            length=250
+        )
+        sl_spread_scale.pack(side='left', fill='x', expand=True)
+
+        # Editable entry field
+        self.stop_loss_spread_filter_entry = ttk.Entry(sl_spread_container, textvariable=self.stop_loss_spread_filter_var, width=8)
+        self.stop_loss_spread_filter_entry.pack(side='left', padx=(10, 0))
+        ToolTip(sl_spread_scale, "Don't trigger stop-loss if spread exceeds this %.\n\nDefault: 10%\nProtects against flash crashes and temporary liquidity drains.\nExample: 10 = ignore stop-loss if spread > 10%")
+        ToolTip(self.stop_loss_spread_filter_entry, "Don't trigger stop-loss if spread exceeds this %.\n\nDefault: 10%\nProtects against flash crashes and temporary liquidity drains.\nExample: 10 = ignore stop-loss if spread > 10%")
+
+        # Flash crash protection - Confirmation Checks
+        sl_confirm_container = ttk.Frame(stoploss_frame)
+        sl_confirm_container.pack(fill='x', pady=5)
+
+        ttk.Label(sl_confirm_container, text="SL Confirm Checks:").pack(side='left', padx=(0, 10))
+
+        self.stop_loss_confirm_checks_var = tk.IntVar(value=3)
+        sl_confirm_scale = ttk.Scale(
+            sl_confirm_container,
+            from_=1, to=10,
+            variable=self.stop_loss_confirm_checks_var,
+            orient='horizontal',
+            length=250
+        )
+        sl_confirm_scale.pack(side='left', fill='x', expand=True)
+
+        # Editable entry field
+        self.stop_loss_confirm_checks_entry = ttk.Entry(sl_confirm_container, textvariable=self.stop_loss_confirm_checks_var, width=8)
+        self.stop_loss_confirm_checks_entry.pack(side='left', padx=(10, 0))
+        ToolTip(sl_confirm_scale, "Require bad price for this many consecutive checks before triggering.\n\nDefault: 3 checks (27 seconds at 9s intervals)\nProtects against temporary price spikes.\nExample: 3 = need 3 consecutive bad checks to trigger")
+        ToolTip(self.stop_loss_confirm_checks_entry, "Require bad price for this many consecutive checks before triggering.\n\nDefault: 3 checks (27 seconds at 9s intervals)\nProtects against temporary price spikes.\nExample: 3 = need 3 consecutive bad checks to trigger")
+
         # === Liquidity Protection Section ===
         liquidity_frame = ttk.LabelFrame(scrollable_frame, text="Liquidity Protection", padding=10)
         liquidity_frame.pack(fill='x', padx=10, pady=5)
@@ -1520,6 +1564,7 @@ class BotLauncherGUI:
             'IMPROVEMENT_TINY', 'IMPROVEMENT_SMALL', 'IMPROVEMENT_MEDIUM', 'IMPROVEMENT_WIDE',
             'SAFETY_MARGIN_CENTS', 'PRICE_DECIMALS', 'AMOUNT_DECIMALS',
             'ENABLE_STOP_LOSS', 'STOP_LOSS_TRIGGER_PERCENT', 'STOP_LOSS_AGGRESSIVE_OFFSET',
+            'STOP_LOSS_SPREAD_FILTER_PCT', 'STOP_LOSS_CONFIRMATION_CHECKS',
             'LIQUIDITY_AUTO_CANCEL', 'LIQUIDITY_BID_DROP_THRESHOLD', 'LIQUIDITY_SPREAD_THRESHOLD',
             'BUY_ORDER_TIMEOUT_HOURS', 'SELL_ORDER_TIMEOUT_HOURS',
             'ENABLE_SELL_ORDER_REPRICING', 'SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT',
@@ -1577,6 +1622,8 @@ class BotLauncherGUI:
         self.enable_stop_loss_var.set(self.config_data.get('enable_stop_loss', True))
         self.stop_loss_trigger_var.set(self.config_data.get('stop_loss_trigger_percent', -10.0))
         self.stop_loss_offset_var.set(self.config_data.get('stop_loss_aggressive_offset', 0.001))
+        self.stop_loss_spread_filter_var.set(self.config_data.get('stop_loss_spread_filter_pct', 10.0))
+        self.stop_loss_confirm_checks_var.set(self.config_data.get('stop_loss_confirmation_checks', 3))
         self.liquidity_auto_cancel_var.set(self.config_data.get('liquidity_auto_cancel', True))
         self.liquidity_bid_drop_var.set(self.config_data.get('liquidity_bid_drop_threshold', 25.0))
         self.liquidity_spread_var.set(self.config_data.get('liquidity_spread_threshold', 15.0))
@@ -1867,6 +1914,8 @@ Click Yes to open the download page."""
         data['enable_stop_loss'] = self.enable_stop_loss_var.get()
         data['stop_loss_trigger_percent'] = self.stop_loss_trigger_var.get()
         data['stop_loss_aggressive_offset'] = self.stop_loss_offset_var.get()
+        data['stop_loss_spread_filter_pct'] = self.stop_loss_spread_filter_var.get()
+        data['stop_loss_confirmation_checks'] = self.stop_loss_confirm_checks_var.get()
         data['liquidity_auto_cancel'] = self.liquidity_auto_cancel_var.get()
         data['liquidity_bid_drop_threshold'] = self.liquidity_bid_drop_var.get()
         data['liquidity_spread_threshold'] = self.liquidity_spread_var.get()

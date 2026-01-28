@@ -74,6 +74,11 @@ class SellMonitor:
         self.enable_stop_loss = config.get('ENABLE_STOP_LOSS', True)
         self.stop_loss_trigger = config.get('STOP_LOSS_TRIGGER_PERCENT', -10.0)
         self.stop_loss_offset = config.get('STOP_LOSS_AGGRESSIVE_OFFSET', 0.001)
+        self.stop_loss_spread_filter = config.get('STOP_LOSS_SPREAD_FILTER_PCT', 10.0)
+        self.stop_loss_confirmation_checks = config.get('STOP_LOSS_CONFIRMATION_CHECKS', 3)
+
+        # Track consecutive bad price checks for confirmation delay
+        self.bad_price_streak = 0
 
         # Sell order repricing config
         self.enable_repricing = config.get('ENABLE_SELL_ORDER_REPRICING', True)
@@ -206,46 +211,85 @@ class SellMonitor:
                     should_stop, unrealized_loss_pct = self.check_stop_loss(buy_price)
 
                     if should_stop:
+                        # Increment bad price streak counter
+                        self.bad_price_streak += 1
+
                         logger.warning("")
-                        logger.warning("=" * 50)
-                        logger.warning("🛑 STOP-LOSS TRIGGERED")
-                        logger.warning("=" * 50)
+                        logger.warning("=" * 70)
+                        logger.warning("⚠️  STOP-LOSS THRESHOLD MET")
+                        logger.warning("=" * 70)
                         logger.warning(f"   Buy price: {format_price(buy_price)}")
                         logger.warning(f"   Unrealized loss: {format_percent(unrealized_loss_pct)}")
                         logger.warning(f"   Threshold: {format_percent(self.stop_loss_trigger)}")
+                        logger.warning(f"   Confirmation: {self.bad_price_streak}/{self.stop_loss_confirmation_checks} checks")
                         logger.warning("")
 
-                        # Execute stop-loss: cancel and place aggressive limit
-                        result = self.execute_stop_loss(order_id)
-
-                        if result.get('success'):
-                            # Successfully placed aggressive order - continue monitoring it
-                            new_order_id = result.get('new_order_id')
-                            new_price = result.get('new_price')
-
-                            logger.info("✅ Stop-loss executed successfully")
-                            logger.info(f"   New aggressive order placed: {new_order_id}")
-                            logger.info(f"   New price: {format_price(new_price)}")
-                            logger.info("")
-
-                            # Update tracking variables to monitor new order
-                            order_id = new_order_id
-                            sell_price = new_price
-
-                            # CRITICAL: Continue monitoring the new order until it fills
-                            # Do NOT return or reset position - order must fill first
-                            logger.info("🔄 Continuing monitoring of aggressive stop-loss order...")
-                            logger.info("")
-
-                            # Continue the main monitoring loop with new order
-                            continue
-
-                        else:
-                            # Stop-loss execution failed - continue monitoring original order
-                            logger.error("❌ Stop-loss execution failed")
-                            logger.error(f"   Reason: {result.get('reason', 'Unknown')}")
-                            logger.warning("   Continuing to monitor original order")
+                        # Check if we've met the confirmation requirement
+                        if self.bad_price_streak >= self.stop_loss_confirmation_checks:
+                            logger.warning("=" * 70)
+                            logger.warning("🛑 STOP-LOSS CONFIRMED - EXECUTING")
+                            logger.warning("=" * 70)
+                            logger.warning(f"   Sustained bad price for {self.bad_price_streak} consecutive checks")
+                            logger.warning(f"   Triggering stop-loss exit")
                             logger.warning("")
+
+                            # Execute stop-loss: cancel and place aggressive limit
+                            result = self.execute_stop_loss(order_id)
+
+                            if result.get('success'):
+                                # Successfully placed aggressive order - continue monitoring it
+                                new_order_id = result.get('new_order_id')
+                                new_price = result.get('new_price')
+
+                                logger.info("✅ Stop-loss executed successfully")
+                                logger.info(f"   New aggressive order placed: {new_order_id}")
+                                logger.info(f"   New price: {format_price(new_price)}")
+                                logger.info("")
+
+                                # Update tracking variables to monitor new order
+                                order_id = new_order_id
+                                sell_price = new_price
+
+                                # Reset bad price streak for new order
+                                self.bad_price_streak = 0
+
+                                # CRITICAL: Continue monitoring the new order until it fills
+                                # Do NOT return or reset position - order must fill first
+                                logger.info("🔄 Continuing monitoring of aggressive stop-loss order...")
+                                logger.info("")
+
+                                # Continue the main monitoring loop with new order
+                                continue
+
+                            else:
+                                # Stop-loss execution failed - continue monitoring original order
+                                logger.error("❌ Stop-loss execution failed")
+                                logger.error(f"   Reason: {result.get('reason', 'Unknown')}")
+                                logger.warning("   Continuing to monitor original order")
+                                logger.warning("")
+                                # Keep bad price streak to retry next check
+                        else:
+                            # Not yet confirmed - need more consecutive bad checks
+                            remaining_checks = self.stop_loss_confirmation_checks - self.bad_price_streak
+                            logger.warning(f"   Waiting for {remaining_checks} more confirmation(s)...")
+                            logger.warning(f"   Next check in {self.check_interval}s (check #{check_count + 1})")
+                            logger.warning("=" * 70)
+                            logger.warning("")
+
+                    else:
+                        # Price is OK or spread filter blocked check
+                        # Reset bad price streak if it was previously set
+                        if self.bad_price_streak > 0:
+                            logger.info("")
+                            logger.info("=" * 70)
+                            logger.info("✅ PRICE RECOVERED - STOP-LOSS COUNTER RESET")
+                            logger.info("=" * 70)
+                            logger.info(f"   Previous bad streak: {self.bad_price_streak} check(s)")
+                            logger.info(f"   Price is now above stop-loss threshold")
+                            logger.info(f"   Counter reset to 0")
+                            logger.info("=" * 70)
+                            logger.info("")
+                            self.bad_price_streak = 0
                 
                 # =============================================================
                 # PERIODIC REPRICING CHECK
@@ -510,24 +554,56 @@ class SellMonitor:
         
         try:
             orderbook = self.client.get_market_orderbook(token_id)
-            
+
             if not orderbook or 'bids' not in orderbook:
                 logger.warning("Failed to fetch orderbook for stop-loss check")
                 return (False, 0.0)
-            
+
             bids = orderbook.get('bids', [])
+            asks = orderbook.get('asks', [])
+
             if not bids:
                 logger.warning("Empty orderbook - cannot check stop-loss")
                 return (False, 0.0)
-            
+
             # Extract best bid (orderbook is NOT sorted)
             current_best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
-            
+
             # Assertion: Verify we got a valid price
             if current_best_bid <= 0:
                 logger.warning("check_stop_loss() failed to get valid current price from orderbook")
                 return (False, 0.0)
-            
+
+            # FLASH CRASH PROTECTION: Check spread before triggering stop-loss
+            # If spread is abnormally wide, this is likely a temporary liquidity drain, not a real market crash
+            if asks:
+                current_best_ask = min(safe_float(ask.get('price', 999)) for ask in asks)
+
+                if current_best_ask > current_best_bid:
+                    spread_pct = ((current_best_ask - current_best_bid) / current_best_bid) * 100
+
+                    if spread_pct > self.stop_loss_spread_filter:
+                        logger.warning("")
+                        logger.warning("=" * 70)
+                        logger.warning("⚠️  SPREAD FILTER TRIGGERED - STOP-LOSS BLOCKED")
+                        logger.warning("=" * 70)
+                        logger.warning(f"   Current spread: {format_percent(spread_pct)}")
+                        logger.warning(f"   Filter threshold: {format_percent(self.stop_loss_spread_filter)}")
+                        logger.warning(f"   Best bid: {format_price(current_best_bid)}")
+                        logger.warning(f"   Best ask: {format_price(current_best_ask)}")
+                        logger.warning("")
+                        logger.warning("   This is likely a liquidity drain/flash crash, not a real market move.")
+                        logger.warning("   Skipping stop-loss check to avoid selling during temporary illiquidity.")
+                        logger.warning("=" * 70)
+                        logger.warning("")
+
+                        # Reset bad price streak since this is not a valid check
+                        if self.bad_price_streak > 0:
+                            logger.info(f"   Resetting bad price streak (was {self.bad_price_streak})")
+                            self.bad_price_streak = 0
+
+                        return (False, 0.0)
+
         except Exception as e:
             logger.error(f"Error fetching orderbook for stop-loss: {e}")
             return (False, 0.0)
