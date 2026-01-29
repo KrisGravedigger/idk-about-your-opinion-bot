@@ -991,19 +991,7 @@ class SellMonitor:
         Monitor SELL order AND ladder BUY order simultaneously.
 
         This is the dual-order monitoring mode used when position laddering is active.
-
-        Handles three outcomes:
-        - Outcome A: SELL fills first → Cancel ladder BUY, exit cleanly
-        - Outcome B: Ladder BUY fills first → Execute averaging down, continue monitoring new SELL
-        - Outcome C: Both pending → Check stop-loss from AVERAGED price, continue
-
-        Also handles recovery scenarios (bot was offline, orders filled):
-        - Recovery 1: SELL filled while offline → Cancel ladder BUY if pending, return filled
-        - Recovery 2: Ladder BUY filled while offline → Execute averaging, continue
-        - Recovery 3: Both filled while offline → Reconcile state
-
-        Args:
-            sell_order_id: SELL order ID to monitor
+        Main orchestration method - delegates to specialized handlers.
 
         Returns:
             Same dict structure as monitor_until_filled()
@@ -1013,10 +1001,6 @@ class SellMonitor:
 
         position = self.state.get('current_position', {})
         ladder_buy_id = position.get('ladder_buy_order_id')
-        market_id = position.get('market_id')
-        token_id = position.get('token_id')
-        original_buy_price = safe_float(position.get('original_cost_basis', position.get('avg_fill_price', 0)))
-        filled_amount = safe_float(position.get('filled_amount', 0))
 
         logger.info(f"   Ladder BUY: {ladder_buy_id}")
         logger.info(f"   Check interval: {self.check_interval}s")
@@ -1028,17 +1012,33 @@ class SellMonitor:
             logger.error("   Falling back to traditional monitoring")
             return self._monitor_traditional(sell_order_id)
 
-        # =====================================================================
-        # RECOVERY CHECK: Check if orders filled while bot was offline
-        # =====================================================================
+        # Recovery check for offline scenarios
+        recovery_result = self._check_recovery_state(sell_order_id, ladder_buy_id, position)
+        if recovery_result:
+            return recovery_result  # Early exit if recovery handled everything
+
+        # Main monitoring loop
+        return self._dual_order_monitoring_loop(sell_order_id, ladder_buy_id, position)
+
+    def _check_recovery_state(
+        self,
+        sell_order_id: str,
+        ladder_buy_id: str,
+        position: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if orders filled while bot was offline (self-healing recovery).
+
+        Returns:
+            Result dict if recovery completed, None if should continue monitoring
+        """
         logger.info("🔍 Recovery check: Verifying order states...")
 
         try:
-            # Check SELL order status
+            # Fetch order statuses
             sell_order = self.client.get_order(sell_order_id)
             sell_status = sell_order.get('status_enum', 'unknown') if sell_order else 'unknown'
 
-            # Check ladder BUY order status
             buy_order = self.client.get_order(ladder_buy_id)
             buy_status = buy_order.get('status_enum', 'unknown') if buy_order else 'unknown'
 
@@ -1046,337 +1046,175 @@ class SellMonitor:
             logger.info(f"   Ladder BUY: {buy_status}")
             logger.info("")
 
-            # Recovery Scenario 1: SELL filled while offline
+            # Recovery Scenario 1: SELL filled offline
             if sell_status == 'Finished':
-                logger.info("=" * 70)
-                logger.info("🔄 RECOVERY: SELL order filled while bot was offline")
-                logger.info("=" * 70)
-                logger.info("")
+                return self._handle_sell_filled_recovery(sell_order, buy_order, buy_status, ladder_buy_id)
 
-                # Cancel ladder BUY if still pending
-                if buy_status == 'Pending':
-                    logger.info("   Cancelling ladder BUY order (no longer needed)...")
-                    try:
-                        self.client.cancel_order(ladder_buy_id)
-                        logger.info("   ✅ Ladder BUY cancelled")
-                    except Exception as e:
-                        logger.warning(f"   ⚠️  Could not cancel ladder BUY: {e}")
-
-                # Extract SELL fill data and return
-                filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(sell_order)
-
-                logger.info("")
-                logger.info("✅ Position closed successfully (normal exit)")
-                logger.info(f"   Sold: {filled_amount:.4f} tokens @ {format_price(avg_fill_price)}")
-                logger.info(f"   Proceeds: {format_usdt(filled_usdt)}")
-                logger.info("")
-
-                return {
-                    'status': 'filled',
-                    'filled_amount': filled_amount,
-                    'avg_fill_price': avg_fill_price,
-                    'filled_usdt': filled_usdt,
-                    'fill_timestamp': get_timestamp(),
-                    'reason': 'Recovery: SELL filled while offline'
-                }
-
-            # Recovery Scenario 2: Ladder BUY filled while offline
+            # Recovery Scenario 2: Ladder BUY filled offline
             if buy_status == 'Finished' and not position.get('averaged_down'):
-                logger.info("=" * 70)
-                logger.info("🔄 RECOVERY: Ladder BUY filled while bot was offline")
-                logger.info("=" * 70)
-                logger.info("   Executing averaging down now...")
-                logger.info("")
-
-                # Extract BUY fill data
-                buy_filled_shares = safe_float(buy_order.get('filled_shares', filled_amount))
-                buy_filled_price = safe_float(buy_order.get('price', position.get('ladder_buy_price', 0)))
-
-                # Execute averaging down
-                from monitoring.position_laddering import PositionLaddering
-                laddering = PositionLaddering(self.config, self.client, self.state)
-
-                avg_result = laddering.execute_averaging_down(
-                    original_shares=filled_amount,
-                    original_price=original_buy_price,
-                    new_shares=buy_filled_shares,
-                    new_price=buy_filled_price
+                return self._handle_ladder_buy_filled_recovery(
+                    buy_order, sell_order_id, position
                 )
 
-                if not avg_result.get('success'):
-                    logger.error(f"❌ Averaging down failed: {avg_result.get('reason')}")
-                    logger.error("   Cannot continue - returning error status")
-                    return {
-                        'status': 'error',
-                        'filled_amount': None,
-                        'avg_fill_price': None,
-                        'filled_usdt': None,
-                        'fill_timestamp': None,
-                        'reason': f"Recovery averaging failed: {avg_result.get('reason')}"
-                    }
-
-                # Update monitoring to new SELL order
-                sell_order_id = avg_result.get('new_sell_order_id')
-                ladder_buy_id = None  # No more ladder BUYs in single mode
-
-                logger.info("✅ Recovery complete - continuing with new SELL order")
-                logger.info("")
-
-                # Continue monitoring below (will monitor new SELL order)
+            # No recovery needed - continue to monitoring loop
+            return None
 
         except Exception as e:
             logger.error(f"❌ Recovery check failed: {e}")
             logger.warning("   Continuing with normal monitoring...")
+            return None
 
-        # =====================================================================
-        # MAIN MONITORING LOOP: Check both orders periodically
-        # =====================================================================
+    def _handle_sell_filled_recovery(
+        self,
+        sell_order: Dict[str, Any],
+        buy_order: Dict[str, Any],
+        buy_status: str,
+        ladder_buy_id: str
+    ) -> Dict[str, Any]:
+        """Handle recovery when SELL filled while bot offline."""
+        logger.info("=" * 70)
+        logger.info("🔄 RECOVERY: SELL order filled while bot was offline")
+        logger.info("=" * 70)
+        logger.info("")
+
+        # Cancel ladder BUY if still pending
+        if buy_status == 'Pending':
+            logger.info("   Cancelling ladder BUY order (no longer needed)...")
+            try:
+                self.client.cancel_order(ladder_buy_id)
+                logger.info("   ✅ Ladder BUY cancelled")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Could not cancel ladder BUY: {e}")
+
+        # Extract SELL fill data
+        filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(sell_order)
+
+        logger.info("")
+        logger.info("✅ Position closed successfully (normal exit)")
+        logger.info(f"   Sold: {filled_amount:.4f} tokens @ {format_price(avg_fill_price)}")
+        logger.info(f"   Proceeds: {format_usdt(filled_usdt)}")
+        logger.info("")
+
+        return {
+            'status': 'filled',
+            'filled_amount': filled_amount,
+            'avg_fill_price': avg_fill_price,
+            'filled_usdt': filled_usdt,
+            'fill_timestamp': get_timestamp(),
+            'reason': 'Recovery: SELL filled while offline'
+        }
+
+    def _handle_ladder_buy_filled_recovery(
+        self,
+        buy_order: Dict[str, Any],
+        sell_order_id: str,
+        position: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Handle recovery when ladder BUY filled while bot offline."""
+        logger.info("=" * 70)
+        logger.info("🔄 RECOVERY: Ladder BUY filled while bot was offline")
+        logger.info("=" * 70)
+        logger.info("   Executing averaging down now...")
+        logger.info("")
+
+        filled_amount = safe_float(position.get('filled_amount', 0))
+        original_buy_price = safe_float(position.get('original_cost_basis', position.get('avg_fill_price', 0)))
+
+        # Extract BUY fill data
+        buy_filled_shares = safe_float(buy_order.get('filled_shares', filled_amount))
+        buy_filled_price = safe_float(buy_order.get('price', position.get('ladder_buy_price', 0)))
+
+        # Execute averaging down
+        from monitoring.position_laddering import PositionLaddering
+        laddering = PositionLaddering(self.config, self.client, self.state)
+
+        avg_result = laddering.execute_averaging_down(
+            original_shares=filled_amount,
+            original_price=original_buy_price,
+            new_shares=buy_filled_shares,
+            new_price=buy_filled_price
+        )
+
+        if not avg_result.get('success'):
+            logger.error(f"❌ Averaging down failed: {avg_result.get('reason')}")
+            return {
+                'status': 'error',
+                'filled_amount': None,
+                'avg_fill_price': None,
+                'filled_usdt': None,
+                'fill_timestamp': None,
+                'reason': f"Recovery averaging failed: {avg_result.get('reason')}"
+            }
+
+        logger.info("✅ Recovery complete - continuing with new SELL order")
+        logger.info("")
+
+        # Return None to continue monitoring the new SELL order
+        return None
+
+    def _dual_order_monitoring_loop(
+        self,
+        sell_order_id: str,
+        ladder_buy_id: Optional[str],
+        position: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Main monitoring loop for dual-order (SELL + ladder BUY).
+
+        Checks both order statuses and handles three outcomes:
+        - SELL fills first → Normal exit
+        - Ladder BUY fills → Execute averaging, continue
+        - Both pending → Monitor with periodic checks
+        """
         check_count = 0
         last_liquidity_check = 0
         LIQUIDITY_CHECK_INTERVAL = 5
+
+        market_id = position.get('market_id')
+        filled_amount = safe_float(position.get('filled_amount', 0))
+        original_buy_price = safe_float(position.get('original_cost_basis', position.get('avg_fill_price', 0)))
 
         try:
             while True:
                 check_count += 1
                 check_time = datetime.now().strftime("%H:%M:%S")
 
-                # =============================================================
-                # CHECK ORDER STATUSES
-                # =============================================================
+                # Fetch both order statuses
+                sell_order, sell_status, buy_order, buy_status = self._fetch_dual_order_statuses(
+                    sell_order_id, ladder_buy_id, check_time
+                )
 
-                # Check SELL order
-                sell_order = self.client.get_order(sell_order_id)
                 if not sell_order:
-                    logger.warning(f"[{check_time}] ⚠️  Failed to fetch SELL order status")
                     interruptible_sleep(self.check_interval)
                     continue
 
-                sell_status = sell_order.get('status_enum', 'unknown')
-
-                # Check ladder BUY order (if still active)
-                buy_order = None
-                buy_status = 'Cancelled'  # Default if no ladder BUY
-
-                if ladder_buy_id and ladder_buy_id != 'unknown':
-                    buy_order = self.client.get_order(ladder_buy_id)
-                    if buy_order:
-                        buy_status = buy_order.get('status_enum', 'unknown')
-
-                # =============================================================
-                # OUTCOME A: SELL FILLED FIRST (Normal exit)
-                # =============================================================
+                # OUTCOME A: SELL filled first
                 if sell_status == 'Finished':
-                    logger.info("")
-                    logger.info("=" * 70)
-                    logger.info("✅ SELL ORDER FILLED (Normal Exit)")
-                    logger.info("=" * 70)
-                    logger.info("")
-
-                    # Cancel ladder BUY if still pending
-                    if buy_status == 'Pending' and ladder_buy_id:
-                        logger.info("   Cancelling ladder BUY order (no longer needed)...")
-                        try:
-                            self.client.cancel_order(ladder_buy_id)
-                            logger.info("   ✅ Ladder BUY cancelled")
-                        except Exception as e:
-                            logger.warning(f"   ⚠️  Could not cancel ladder BUY: {e}")
-                            logger.warning(f"   This is non-critical - order will expire")
-
-                    # Extract fill data
-                    filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(sell_order)
-
-                    logger.info(f"   Sold: {filled_amount:.4f} tokens")
-                    logger.info(f"   Avg price: {format_price(avg_fill_price)}")
-                    logger.info(f"   Proceeds: {format_usdt(filled_usdt)}")
-                    logger.info("")
-                    logger.info("   Position closed successfully - no averaging needed")
-                    logger.info("=" * 70)
-                    logger.info("")
-
-                    return {
-                        'status': 'filled',
-                        'filled_amount': filled_amount,
-                        'avg_fill_price': avg_fill_price,
-                        'filled_usdt': filled_usdt,
-                        'fill_timestamp': get_timestamp(),
-                        'reason': None
-                    }
-
-                # =============================================================
-                # OUTCOME B: LADDER BUY FILLED FIRST (Flash crash occurred)
-                # =============================================================
-                if buy_status == 'Finished' and not position.get('averaged_down'):
-                    logger.warning("")
-                    logger.warning("=" * 70)
-                    logger.warning("⚠️  LADDER BUY FILLED - FLASH CRASH DETECTED")
-                    logger.warning("=" * 70)
-                    logger.warning("")
-                    logger.warning("   Market crashed below entry - averaging down position now")
-                    logger.warning("")
-
-                    # Extract BUY fill data
-                    buy_filled_shares = safe_float(buy_order.get('filled_shares', filled_amount))
-                    buy_filled_price = safe_float(buy_order.get('price', position.get('ladder_buy_price', 0)))
-
-                    logger.info(f"   Original position: {filled_amount:.2f} @ {format_price(original_buy_price)}")
-                    logger.info(f"   Counter-buy filled: {buy_filled_shares:.2f} @ {format_price(buy_filled_price)}")
-                    logger.info("")
-
-                    # Execute averaging down
-                    from monitoring.position_laddering import PositionLaddering
-                    laddering = PositionLaddering(self.config, self.client, self.state)
-
-                    avg_result = laddering.execute_averaging_down(
-                        original_shares=filled_amount,
-                        original_price=original_buy_price,
-                        new_shares=buy_filled_shares,
-                        new_price=buy_filled_price
+                    return self._handle_sell_filled_outcome(
+                        sell_order, ladder_buy_id, buy_status
                     )
 
-                    if not avg_result.get('success'):
-                        logger.error(f"❌ Averaging down failed: {avg_result.get('reason')}")
-                        logger.error("   Cannot continue - returning error")
-                        return {
-                            'status': 'error',
-                            'filled_amount': None,
-                            'avg_fill_price': None,
-                            'filled_usdt': None,
-                            'fill_timestamp': None,
-                            'reason': f"Averaging failed: {avg_result.get('reason')}"
-                        }
+                # OUTCOME B: Ladder BUY filled (flash crash)
+                if buy_status == 'Finished' and not position.get('averaged_down'):
+                    outcome = self._handle_ladder_buy_filled_outcome(
+                        buy_order, position, filled_amount, original_buy_price
+                    )
+                    if outcome:
+                        return outcome  # Error occurred
 
-                    # Update tracking variables to monitor new SELL order
-                    sell_order_id = avg_result.get('new_sell_order_id')
-                    filled_amount = avg_result.get('total_shares')
-                    original_buy_price = avg_result.get('avg_price')  # Now use averaged price for stop-loss
-                    ladder_buy_id = None  # No more ladder BUYs in single mode
-
-                    # Update position in state
+                    # Update variables for continued monitoring
+                    sell_order_id = self.state['current_position'].get('sell_order_id')
+                    ladder_buy_id = None
                     position['averaged_down'] = True
-
-                    logger.info("")
-                    logger.info("✅ AVERAGING COMPLETE - Continuing with new SELL order")
-                    logger.info(f"   New position: {filled_amount:.2f} tokens @ {format_price(original_buy_price)} avg")
-                    logger.info(f"   Monitoring SELL @ {format_price(avg_result.get('profit_target_price'))}")
-                    logger.info("=" * 70)
-                    logger.info("")
-
-                    # Continue monitoring loop with new SELL order
                     continue
 
-                # =============================================================
-                # OUTCOME C: BOTH PENDING - Continue monitoring
-                # =============================================================
+                # OUTCOME C: Both pending - periodic checks
+                self._perform_periodic_checks(
+                    check_count, market_id, sell_order_id, ladder_buy_id,
+                    sell_status, buy_status, position, original_buy_price, sell_order
+                )
 
-                # =============================================================
-                # EDGE CASE: Market resolution during monitoring
-                # =============================================================
-                if check_count % 10 == 0:  # Check every 10th iteration
-                    try:
-                        market_data = self.client.get_market(market_id)
-                        if market_data:
-                            market_status = market_data.get('status', 'unknown').lower()
-
-                            if market_status in ['resolved', 'closed', 'resolving']:
-                                logger.warning("")
-                                logger.warning("=" * 70)
-                                logger.warning("⚠️  MARKET RESOLVED DURING MONITORING")
-                                logger.warning("=" * 70)
-                                logger.warning(f"   Market status: {market_status}")
-                                logger.warning("")
-
-                                # Cancel all pending orders
-                                if sell_status == 'Pending':
-                                    try:
-                                        self.client.cancel_order(sell_order_id)
-                                        logger.info("   Cancelled SELL order")
-                                    except:
-                                        pass
-
-                                if ladder_buy_id and buy_status == 'Pending':
-                                    try:
-                                        self.client.cancel_order(ladder_buy_id)
-                                        logger.info("   Cancelled ladder BUY order")
-                                    except:
-                                        pass
-
-                                logger.warning("   Market has resolved - accepting final position and payout")
-                                logger.warning("=" * 70)
-                                logger.warning("")
-
-                                return {
-                                    'status': 'market_resolved',
-                                    'filled_amount': None,
-                                    'avg_fill_price': None,
-                                    'filled_usdt': None,
-                                    'fill_timestamp': None,
-                                    'reason': f'Market {market_status} during monitoring'
-                                }
-
-                    except Exception as e:
-                        logger.debug(f"Could not check market status: {e}")
-
-                # Check stop-loss (from AVERAGED price if averaged down)
-                if self.enable_stop_loss and check_count % 3 == 0:
-                    # Use averaged price if position was averaged down
-                    current_buy_price = position.get('avg_fill_price', original_buy_price)
-
-                    should_stop, unrealized_loss_pct = self.check_stop_loss(current_buy_price)
-
-                    if should_stop:
-                        self.bad_price_streak += 1
-
-                        if self.bad_price_streak >= self.stop_loss_confirmation_checks:
-                            logger.warning("")
-                            logger.warning("🛑 HARD STOP-LOSS CONFIRMED")
-                            logger.warning("   Position not recovering - executing stop-loss")
-                            logger.warning("")
-
-                            # Cancel ladder BUY if still active
-                            if ladder_buy_id and buy_status == 'Pending':
-                                try:
-                                    self.client.cancel_order(ladder_buy_id)
-                                    logger.info("   Cancelled ladder BUY order")
-                                except:
-                                    pass
-
-                            # Execute stop-loss on SELL order
-                            result = self.execute_stop_loss(sell_order_id)
-
-                            if result.get('success'):
-                                sell_order_id = result.get('new_order_id')
-                                self.bad_price_streak = 0
-                                continue
-                    else:
-                        if self.bad_price_streak > 0:
-                            logger.info("✅ Price recovered - stop-loss counter reset")
-                            self.bad_price_streak = 0
-
-                # Periodic repricing check
-                if check_count % 3 == 0:
-                    sell_price = safe_float(sell_order.get('price', position.get('sell_price', 0)))
-                    repricing_result = self.check_and_execute_repricing(sell_order_id, sell_price)
-
-                    if repricing_result and repricing_result.get('status') == 'repriced':
-                        sell_order_id = repricing_result.get('new_order_id')
-                        logger.info(f"✅ Order repriced, continuing with {sell_order_id}")
-                        continue
-
-                # Periodic liquidity check
-                if check_count - last_liquidity_check >= LIQUIDITY_CHECK_INTERVAL:
-                    logger.debug(f"[{check_time}] 🔍 Checking liquidity...")
-                    # Same liquidity check as traditional mode
-                    # (omitted for brevity - same as _monitor_traditional)
-                    last_liquidity_check = check_count
-
-                # Send heartbeat if callback provided
-                if self.heartbeat_callback:
-                    try:
-                        self.heartbeat_callback()
-                    except Exception as e:
-                        logger.debug(f"Heartbeat callback failed: {e}")
-
-                # Log status periodically
+                # Log status
                 if check_count % 10 == 0:
                     logger.info(f"[{check_time}] ⏳ Monitoring: SELL={sell_status}, BUY={buy_status} (check #{check_count})")
 
@@ -1398,6 +1236,244 @@ class SellMonitor:
                 'fill_timestamp': None,
                 'reason': f'Error: {str(e)}'
             }
+
+    def _fetch_dual_order_statuses(
+        self,
+        sell_order_id: str,
+        ladder_buy_id: Optional[str],
+        check_time: str
+    ) -> Tuple[Optional[Dict], str, Optional[Dict], str]:
+        """Fetch status for both SELL and ladder BUY orders."""
+        # Check SELL order
+        sell_order = self.client.get_order(sell_order_id)
+        if not sell_order:
+            logger.warning(f"[{check_time}] ⚠️  Failed to fetch SELL order status")
+            return None, 'unknown', None, 'Cancelled'
+
+        sell_status = sell_order.get('status_enum', 'unknown')
+
+        # Check ladder BUY order (if still active)
+        buy_order = None
+        buy_status = 'Cancelled'
+
+        if ladder_buy_id and ladder_buy_id != 'unknown':
+            buy_order = self.client.get_order(ladder_buy_id)
+            if buy_order:
+                buy_status = buy_order.get('status_enum', 'unknown')
+
+        return sell_order, sell_status, buy_order, buy_status
+
+    def _handle_sell_filled_outcome(
+        self,
+        sell_order: Dict[str, Any],
+        ladder_buy_id: Optional[str],
+        buy_status: str
+    ) -> Dict[str, Any]:
+        """Handle SELL order filled (normal exit)."""
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("✅ SELL ORDER FILLED (Normal Exit)")
+        logger.info("=" * 70)
+        logger.info("")
+
+        # Cancel ladder BUY if still pending
+        if buy_status == 'Pending' and ladder_buy_id:
+            logger.info("   Cancelling ladder BUY order (no longer needed)...")
+            try:
+                self.client.cancel_order(ladder_buy_id)
+                logger.info("   ✅ Ladder BUY cancelled")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Could not cancel ladder BUY: {e}")
+
+        # Extract fill data
+        filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(sell_order)
+
+        logger.info(f"   Sold: {filled_amount:.4f} tokens")
+        logger.info(f"   Avg price: {format_price(avg_fill_price)}")
+        logger.info(f"   Proceeds: {format_usdt(filled_usdt)}")
+        logger.info("")
+        logger.info("   Position closed successfully - no averaging needed")
+        logger.info("=" * 70)
+        logger.info("")
+
+        return {
+            'status': 'filled',
+            'filled_amount': filled_amount,
+            'avg_fill_price': avg_fill_price,
+            'filled_usdt': filled_usdt,
+            'fill_timestamp': get_timestamp(),
+            'reason': None
+        }
+
+    def _handle_ladder_buy_filled_outcome(
+        self,
+        buy_order: Dict[str, Any],
+        position: Dict[str, Any],
+        filled_amount: float,
+        original_buy_price: float
+    ) -> Optional[Dict[str, Any]]:
+        """Handle ladder BUY filled (flash crash detected)."""
+        logger.warning("")
+        logger.warning("=" * 70)
+        logger.warning("⚠️  LADDER BUY FILLED - FLASH CRASH DETECTED")
+        logger.warning("=" * 70)
+        logger.warning("")
+
+        # Extract BUY fill data
+        buy_filled_shares = safe_float(buy_order.get('filled_shares', filled_amount))
+        buy_filled_price = safe_float(buy_order.get('price', position.get('ladder_buy_price', 0)))
+
+        logger.info(f"   Original: {filled_amount:.2f} @ {format_price(original_buy_price)}")
+        logger.info(f"   Counter-buy: {buy_filled_shares:.2f} @ {format_price(buy_filled_price)}")
+        logger.info("")
+
+        # Execute averaging down
+        from monitoring.position_laddering import PositionLaddering
+        laddering = PositionLaddering(self.config, self.client, self.state)
+
+        avg_result = laddering.execute_averaging_down(
+            original_shares=filled_amount,
+            original_price=original_buy_price,
+            new_shares=buy_filled_shares,
+            new_price=buy_filled_price
+        )
+
+        if not avg_result.get('success'):
+            logger.error(f"❌ Averaging down failed: {avg_result.get('reason')}")
+            return {
+                'status': 'error',
+                'filled_amount': None,
+                'avg_fill_price': None,
+                'filled_usdt': None,
+                'fill_timestamp': None,
+                'reason': f"Averaging failed: {avg_result.get('reason')}"
+            }
+
+        logger.info("")
+        logger.info("✅ AVERAGING COMPLETE - Continuing with new SELL order")
+        logger.info(f"   New position: {avg_result.get('total_shares'):.2f} @ {format_price(avg_result.get('avg_price'))}")
+        logger.info("=" * 70)
+        logger.info("")
+
+        return None  # Continue monitoring
+
+    def _perform_periodic_checks(
+        self,
+        check_count: int,
+        market_id: int,
+        sell_order_id: str,
+        ladder_buy_id: Optional[str],
+        sell_status: str,
+        buy_status: str,
+        position: Dict[str, Any],
+        original_buy_price: float,
+        sell_order: Dict[str, Any]
+    ):
+        """Perform periodic checks: market resolution, stop-loss, repricing."""
+        # Market resolution check
+        if check_count % 10 == 0:
+            self._check_market_resolution(market_id, sell_order_id, sell_status, ladder_buy_id, buy_status)
+
+        # Stop-loss check
+        if self.enable_stop_loss and check_count % 3 == 0:
+            current_buy_price = position.get('avg_fill_price', original_buy_price)
+            self._check_dual_order_stop_loss(sell_order_id, ladder_buy_id, buy_status, current_buy_price)
+
+        # Repricing check
+        if check_count % 3 == 0:
+            sell_price = safe_float(sell_order.get('price', position.get('sell_price', 0)))
+            self._check_dual_order_repricing(sell_order_id)
+
+        # Heartbeat
+        if self.heartbeat_callback:
+            try:
+                self.heartbeat_callback()
+            except Exception as e:
+                logger.debug(f"Heartbeat callback failed: {e}")
+
+    def _check_market_resolution(
+        self,
+        market_id: int,
+        sell_order_id: str,
+        sell_status: str,
+        ladder_buy_id: Optional[str],
+        buy_status: str
+    ):
+        """Check if market resolved during monitoring."""
+        try:
+            market_data = self.client.get_market(market_id)
+            if market_data:
+                market_status = market_data.get('status', 'unknown').lower()
+
+                if market_status in ['resolved', 'closed', 'resolving']:
+                    logger.warning("")
+                    logger.warning("=" * 70)
+                    logger.warning("⚠️  MARKET RESOLVED DURING MONITORING")
+                    logger.warning("=" * 70)
+
+                    # Cancel pending orders
+                    if sell_status == 'Pending':
+                        try:
+                            self.client.cancel_order(sell_order_id)
+                            logger.info("   Cancelled SELL order")
+                        except:
+                            pass
+
+                    if ladder_buy_id and buy_status == 'Pending':
+                        try:
+                            self.client.cancel_order(ladder_buy_id)
+                            logger.info("   Cancelled ladder BUY order")
+                        except:
+                            pass
+
+                    logger.warning("   Market resolved - accepting final position")
+                    logger.warning("=" * 70)
+                    logger.warning("")
+
+        except Exception as e:
+            logger.debug(f"Could not check market status: {e}")
+
+    def _check_dual_order_stop_loss(
+        self,
+        sell_order_id: str,
+        ladder_buy_id: Optional[str],
+        buy_status: str,
+        current_buy_price: float
+    ):
+        """Check stop-loss for dual-order mode."""
+        should_stop, unrealized_loss_pct = self.check_stop_loss(current_buy_price)
+
+        if should_stop:
+            self.bad_price_streak += 1
+
+            if self.bad_price_streak >= self.stop_loss_confirmation_checks:
+                logger.warning("🛑 HARD STOP-LOSS CONFIRMED")
+
+                # Cancel ladder BUY if still active
+                if ladder_buy_id and buy_status == 'Pending':
+                    try:
+                        self.client.cancel_order(ladder_buy_id)
+                        logger.info("   Cancelled ladder BUY order")
+                    except:
+                        pass
+
+                # Execute stop-loss
+                result = self.execute_stop_loss(sell_order_id)
+                if result.get('success'):
+                    self.bad_price_streak = 0
+        else:
+            if self.bad_price_streak > 0:
+                logger.info("✅ Price recovered - stop-loss counter reset")
+                self.bad_price_streak = 0
+
+    def _check_dual_order_repricing(self, sell_order_id: str):
+        """Check and execute repricing for dual-order mode."""
+        position = self.state.get('current_position', {})
+        sell_price = safe_float(position.get('sell_price', 0))
+        repricing_result = self.check_and_execute_repricing(sell_order_id, sell_price)
+
+        if repricing_result and repricing_result.get('status') == 'repriced':
+            logger.info(f"✅ Order repriced, continuing monitoring")
 
     def check_and_execute_repricing(self, order_id: str, current_price: float) -> dict:
         """
