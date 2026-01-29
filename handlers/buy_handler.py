@@ -801,6 +801,106 @@ class BuyHandler:
                 position['original_sell_price'] = sell_price
                 logger.debug(f"   Saved original_sell_price: {format_price(sell_price)}")
 
+            # =================================================================
+            # POSITION LADDERING: Place counter-BUY order if enabled
+            # =================================================================
+            if self.config.get('ENABLE_POSITION_LADDERING', False):
+                logger.info("")
+                logger.info("=" * 70)
+                logger.info("🎯 POSITION LADDERING ENABLED")
+                logger.info("=" * 70)
+                logger.info("")
+
+                try:
+                    from monitoring.position_laddering import PositionLaddering
+
+                    # Initialize laddering strategy
+                    laddering = PositionLaddering(self.config, self.client, self.bot.state)
+
+                    # Get entry price and amount
+                    entry_price = position.get('avg_fill_price', 0)
+                    filled_amount = position.get('filled_amount', 0)
+
+                    if entry_price <= 0 or filled_amount <= 0:
+                        logger.warning("⚠️  Cannot place ladder BUY: invalid entry_price or filled_amount")
+                        logger.warning("   Continuing without laddering (traditional stop-loss will apply)")
+                    else:
+                        # Calculate ladder price
+                        ladder_offset_pct = self.config.get('LADDER_BUY_OFFSET_PCT', -15.0)
+                        ladder_price = laddering.calculate_ladder_price(entry_price, ladder_offset_pct)
+
+                        logger.info(f"📊 LADDER CALCULATION:")
+                        logger.info(f"   Entry price: {format_price(entry_price)}")
+                        logger.info(f"   Ladder offset: {ladder_offset_pct}%")
+                        logger.info(f"   Ladder price: {format_price(float(ladder_price))}")
+                        logger.info(f"   Position size: {filled_amount:.4f} tokens")
+                        logger.info("")
+
+                        # Place counter-BUY order
+                        logger.info(f"📤 Placing counter-BUY order (safety net)...")
+
+                        ladder_result = laddering.place_ladder_buy(
+                            market_id=market_id,
+                            token_id=token_id,
+                            price=float(ladder_price),
+                            amount=filled_amount
+                        )
+
+                        if ladder_result.get('success'):
+                            # Counter-BUY placed successfully
+                            ladder_order_id = ladder_result.get('order_id')
+
+                            logger.info("")
+                            logger.info("✅ LADDERING STRATEGY ACTIVATED")
+                            logger.info("")
+                            logger.info("   📍 Current state:")
+                            logger.info(f"      SELL order @ {format_price(sell_price)} [PENDING]")
+                            logger.info(f"      Safety BUY @ {format_price(float(ladder_price))} [PENDING]")
+                            logger.info("")
+                            logger.info("   📈 Possible outcomes:")
+                            logger.info(f"      ✅ SELL fills first → Normal exit (+profit)")
+                            logger.info(f"      🎯 BUY fills first → Average down, wait for recovery")
+                            logger.info("")
+                            logger.info("=" * 70)
+                            logger.info("")
+
+                            # Update state with laddering info
+                            position['laddering_active'] = True
+                            position['ladder_buy_order_id'] = ladder_order_id
+                            position['ladder_buy_price'] = float(ladder_price)
+                            position['original_cost_basis'] = entry_price
+                            position['original_shares'] = filled_amount
+                            position['averaging_rounds'] = 0
+                            position['total_cost_usd'] = filled_amount * entry_price
+
+                            # Save state immediately with ladder info
+                            self.state_manager.save_state(self.bot.state)
+
+                            logger.debug(f"💾 State updated with ladder BUY order info")
+
+                        else:
+                            # Counter-BUY failed (likely insufficient capital)
+                            reason = ladder_result.get('reason', 'Unknown error')
+                            logger.warning("")
+                            logger.warning("⚠️  LADDERING ACTIVATION FAILED")
+                            logger.warning(f"   Reason: {reason}")
+                            logger.warning("")
+                            logger.warning("   Continuing with traditional stop-loss only")
+                            logger.warning("   Position will use standard stop-loss protection")
+                            logger.warning("")
+                            logger.warning("=" * 70)
+                            logger.warning("")
+
+                            # Mark laddering as inactive
+                            position['laddering_active'] = False
+
+                except Exception as e:
+                    logger.exception(f"❌ Error setting up position laddering: {e}")
+                    logger.warning("   Continuing without laddering (traditional stop-loss will apply)")
+
+                    # Mark laddering as inactive
+                    position['laddering_active'] = False
+
             self.bot.state['stage'] = 'SELL_PLACED'
             self.state_manager.save_state(self.bot.state)
 
