@@ -1268,6 +1268,54 @@ class SellMonitor:
                 # OUTCOME C: BOTH PENDING - Continue monitoring
                 # =============================================================
 
+                # =============================================================
+                # EDGE CASE: Market resolution during monitoring
+                # =============================================================
+                if check_count % 10 == 0:  # Check every 10th iteration
+                    try:
+                        market_data = self.client.get_market(market_id)
+                        if market_data:
+                            market_status = market_data.get('status', 'unknown').lower()
+
+                            if market_status in ['resolved', 'closed', 'resolving']:
+                                logger.warning("")
+                                logger.warning("=" * 70)
+                                logger.warning("⚠️  MARKET RESOLVED DURING MONITORING")
+                                logger.warning("=" * 70)
+                                logger.warning(f"   Market status: {market_status}")
+                                logger.warning("")
+
+                                # Cancel all pending orders
+                                if sell_status == 'Pending':
+                                    try:
+                                        self.client.cancel_order(sell_order_id)
+                                        logger.info("   Cancelled SELL order")
+                                    except:
+                                        pass
+
+                                if ladder_buy_id and buy_status == 'Pending':
+                                    try:
+                                        self.client.cancel_order(ladder_buy_id)
+                                        logger.info("   Cancelled ladder BUY order")
+                                    except:
+                                        pass
+
+                                logger.warning("   Market has resolved - accepting final position and payout")
+                                logger.warning("=" * 70)
+                                logger.warning("")
+
+                                return {
+                                    'status': 'market_resolved',
+                                    'filled_amount': None,
+                                    'avg_fill_price': None,
+                                    'filled_usdt': None,
+                                    'fill_timestamp': None,
+                                    'reason': f'Market {market_status} during monitoring'
+                                }
+
+                    except Exception as e:
+                        logger.debug(f"Could not check market status: {e}")
+
                 # Check stop-loss (from AVERAGED price if averaged down)
                 if self.enable_stop_loss and check_count % 3 == 0:
                     # Use averaged price if position was averaged down
