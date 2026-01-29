@@ -210,21 +210,32 @@ ORDER_MONITOR_INTERVAL_SECONDS = 9
 FILL_CHECK_INTERVAL_SECONDS = 9
 
 # =============================================================================
+# MARKET ENTRY FILTERS
+# =============================================================================
+
+# Maximum spread allowed when ENTERING a market (market selection filter)
+# Markets with spread > threshold will be excluded from scanning
+# This prevents entering illiquid markets that could trigger false stop-loss
+#
+# Connection to Stop-Loss:
+# If you enter a market with 20% spread, and stop-loss is -15%, the spread
+# itself could be mistaken for a price drop. This parameter prevents that by
+# blocking high-spread markets from the start.
+#
+# Example: 20.0 means markets with spread > 20% will be filtered out during scanning
+MAX_ENTRY_SPREAD_PERCENT = 20.0
+
+# =============================================================================
 # LIQUIDITY MONITORING
 # =============================================================================
 
 # Automatically cancel orders if liquidity deteriorates significantly?
-# True = cancel and find new market if conditions worsen
-# False = let order sit even if liquidity drops
+# True = cancel order if stop-loss is triggered
+# False = let order sit even if stop-loss threshold is reached
+#
+# Note: "Deterioration" means price drops below stop-loss threshold.
+# Spread widening does NOT trigger cancellation - only true price crashes.
 LIQUIDITY_AUTO_CANCEL = True
-
-# Maximum bid price drop before considering liquidity deteriorated
-# Example: 25% means if best bid drops >25% from initial, cancel order
-LIQUIDITY_BID_DROP_THRESHOLD = 25.0
-
-# Maximum spread percentage before considering liquidity deteriorated
-# Example: 15% means if spread exceeds 15%, cancel order
-LIQUIDITY_SPREAD_THRESHOLD = 15.0
 
 # =============================================================================
 # ORDER TIMEOUTS
@@ -442,7 +453,19 @@ def validate_config():
                 f"abs(STOP_LOSS_TRIGGER_PERCENT) ({abs(STOP_LOSS_TRIGGER_PERCENT)}%)"
             )
 
-    # Validate liquidity thresholds
+    # Validate market entry filters
+    if MAX_ENTRY_SPREAD_PERCENT < 1 or MAX_ENTRY_SPREAD_PERCENT > 100:
+        errors.append(
+            f"MAX_ENTRY_SPREAD_PERCENT must be 1-100, got {MAX_ENTRY_SPREAD_PERCENT}"
+        )
+
+    # Validate stop-loss threshold
+    if STOP_LOSS_TRIGGER_PERCENT > 0 or STOP_LOSS_TRIGGER_PERCENT < -100:
+        errors.append(
+            f"STOP_LOSS_TRIGGER_PERCENT must be negative and >= -100, got {STOP_LOSS_TRIGGER_PERCENT}"
+        )
+
+    # Validate repricing thresholds
     if SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT < 1 or SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT > 1000:
         errors.append(
             f"SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT must be 1-1000, got {SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT}"

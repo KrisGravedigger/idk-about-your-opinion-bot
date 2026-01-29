@@ -322,10 +322,16 @@ class SellMonitor:
                 if check_count - last_liquidity_check >= LIQUIDITY_CHECK_INTERVAL:
                     logger.debug(f"[{check_time}] 🔍 Checking liquidity...")
 
+                    # Get initial spread from state (stored when SELL order was placed)
+                    initial_spread_pct = position.get('initial_spread_pct')
+                    initial_best_bid = position.get('initial_best_bid', buy_price)
+
                     liquidity = self.liquidity_checker.check_liquidity(
                         market_id=market_id,
                         token_id=token_id,
-                        initial_best_bid=buy_price  # Use buy price as baseline
+                        initial_best_bid=initial_best_bid,
+                        buy_price=buy_price,  # Use ACTUAL buy price for stop-loss calculation
+                        initial_spread_pct=initial_spread_pct  # Check if spread WIDENED
                     )
 
                     if not liquidity['ok']:
