@@ -75,7 +75,7 @@ class TelegramNotifier:
             'stop_loss': 300,      # 5 minutes
             'bot_start': 0,        # Always send
             'bot_stop': 0,         # Always send
-            'state_change': 60,    # 1 minute (prevent SELL_PLACED spam in stop-loss loops)
+            'state_change': 90,    # 1.5 minutes (~10 monitoring cycles @ 9s each)
             'heartbeat': 0,        # Controlled by separate heartbeat interval config
         }
 

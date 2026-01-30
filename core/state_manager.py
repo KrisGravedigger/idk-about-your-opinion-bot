@@ -266,7 +266,8 @@ class StateManager:
             "avg_fill_price": None,
             "filled_usdt": None,
             "outcome_side": None,
-            "fill_timestamp": None
+            "fill_timestamp": None,
+            "wide_spread_start_time": None
         }
         
         # Set stage to IDLE

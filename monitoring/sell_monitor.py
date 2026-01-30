@@ -81,7 +81,15 @@ class SellMonitor:
         self.bad_price_streak = 0
 
         # Track when spread first exceeded threshold (for time-based override)
-        self.wide_spread_start_time = None
+        # Load from state if available (for timer persistence across restarts)
+        position = state.get('current_position', {})
+        self.wide_spread_start_time = position.get('wide_spread_start_time', None)
+
+        if self.wide_spread_start_time:
+            logger.info(f"✅ Restored wide spread timer from state (started at {self.wide_spread_start_time})")
+
+        # Track when spread normalized (for hysteresis)
+        self.spread_normalized_time = None
 
         # Sell order repricing config
         self.enable_repricing = config.get('ENABLE_SELL_ORDER_REPRICING', True)
@@ -601,6 +609,11 @@ class SellMonitor:
                             self.wide_spread_start_time = current_time
                             logger.debug(f"Wide spread detected, starting timer")
 
+                            # SAVE TO STATE
+                            if 'current_position' not in self.state:
+                                self.state['current_position'] = {}
+                            self.state['current_position']['wide_spread_start_time'] = current_time
+
                         # Calculate duration
                         elapsed_seconds = current_time - self.wide_spread_start_time
                         elapsed_hours = elapsed_seconds / 3600.0
@@ -624,6 +637,10 @@ class SellMonitor:
 
                             # Reset timer
                             self.wide_spread_start_time = None
+
+                            # SAVE TO STATE
+                            if 'current_position' in self.state:
+                                self.state['current_position']['wide_spread_start_time'] = None
 
                             # DON'T return - let stop-loss check proceed below
                         else:
@@ -650,10 +667,30 @@ class SellMonitor:
 
                             return (False, 0.0)
                     else:
-                        # Spread is normal - reset timer if it was set
+                        # Spread is normal - but use hysteresis to prevent oscillation resets
                         if self.wide_spread_start_time is not None:
-                            logger.info("✅ Spread normalized, resetting wide spread timer")
-                            self.wide_spread_start_time = None
+                            # Calculate how long spread has been normal
+                            time_below_threshold = current_time - getattr(self, 'spread_normalized_time', current_time)
+
+                            # Only reset timer if spread stays normal for 30 seconds (hysteresis)
+                            if time_below_threshold >= 30:
+                                logger.info("✅ Spread normalized for 30s, resetting wide spread timer")
+                                self.wide_spread_start_time = None
+
+                                # SAVE TO STATE
+                                if 'current_position' in self.state:
+                                    self.state['current_position']['wide_spread_start_time'] = None
+
+                                # Reset hysteresis tracker
+                                self.spread_normalized_time = None
+                            else:
+                                logger.debug(f"Spread normal but within hysteresis period ({time_below_threshold:.0f}s / 30s)")
+                                # Track when spread first became normal
+                                if not hasattr(self, 'spread_normalized_time') or self.spread_normalized_time is None:
+                                    self.spread_normalized_time = current_time
+                        else:
+                            # No timer running, no need for hysteresis
+                            self.spread_normalized_time = None
 
         except Exception as e:
             logger.error(f"Error fetching orderbook for stop-loss: {e}")

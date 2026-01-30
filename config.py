@@ -514,9 +514,10 @@ def validate_config():
         )
 
     # Validate timeout is positive
+    global LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS
     if LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS <= 0:
         warnings.append(f"Invalid LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS ({LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS}), using default 1.0")
-        # Note: This is a warning, not an error - the value will be corrected
+        LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS = 1.0  # ACTUALLY FIX IT
 
     return (len(errors) == 0, errors, warnings)
 
