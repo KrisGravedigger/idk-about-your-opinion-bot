@@ -331,7 +331,8 @@ class SellMonitor:
                         token_id=token_id,
                         initial_best_bid=initial_best_bid,
                         buy_price=buy_price,  # Use ACTUAL buy price for stop-loss calculation
-                        initial_spread_pct=initial_spread_pct  # Check if spread WIDENED
+                        initial_spread_pct=initial_spread_pct,  # Check if spread WIDENED
+                        stop_loss_spread_filter=self.stop_loss_spread_filter  # Respect spread filter
                     )
 
                     if not liquidity['ok']:

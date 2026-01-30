@@ -261,7 +261,12 @@ class StateManager:
             "sell_price": None,
             "sell_filled_at": None,
             "pnl_usdt": None,
-            "pnl_percent": None
+            "pnl_percent": None,
+            "filled_amount": None,
+            "avg_fill_price": None,
+            "filled_usdt": None,
+            "outcome_side": None,
+            "fill_timestamp": None
         }
         
         # Set stage to IDLE

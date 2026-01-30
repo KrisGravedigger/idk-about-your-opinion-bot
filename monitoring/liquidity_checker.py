@@ -74,7 +74,8 @@ class LiquidityChecker:
         token_id: int,
         initial_best_bid: float,
         buy_price: Optional[float] = None,
-        initial_spread_pct: Optional[float] = None
+        initial_spread_pct: Optional[float] = None,
+        stop_loss_spread_filter: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Check if liquidity has deteriorated significantly.
@@ -85,6 +86,7 @@ class LiquidityChecker:
             initial_best_bid: Initial best bid price when order was placed (for compatibility)
             buy_price: Actual price paid for position (used for stop-loss calculation)
             initial_spread_pct: Initial spread percentage when order was placed
+            stop_loss_spread_filter: Spread filter threshold to prevent stop-loss during flash crashes
 
         Returns:
             Dictionary with structure:
@@ -185,11 +187,22 @@ class LiquidityChecker:
         # Spread widening is NOT a reason to cancel - it's just illiquidity.
         # Only a true price crash (bid drop from entry price) triggers stop-loss.
         if bid_drop_pct < -self.stop_loss_threshold:
-            deterioration_reason = (
-                f"Bid dropped {format_percent(abs(bid_drop_pct))} from buy price "
-                f"(stop-loss threshold: {format_percent(self.stop_loss_threshold)})"
-            )
-            logger.warning(f"⚠️  {deterioration_reason}")
+            # BEFORE setting deterioration_reason, check spread filter
+            # If spread is too wide, this is temporary illiquidity, not a real crash
+            if stop_loss_spread_filter and current_spread_pct > stop_loss_spread_filter:
+                # Spread too wide - this is flash crash/temporary illiquidity
+                logger.debug(
+                    f"   Spread {format_percent(current_spread_pct)} > filter "
+                    f"{format_percent(stop_loss_spread_filter)} - ignoring bid drop"
+                )
+                # Don't trigger deterioration
+            else:
+                # Spread OK - this is a real price crash
+                deterioration_reason = (
+                    f"Bid dropped {format_percent(abs(bid_drop_pct))} from buy price "
+                    f"(stop-loss threshold: {format_percent(self.stop_loss_threshold)})"
+                )
+                logger.warning(f"⚠️  {deterioration_reason}")
         else:
             # Liquidity is acceptable (no price crash)
             # Log spread info for debugging, but don't trigger deterioration

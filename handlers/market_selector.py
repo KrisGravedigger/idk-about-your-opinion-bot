@@ -107,14 +107,60 @@ class MarketSelector:
                 logger.info(f"   💡 Skipping this position - will look for new opportunities")
                 return False
 
-            # Recover state with real avg_price if available
+            # Recover avg_price with fallback chain
             avg_price = pos.get('avg_price', 0)
-            if avg_price <= 0:
+
+            if not avg_price or avg_price <= 0.01 or avg_price is None:
+                logger.warning(f"   ⚠️ avg_price missing or invalid ({avg_price}), trying recovery...")
+
+                # Method 1: Calculate from filled_amount / filled_usdt
+                filled_amount = pos.get('filled_amount', 0)
+                filled_usdt = pos.get('filled_usdt', 0)
+                if filled_amount and filled_amount > 0 and filled_usdt and filled_usdt > 0:
+                    avg_price = filled_usdt / filled_amount
+                    logger.info(f"   ✅ Calculated avg_price from filled data: ${avg_price:.4f}")
+                else:
+                    # Method 2: Retrieve from transaction_history
+                    logger.info(f"   Trying transaction_history...")
+                    try:
+                        from transaction_history import TransactionHistory
+                        history = TransactionHistory()
+                        market_txns = history.get_transactions_for_market(market_id)
+
+                        # Find last BUY transaction
+                        buy_txns = [t for t in market_txns if t.get('type') == 'BUY']
+                        if buy_txns:
+                            # Sort by timestamp, get most recent
+                            last_buy = sorted(buy_txns, key=lambda t: t.get('timestamp', ''), reverse=True)[0]
+                            avg_price = last_buy.get('price', 0)
+                            logger.info(f"   ✅ Recovered avg_price from transaction history: ${avg_price:.4f}")
+                        else:
+                            logger.warning(f"   No BUY transactions found in history")
+                    except Exception as e:
+                        logger.error(f"   Error reading transaction history: {e}")
+
+                    # Method 3: Fallback to current best bid (last resort)
+                    if not avg_price or avg_price <= 0.01:
+                        try:
+                            orderbook = self.client.get_market_orderbook(token_id)
+                            if orderbook and 'bids' in orderbook:
+                                bids = orderbook.get('bids', [])
+                                if bids:
+                                    avg_price = max(safe_float(bid.get('price', 0)) for bid in bids)
+                                    logger.warning(f"   ⚠️ Using current best bid as fallback: ${avg_price:.4f}")
+                                    logger.warning(f"   Stop-loss will be inaccurate!")
+                        except Exception as e:
+                            logger.error(f"   Error fetching orderbook: {e}")
+
+            # Final validation
+            if not avg_price or avg_price <= 0.01:
                 logger.error(f"   ❌ Cannot recover position without valid avg_price")
-                logger.error(f"   Position avg_price: {avg_price}")
+                logger.error(f"   Final avg_price: {avg_price}")
                 logger.error(f"   This position cannot be managed by the bot (stop-loss won't work)")
                 logger.info(f"   💡 Skipping this position - will look for new opportunities")
                 return False
+            else:
+                logger.info(f"   ✅ Using avg_price: ${avg_price:.4f}")
 
             self.bot.state['stage'] = 'BUY_FILLED'
             self.bot.state['current_position'] = {
