@@ -41,6 +41,8 @@ class TelegramNotifier:
         bot_token: Telegram bot token from BotFather
         chat_id: Telegram chat ID to send messages to
         enabled: Whether notifications are enabled
+        rate_limits: Dictionary tracking last send time for each notification type
+        min_interval_seconds: Minimum seconds between duplicate notifications
     """
 
     def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
@@ -62,6 +64,52 @@ class TelegramNotifier:
             logger.info("📱 Telegram notifications disabled (no credentials)")
 
         self.api_url = f"https://api.telegram.org/bot{self.bot_token}"
+
+        # Rate limiting for duplicate notifications
+        self.rate_limits: Dict[str, float] = {}
+        # Minimum interval between same notification types (in seconds)
+        # - stop_loss: 5 minutes (don't spam during prolonged crashes)
+        # - heartbeat: controlled by separate config
+        # - state_change: always send (0 seconds)
+        self.min_intervals = {
+            'stop_loss': 300,      # 5 minutes
+            'bot_start': 0,        # Always send
+            'bot_stop': 0,         # Always send
+            'state_change': 0,     # Always send
+            'heartbeat': 0,        # Controlled by separate heartbeat interval config
+        }
+
+    def _should_send_notification(self, notification_type: str) -> bool:
+        """
+        Check if notification should be sent based on rate limiting.
+
+        Args:
+            notification_type: Type of notification (e.g., 'stop_loss', 'heartbeat')
+
+        Returns:
+            True if notification should be sent, False if rate limited
+        """
+        if notification_type not in self.min_intervals:
+            # Unknown type - allow it
+            return True
+
+        min_interval = self.min_intervals[notification_type]
+        if min_interval == 0:
+            # No rate limiting for this type
+            return True
+
+        last_sent = self.rate_limits.get(notification_type, 0)
+        now = time.time()
+        elapsed = now - last_sent
+
+        if elapsed >= min_interval:
+            # Enough time has passed
+            self.rate_limits[notification_type] = now
+            return True
+        else:
+            # Rate limited
+            logger.debug(f"Rate limited {notification_type} notification (sent {elapsed:.0f}s ago, min interval: {min_interval}s)")
+            return False
 
     def send_message(
         self,
@@ -529,7 +577,7 @@ class TelegramNotifier:
         action: str = "triggered"
     ) -> bool:
         """
-        Send stop-loss notification.
+        Send stop-loss notification (rate limited to prevent spam).
 
         Args:
             market_id: Market ID
@@ -540,8 +588,12 @@ class TelegramNotifier:
             action: Action taken (e.g., "triggered", "executed")
 
         Returns:
-            True if sent successfully
+            True if sent successfully or rate limited
         """
+        # Check rate limiting (prevent notification spam during prolonged crashes)
+        if not self._should_send_notification('stop_loss'):
+            return False
+
         message = f"""
 🚨 <b>STOP-LOSS {action.upper()}</b>
 
