@@ -70,12 +70,12 @@ class TelegramNotifier:
         # Minimum interval between same notification types (in seconds)
         # - stop_loss: 5 minutes (don't spam during prolonged crashes)
         # - heartbeat: controlled by separate config
-        # - state_change: always send (0 seconds)
+        # - state_change: 1 minute (prevent spam when looping in same state)
         self.min_intervals = {
             'stop_loss': 300,      # 5 minutes
             'bot_start': 0,        # Always send
             'bot_stop': 0,         # Always send
-            'state_change': 0,     # Always send
+            'state_change': 60,    # 1 minute (prevent SELL_PLACED spam in stop-loss loops)
             'heartbeat': 0,        # Controlled by separate heartbeat interval config
         }
 
@@ -510,6 +510,10 @@ class TelegramNotifier:
         Returns:
             True if sent successfully
         """
+        # Check rate limiting (prevent spam when bot loops in same state)
+        if not self._should_send_notification('state_change'):
+            return False
+
         stage_emoji = {
             'BUY_PLACED': '🟢',
             'SELL_PLACED': '🔴',
