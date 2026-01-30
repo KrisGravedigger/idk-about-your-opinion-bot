@@ -237,6 +237,24 @@ MAX_ENTRY_SPREAD_PERCENT = 20.0
 # Spread widening does NOT trigger cancellation - only true price crashes.
 LIQUIDITY_AUTO_CANCEL = True
 
+# Auto-cancel timeout - override spread filter after X hours
+# Prevents being stuck in dead markets with prolonged wide spreads
+# Default: 1 hour (if spread stays wide for > 1h, market is likely dead)
+def env_float(key, default):
+    """Helper to get float from environment or use default."""
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS = env_float(
+    "LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS",
+    1.0
+)
+
 # =============================================================================
 # ORDER TIMEOUTS
 # =============================================================================
@@ -494,6 +512,11 @@ def validate_config():
         errors.append(
             f"SELL_REPRICE_SCALE_MODE must be one of {valid_modes}, got '{SELL_REPRICE_SCALE_MODE}'"
         )
+
+    # Validate timeout is positive
+    if LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS <= 0:
+        warnings.append(f"Invalid LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS ({LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS}), using default 1.0")
+        # Note: This is a warning, not an error - the value will be corrected
 
     return (len(errors) == 0, errors, warnings)
 

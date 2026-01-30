@@ -80,6 +80,9 @@ class SellMonitor:
         # Track consecutive bad price checks for confirmation delay
         self.bad_price_streak = 0
 
+        # Track when spread first exceeded threshold (for time-based override)
+        self.wide_spread_start_time = None
+
         # Sell order repricing config
         self.enable_repricing = config.get('ENABLE_SELL_ORDER_REPRICING', True)
         self.reprice_threshold_pct = config.get('SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT', 50.0)
@@ -590,26 +593,67 @@ class SellMonitor:
                     spread_pct = ((current_best_ask - current_best_bid) / current_best_bid) * 100
 
                     if spread_pct > self.stop_loss_spread_filter:
-                        logger.warning("")
-                        logger.warning("=" * 70)
-                        logger.warning("⚠️  SPREAD FILTER TRIGGERED - STOP-LOSS BLOCKED")
-                        logger.warning("=" * 70)
-                        logger.warning(f"   Current spread: {format_percent(spread_pct)}")
-                        logger.warning(f"   Filter threshold: {format_percent(self.stop_loss_spread_filter)}")
-                        logger.warning(f"   Best bid: {format_price(current_best_bid)}")
-                        logger.warning(f"   Best ask: {format_price(current_best_ask)}")
-                        logger.warning("")
-                        logger.warning("   This is likely a liquidity drain/flash crash, not a real market move.")
-                        logger.warning("   Skipping stop-loss check to avoid selling during temporary illiquidity.")
-                        logger.warning("=" * 70)
-                        logger.warning("")
+                        # Track how long spread has been wide
+                        import time
+                        current_time = time.time()
 
-                        # Reset bad price streak since this is not a valid check
-                        if self.bad_price_streak > 0:
-                            logger.info(f"   Resetting bad price streak (was {self.bad_price_streak})")
-                            self.bad_price_streak = 0
+                        if self.wide_spread_start_time is None:
+                            self.wide_spread_start_time = current_time
+                            logger.debug(f"Wide spread detected, starting timer")
 
-                        return (False, 0.0)
+                        # Calculate duration
+                        elapsed_seconds = current_time - self.wide_spread_start_time
+                        elapsed_hours = elapsed_seconds / 3600.0
+
+                        # Get timeout from config (default 1 hour)
+                        timeout_hours = self.config.get('LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS', 1.0)
+
+                        # Check if timeout exceeded
+                        if elapsed_hours >= timeout_hours:
+                            logger.warning("")
+                            logger.warning("=" * 70)
+                            logger.warning("⚠️  SPREAD FILTER TIMEOUT - OVERRIDING")
+                            logger.warning("=" * 70)
+                            logger.warning(f"   Spread has been wide for {elapsed_hours:.1f} hours")
+                            logger.warning(f"   Timeout threshold: {timeout_hours:.1f} hours")
+                            logger.warning(f"   Current spread: {format_percent(spread_pct)}")
+                            logger.warning("")
+                            logger.warning("   Market likely dead - allowing stop-loss to trigger")
+                            logger.warning("=" * 70)
+                            logger.warning("")
+
+                            # Reset timer
+                            self.wide_spread_start_time = None
+
+                            # DON'T return - let stop-loss check proceed below
+                        else:
+                            # Spread is wide but within timeout - block stop-loss
+                            logger.warning("")
+                            logger.warning("=" * 70)
+                            logger.warning("⚠️  SPREAD FILTER TRIGGERED - STOP-LOSS BLOCKED")
+                            logger.warning("=" * 70)
+                            logger.warning(f"   Current spread: {format_percent(spread_pct)}")
+                            logger.warning(f"   Filter threshold: {format_percent(self.stop_loss_spread_filter)}")
+                            logger.warning(f"   Best bid: {format_price(current_best_bid)}")
+                            logger.warning(f"   Best ask: {format_price(current_best_ask)}")
+                            logger.warning("")
+                            logger.warning(f"   Wide spread duration: {elapsed_hours:.1f}h / {timeout_hours:.1f}h timeout")
+                            logger.warning("   This is likely a liquidity drain/flash crash, not a real market move.")
+                            logger.warning("   Skipping stop-loss check to avoid selling during temporary illiquidity.")
+                            logger.warning("=" * 70)
+                            logger.warning("")
+
+                            # Reset bad price streak since this is not a valid check
+                            if self.bad_price_streak > 0:
+                                logger.info(f"   Resetting bad price streak (was {self.bad_price_streak})")
+                                self.bad_price_streak = 0
+
+                            return (False, 0.0)
+                    else:
+                        # Spread is normal - reset timer if it was set
+                        if self.wide_spread_start_time is not None:
+                            logger.info("✅ Spread normalized, resetting wide spread timer")
+                            self.wide_spread_start_time = None
 
         except Exception as e:
             logger.error(f"Error fetching orderbook for stop-loss: {e}")
