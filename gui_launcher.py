@@ -770,6 +770,23 @@ class BotLauncherGUI:
         ToolTip(sl_confirm_scale, "Require bad price for this many consecutive checks before triggering.\n\nDefault: 3 checks (27 seconds at 9s intervals)\nProtects against temporary price spikes.\nExample: 3 = need 3 consecutive bad checks to trigger")
         ToolTip(self.stop_loss_confirm_checks_entry, "Require bad price for this many consecutive checks before triggering.\n\nDefault: 3 checks (27 seconds at 9s intervals)\nProtects against temporary price spikes.\nExample: 3 = need 3 consecutive bad checks to trigger")
 
+        # === Laddering Warning Box ===
+        self.laddering_warning_frame = ttk.Frame(stoploss_frame, style='Warning.TFrame')
+        self.laddering_warning_frame.pack(fill='x', pady=(10, 5))
+
+        warning_text = ttk.Label(
+            self.laddering_warning_frame,
+            text="⚠️ WARNING: Stop-Loss settings above apply ONLY to positions opened WITHOUT laddering. Laddered positions use the Hard Stop-Loss configured in the Laddering tab instead.",
+            foreground='#FF8C00',
+            font=('TkDefaultFont', 9),
+            wraplength=650,
+            justify='left'
+        )
+        warning_text.pack(padx=10, pady=8)
+
+        # Initially hide the warning (shown only when laddering enabled)
+        self.laddering_warning_frame.pack_forget()
+
         # === Liquidity Protection Section ===
         liquidity_frame = ttk.LabelFrame(scrollable_frame, text="Liquidity Protection", padding=10)
         liquidity_frame.pack(fill='x', padx=10, pady=5)
@@ -1305,6 +1322,13 @@ class BotLauncherGUI:
         self.ladder_spread_filter_scale.config(state=state)
         self.ladder_spread_filter_entry.config(state=state)
         self.ladder_capital_multiplier_entry.config(state=state)
+
+        # Show/hide laddering warning in Risk tab
+        if hasattr(self, 'laddering_warning_frame'):
+            if enabled:
+                self.laddering_warning_frame.pack(fill='x', pady=(10, 5))
+            else:
+                self.laddering_warning_frame.pack_forget()
 
         # Update capital requirements if enabled
         if enabled:

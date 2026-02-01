@@ -27,10 +27,10 @@ Usage:
 """
 
 import time
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from datetime import datetime, timedelta
 from logger_config import setup_logger
-from utils import safe_float, format_price, format_percent, round_price, get_timestamp, interruptible_sleep
+from utils import safe_float, format_price, format_percent, round_price, get_timestamp, interruptible_sleep, format_usdt
 from monitoring.liquidity_checker import LiquidityChecker
 
 logger = setup_logger(__name__)
