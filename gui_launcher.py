@@ -776,6 +776,27 @@ class BotLauncherGUI:
         )
         ToolTip(cb_liquidity, tooltip_text)
 
+        # Auto-cancel timeout (override spread filter after X hours)
+        timeout_container = ttk.Frame(liquidity_frame)
+        timeout_container.pack(fill='x', pady=5)
+
+        ttk.Label(timeout_container, text="Auto-Cancel Timeout (hours):").pack(side='left', padx=(0, 5))
+        self.liquidity_timeout_var = tk.DoubleVar(value=1.0)
+        ttk.Entry(timeout_container, textvariable=self.liquidity_timeout_var, width=10).pack(side='left', padx=(0, 5))
+        ttk.Label(timeout_container, text="(Override spread filter after this duration)",
+                  font=('Arial', 8, 'italic')).pack(side='left')
+
+        timeout_tooltip = (
+            "Override spread filter after market is dead for this long.\n\n"
+            "How it works:\n"
+            "• If spread stays wide for > timeout hours, market is likely dead\n"
+            "• Bot will trigger stop-loss even with wide spread\n"
+            "• Prevents being stuck in illiquid markets forever\n\n"
+            "Default: 1.0 hour\n"
+            "Example: 1.0 = allow stop-loss after 1 hour of wide spread"
+        )
+        ToolTip(timeout_container, timeout_tooltip)
+
         # === Order Timeouts Section ===
         timeout_frame = ttk.LabelFrame(scrollable_frame, text="Order Timeouts", padding=10)
         timeout_frame.pack(fill='x', padx=10, pady=5)
@@ -1553,7 +1574,7 @@ class BotLauncherGUI:
             'SAFETY_MARGIN_CENTS', 'PRICE_DECIMALS', 'AMOUNT_DECIMALS',
             'ENABLE_STOP_LOSS', 'STOP_LOSS_TRIGGER_PERCENT', 'STOP_LOSS_AGGRESSIVE_OFFSET',
             'STOP_LOSS_SPREAD_FILTER_PCT', 'STOP_LOSS_CONFIRMATION_CHECKS',
-            'LIQUIDITY_AUTO_CANCEL',
+            'LIQUIDITY_AUTO_CANCEL', 'LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS',
             'BUY_ORDER_TIMEOUT_HOURS', 'SELL_ORDER_TIMEOUT_HOURS',
             'ENABLE_SELL_ORDER_REPRICING', 'SELL_REPRICE_LIQUIDITY_THRESHOLD_PCT',
             'ALLOW_SELL_BELOW_BUY_PRICE', 'MAX_SELL_PRICE_REDUCTION_PCT',
@@ -1614,6 +1635,7 @@ class BotLauncherGUI:
         self.stop_loss_spread_filter_var.set(self.config_data.get('stop_loss_spread_filter_pct', 10.0))
         self.stop_loss_confirm_checks_var.set(self.config_data.get('stop_loss_confirmation_checks', 3))
         self.liquidity_auto_cancel_var.set(self.config_data.get('liquidity_auto_cancel', True))
+        self.liquidity_timeout_var.set(self.config_data.get('liquidity_auto_cancel_timeout_hours', 1.0))
         self.buy_timeout_var.set(self.config_data.get('buy_order_timeout_hours', 8.0))
         self.sell_timeout_var.set(self.config_data.get('sell_order_timeout_hours', 8.0))
 
@@ -1905,6 +1927,7 @@ Click Yes to open the download page."""
         data['stop_loss_spread_filter_pct'] = self.stop_loss_spread_filter_var.get()
         data['stop_loss_confirmation_checks'] = self.stop_loss_confirm_checks_var.get()
         data['liquidity_auto_cancel'] = self.liquidity_auto_cancel_var.get()
+        data['liquidity_auto_cancel_timeout_hours'] = self.liquidity_timeout_var.get()
         data['buy_order_timeout_hours'] = self.buy_timeout_var.get()
         data['sell_order_timeout_hours'] = self.sell_timeout_var.get()
 

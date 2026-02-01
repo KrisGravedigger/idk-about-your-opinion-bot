@@ -688,6 +688,7 @@ class BuyHandler:
 
             # Apply minimum price floor to prevent selling below buy price
             # This is critical when retrying after order cancellation
+            # EXCEPT when stop-loss is triggered - then we need to exit at market price
             buy_price = position.get('avg_fill_price', 0)
             if buy_price > 0:
                 # Calculate minimum allowed price based on config
@@ -701,12 +702,22 @@ class BuyHandler:
                     min_allowed_price = buy_price * (1 - max_reduction_pct / 100.0)
                     min_allowed_price = round_price(min_allowed_price)
 
-                # Enforce floor
+                # Enforce floor (but OVERRIDE if stop-loss triggered and market is below floor)
                 if sell_price < min_allowed_price:
-                    logger.warning(f"⚠️  Calculated SELL price {format_price(sell_price)} is below minimum floor {format_price(min_allowed_price)}")
-                    logger.warning(f"   Buy price: {format_price(buy_price)}, Allow below: {allow_below_buy}, Max reduction: {max_reduction_pct}%")
-                    logger.info(f"   Adjusting to floor: {format_price(min_allowed_price)}")
-                    sell_price = min_allowed_price
+                    if stop_loss_triggered:
+                        # Stop-loss scenario: market price is below floor
+                        # We MUST override the floor to exit the position
+                        logger.warning("⚠️ Stop-loss triggered but price floor prevents market exit")
+                        logger.warning(f"   Market bid: {format_price(sell_price)} vs Floor: {format_price(min_allowed_price)}")
+                        logger.warning("⚠️ OVERRIDING floor to accept loss and exit position at market price")
+                        logger.info(f"   Selling at: {format_price(sell_price)} (below buy price of {format_price(buy_price)})")
+                        # sell_price stays at best_bid - don't adjust to floor
+                    else:
+                        # Normal scenario: respect floor
+                        logger.warning(f"⚠️  Calculated SELL price {format_price(sell_price)} is below minimum floor {format_price(min_allowed_price)}")
+                        logger.warning(f"   Buy price: {format_price(buy_price)}, Allow below: {allow_below_buy}, Max reduction: {max_reduction_pct}%")
+                        logger.info(f"   Adjusting to floor: {format_price(min_allowed_price)}")
+                        sell_price = min_allowed_price
 
             logger.info(f"   SELL price: {format_price(sell_price)}")
 
