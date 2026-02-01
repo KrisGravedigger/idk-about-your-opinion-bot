@@ -230,7 +230,11 @@ class BotLauncherGUI:
         # Tab 6: Credentials & API
         self.tab6 = self.create_credentials_tab()
         self.notebook.add(self.tab6, text="🔐 Credentials")
-        
+
+        # Tab 7: Position Laddering
+        self.tab7 = self.create_laddering_tab()
+        self.notebook.add(self.tab7, text="📈 Laddering")
+
         self.notebook.pack(fill='both', expand=True, padx=5, pady=5)
         
         # Bind tab change to mark config as changed
@@ -301,7 +305,10 @@ class BotLauncherGUI:
         self.capital_amount_entry = ttk.Entry(amount_frame, textvariable=self.capital_amount_var, width=15)
         self.capital_amount_entry.grid(row=0, column=1, sticky='w', pady=5, padx=5)
         ToolTip(self.capital_amount_entry, "Fixed USDT amount to use per position.\n\nDefault: 20.0\nRange: 10.0 - 10000.0\nExample: 50 = always trade with $50")
-        
+
+        # Bind capital amount to update ladder calculator
+        self.capital_amount_var.trace_add('write', lambda *args: self.update_ladder_calculator_if_enabled())
+
         # Percentage
         ttk.Label(amount_frame, text="Capital Percentage (%):").grid(row=1, column=0, sticky='w', pady=5)
         self.capital_percentage_var = tk.DoubleVar(value=90.0)
@@ -319,6 +326,9 @@ class BotLauncherGUI:
         self.capital_percentage_entry.grid(row=1, column=2, sticky='w', pady=5, padx=5)
         ToolTip(self.capital_percentage_scale, "Percentage of current balance to use per position.\n\nDefault: 90%\nRecommended: 80-95%\nExample: 90 = use 90% of balance")
         ToolTip(self.capital_percentage_entry, "Percentage of current balance to use per position.\n\nDefault: 90%\nRecommended: 80-95%\nExample: 90 = use 90% of balance")
+
+        # Bind capital percentage to update ladder calculator
+        self.capital_percentage_var.trace_add('write', lambda *args: self.update_ladder_calculator_if_enabled())
         
         # Auto Reinvest
         self.auto_reinvest_var = tk.BooleanVar(value=True)
@@ -367,6 +377,14 @@ class BotLauncherGUI:
         else:
             self.capital_amount_entry.config(state='disabled')
             self.capital_percentage_scale.config(state='normal')
+
+        # Update ladder capital requirements if laddering tab exists and is enabled
+        self.update_ladder_calculator_if_enabled()
+
+    def update_ladder_calculator_if_enabled(self):
+        """Update ladder capital requirements calculator if laddering is enabled."""
+        if hasattr(self, 'enable_laddering_var') and self.enable_laddering_var.get():
+            self.calculate_ladder_capital_requirements()
         
     def create_market_tab(self) -> ttk.Frame:
         """Create Market Selection tab."""
@@ -1014,7 +1032,337 @@ class BotLauncherGUI:
         self.on_allow_below_buy_toggle()
 
         return frame
-        
+
+    def create_laddering_tab(self) -> ttk.Frame:
+        """Create Position Laddering tab."""
+        frame = ttk.Frame(self.notebook)
+        scrollable_frame = self.create_scrollable_frame(frame)
+
+        # === Enable Laddering Section ===
+        enable_frame = ttk.LabelFrame(scrollable_frame, text="Position Laddering Strategy", padding=10)
+        enable_frame.pack(fill='x', padx=10, pady=5)
+
+        self.enable_laddering_var = tk.BooleanVar(value=False)
+        cb_enable_laddering = ttk.Checkbutton(
+            enable_frame,
+            text="Enable Position Laddering",
+            variable=self.enable_laddering_var,
+            command=self.on_laddering_toggle
+        )
+        cb_enable_laddering.pack(anchor='w', pady=5)
+
+        tooltip_text = (
+            "Replace traditional stop-loss with counter-BUY orders during flash crashes.\n\n"
+            "How it works:\n"
+            "• Instead of panic selling, place counter-BUY at lower price\n"
+            "• If market crashes, counter-BUY fills and averages down cost basis\n"
+            "• Profit from mean reversion when market recovers\n\n"
+            "Example:\n"
+            "  Entry: $0.78 → Crash to $0.50 → Counter-buy at $0.66\n"
+            "  New average: $0.72 → Sell at $0.75 = +4% profit\n\n"
+            "IMPORTANT: Requires 2x capital reserves (position + counter-buy)\n\n"
+            "Default: Disabled (opt-in for advanced users)"
+        )
+        ToolTip(cb_enable_laddering, tooltip_text)
+
+        # Warning label
+        warning_label = ttk.Label(
+            enable_frame,
+            text="⚠️ Requires 2x capital reserves. Position size auto-adjusted by Capital Multiplier.",
+            foreground='#FF8C00',
+            font=('TkDefaultFont', 9)
+        )
+        warning_label.pack(anchor='w', pady=(0, 5))
+
+        # === Ladder Configuration Section ===
+        config_frame = ttk.LabelFrame(scrollable_frame, text="Ladder Configuration", padding=10)
+        config_frame.pack(fill='x', padx=10, pady=5)
+
+        # Ladder Buy Offset (slider + entry)
+        offset_container = ttk.Frame(config_frame)
+        offset_container.pack(fill='x', pady=5)
+
+        ttk.Label(offset_container, text="Counter-BUY Offset (%):").pack(side='left', padx=(0, 10))
+
+        self.ladder_buy_offset_var = tk.DoubleVar(value=-15.0)
+
+        self.ladder_offset_scale = ttk.Scale(
+            offset_container,
+            from_=-50, to=-1,
+            variable=self.ladder_buy_offset_var,
+            orient='horizontal',
+            length=250
+        )
+        self.ladder_offset_scale.pack(side='left', fill='x', expand=True)
+
+        self.ladder_offset_entry = ttk.Entry(offset_container, textvariable=self.ladder_buy_offset_var, width=8)
+        self.ladder_offset_entry.pack(side='left', padx=(10, 0))
+
+        tooltip_text = (
+            "Percentage below entry price to place counter-BUY order.\n\n"
+            "Example: -15% means counter-BUY at 15% below entry\n"
+            "  If entry = $0.78, counter-BUY = $0.66\n\n"
+            "More aggressive (closer to -50%) = earlier fills but smaller discount\n"
+            "More conservative (closer to -1%) = bigger discount but may not fill\n\n"
+            "Default: -15%\n"
+            "Recommended: -10% to -20%"
+        )
+        ToolTip(self.ladder_offset_scale, tooltip_text)
+        ToolTip(self.ladder_offset_entry, tooltip_text)
+
+        # Max Rounds
+        ttk.Label(config_frame, text="Max Averaging Rounds:").pack(anchor='w', pady=5)
+        self.ladder_max_rounds_var = tk.IntVar(value=1)
+        self.ladder_max_rounds_entry = ttk.Entry(config_frame, textvariable=self.ladder_max_rounds_var, width=10)
+        self.ladder_max_rounds_entry.pack(anchor='w', pady=5)
+        ToolTip(self.ladder_max_rounds_entry,
+            "Maximum times to average down per position.\n\n"
+            "1 = conservative (recommended for Phase 1)\n"
+            "2-3 = more aggressive (requires more capital, future)\n\n"
+            "Default: 1")
+
+        # Profit Target (slider + entry)
+        profit_container = ttk.Frame(config_frame)
+        profit_container.pack(fill='x', pady=5)
+
+        ttk.Label(profit_container, text="Profit Target (%):").pack(side='left', padx=(0, 10))
+
+        self.ladder_profit_target_var = tk.DoubleVar(value=4.0)
+
+        self.ladder_profit_scale = ttk.Scale(
+            profit_container,
+            from_=1, to=20,
+            variable=self.ladder_profit_target_var,
+            orient='horizontal',
+            length=250
+        )
+        self.ladder_profit_scale.pack(side='left', fill='x', expand=True)
+
+        self.ladder_profit_entry = ttk.Entry(profit_container, textvariable=self.ladder_profit_target_var, width=8)
+        self.ladder_profit_entry.pack(side='left', padx=(10, 0))
+
+        tooltip_text = (
+            "Profit target % above averaged cost basis after counter-BUY fills.\n\n"
+            "Example: 4% profit target\n"
+            "  If averaged price = $0.72, sell target = $0.75 (+4%)\n\n"
+            "Lower = faster exits, higher = more profit\n\n"
+            "Default: 4%\n"
+            "Recommended: 3-8%"
+        )
+        ToolTip(self.ladder_profit_scale, tooltip_text)
+        ToolTip(self.ladder_profit_entry, tooltip_text)
+
+        # Hard Stop-Loss (slider + entry)
+        hard_sl_container = ttk.Frame(config_frame)
+        hard_sl_container.pack(fill='x', pady=5)
+
+        ttk.Label(hard_sl_container, text="Hard Stop-Loss (%):").pack(side='left', padx=(0, 10))
+
+        self.ladder_hard_stop_loss_var = tk.DoubleVar(value=-50.0)
+
+        self.ladder_hard_sl_scale = ttk.Scale(
+            hard_sl_container,
+            from_=-90, to=-10,
+            variable=self.ladder_hard_stop_loss_var,
+            orient='horizontal',
+            length=250
+        )
+        self.ladder_hard_sl_scale.pack(side='left', fill='x', expand=True)
+
+        self.ladder_hard_sl_entry = ttk.Entry(hard_sl_container, textvariable=self.ladder_hard_stop_loss_var, width=8)
+        self.ladder_hard_sl_entry.pack(side='left', padx=(10, 0))
+
+        tooltip_text = (
+            "Last resort stop-loss from AVERAGED price (not original entry).\n\n"
+            "If market doesn't recover after averaging, exit at this loss.\n\n"
+            "Example: -50% from averaged price\n"
+            "  If averaged price = $0.72, exit if drops below $0.36\n\n"
+            "This protects against complete market collapse scenarios.\n\n"
+            "Default: -50%\n"
+            "Recommended: -40% to -60%"
+        )
+        ToolTip(self.ladder_hard_sl_scale, tooltip_text)
+        ToolTip(self.ladder_hard_sl_entry, tooltip_text)
+
+        # Spread Filter (slider + entry)
+        spread_filter_container = ttk.Frame(config_frame)
+        spread_filter_container.pack(fill='x', pady=5)
+
+        ttk.Label(spread_filter_container, text="Spread Filter (%):").pack(side='left', padx=(0, 10))
+
+        self.ladder_spread_filter_var = tk.DoubleVar(value=20.0)
+
+        self.ladder_spread_filter_scale = ttk.Scale(
+            spread_filter_container,
+            from_=0, to=100,
+            variable=self.ladder_spread_filter_var,
+            orient='horizontal',
+            length=250
+        )
+        self.ladder_spread_filter_scale.pack(side='left', fill='x', expand=True)
+
+        self.ladder_spread_filter_entry = ttk.Entry(spread_filter_container, textvariable=self.ladder_spread_filter_var, width=8)
+        self.ladder_spread_filter_entry.pack(side='left', padx=(10, 0))
+
+        tooltip_text = (
+            "Don't counter-buy if spread exceeds this percentage.\n\n"
+            "Wide spreads indicate temporary illiquidity (flash crash), not true price.\n"
+            "This prevents buying into illiquid markets.\n\n"
+            "Example: 20% means block counter-buy if spread > 20%\n\n"
+            "Default: 20%\n"
+            "Recommended: 15-25%"
+        )
+        ToolTip(self.ladder_spread_filter_scale, tooltip_text)
+        ToolTip(self.ladder_spread_filter_entry, tooltip_text)
+
+        # Capital Multiplier
+        ttk.Label(config_frame, text="Capital Multiplier:").pack(anchor='w', pady=5)
+        self.ladder_capital_multiplier_var = tk.DoubleVar(value=2.0)
+        self.ladder_capital_multiplier_entry = ttk.Entry(config_frame, textvariable=self.ladder_capital_multiplier_var, width=10)
+        self.ladder_capital_multiplier_entry.pack(anchor='w', pady=5)
+        ToolTip(self.ladder_capital_multiplier_entry,
+            "Capital reserve ratio for ladder strategy.\n\n"
+            "Determines how position size is adjusted to reserve capital for counter-buy.\n"
+            "Effective position size = CAPITAL_PERCENTAGE / LADDER_CAPITAL_MULTIPLIER\n\n"
+            "Example: 2.0 with 90% capital\n"
+            "  Position size: 45% (for initial BUY)\n"
+            "  Reserve: 45% (for counter-buy if needed)\n\n"
+            "Default: 2.0 (requires 2x capital)\n"
+            "Minimum: 1.0")
+
+        # Bind capital multiplier to update calculator
+        self.ladder_capital_multiplier_var.trace_add('write', lambda *args: self.calculate_ladder_capital_requirements())
+
+        # Laddering Mode
+        mode_container = ttk.Frame(config_frame)
+        mode_container.pack(fill='x', pady=5)
+
+        ttk.Label(mode_container, text="Laddering Mode:").pack(side='left', padx=(0, 10))
+
+        self.laddering_mode_var = tk.StringVar(value='single')
+        mode_combo = ttk.Combobox(
+            mode_container,
+            textvariable=self.laddering_mode_var,
+            values=['single', 'geometric'],
+            state='readonly',
+            width=15
+        )
+        mode_combo.pack(side='left', padx=5)
+        ToolTip(mode_combo,
+            "Laddering execution mode:\n\n"
+            "single: One counter-BUY level (Phase 1: conservative, recommended)\n"
+            "geometric: Multiple counter-BUY levels (Phase 2: future, requires 4x capital)\n\n"
+            "Default: single\n"
+            "Note: Only 'single' is currently implemented")
+
+        # === Capital Requirements Calculator Section ===
+        calc_frame = ttk.LabelFrame(scrollable_frame, text="Capital Requirements Calculator", padding=10)
+        calc_frame.pack(fill='x', padx=10, pady=5)
+
+        # Info label
+        info_label = ttk.Label(
+            calc_frame,
+            text="Estimated capital needed for laddering strategy:",
+            font=('TkDefaultFont', 9, 'bold')
+        )
+        info_label.pack(anchor='w', pady=(0, 10))
+
+        # Capital requirement display
+        self.capital_req_label = ttk.Label(
+            calc_frame,
+            text="Configure Capital and Ladder settings to see estimate.",
+            foreground='#555555',
+            font=('TkDefaultFont', 9)
+        )
+        self.capital_req_label.pack(anchor='w', pady=5)
+
+        # Calculate button
+        calc_button = ttk.Button(
+            calc_frame,
+            text="Calculate Capital Requirements",
+            command=self.calculate_ladder_capital_requirements
+        )
+        calc_button.pack(anchor='w', pady=5)
+
+        # Initialize widget states
+        self.on_laddering_toggle()
+
+        return frame
+
+    def on_laddering_toggle(self):
+        """Handle laddering toggle - enable/disable all laddering parameters."""
+        enabled = self.enable_laddering_var.get()
+        state = 'normal' if enabled else 'disabled'
+
+        # Toggle all laddering controls
+        self.ladder_offset_scale.config(state=state)
+        self.ladder_offset_entry.config(state=state)
+        self.ladder_max_rounds_entry.config(state=state)
+        self.ladder_profit_scale.config(state=state)
+        self.ladder_profit_entry.config(state=state)
+        self.ladder_hard_sl_scale.config(state=state)
+        self.ladder_hard_sl_entry.config(state=state)
+        self.ladder_spread_filter_scale.config(state=state)
+        self.ladder_spread_filter_entry.config(state=state)
+        self.ladder_capital_multiplier_entry.config(state=state)
+
+        # Update capital requirements if enabled
+        if enabled:
+            self.calculate_ladder_capital_requirements()
+
+    def calculate_ladder_capital_requirements(self):
+        """Calculate and display estimated capital requirements for laddering."""
+        try:
+            # Get capital settings from Capital tab
+            capital_mode = self.capital_mode_var.get()
+            capital_percentage = self.capital_percentage_var.get()
+            capital_amount = self.capital_amount_var.get()
+
+            # Get ladder settings
+            multiplier = self.ladder_capital_multiplier_var.get()
+
+            if capital_mode == 'percentage':
+                # Calculate effective position size
+                effective_pct = capital_percentage / multiplier
+                reserve_pct = capital_percentage - effective_pct
+
+                # Warning if insufficient
+                warning = ""
+                if capital_percentage < 80:
+                    warning = "\n⚠️ WARNING: Capital % may be too low for safe laddering."
+
+                message = (
+                    f"Capital Mode: Percentage ({capital_percentage:.1f}%)\n"
+                    f"Capital Multiplier: {multiplier}x\n\n"
+                    f"Position size: {effective_pct:.1f}% (for initial BUY)\n"
+                    f"Reserved: {reserve_pct:.1f}% (for counter-BUY)\n\n"
+                    f"Example with $100 balance:\n"
+                    f"  Initial position: ${effective_pct:.0f}\n"
+                    f"  Counter-buy reserve: ${reserve_pct:.0f}\n"
+                    f"  Total utilized: ${capital_percentage:.0f}"
+                    f"{warning}"
+                )
+            else:  # fixed mode
+                position_size = capital_amount / multiplier
+                reserve = capital_amount - position_size
+
+                message = (
+                    f"Capital Mode: Fixed (${capital_amount:.2f})\n"
+                    f"Capital Multiplier: {multiplier}x\n\n"
+                    f"Position size: ${position_size:.2f} (for initial BUY)\n"
+                    f"Reserved: ${reserve:.2f} (for counter-BUY)\n\n"
+                    f"Total capital needed: ${capital_amount:.2f}"
+                )
+
+            # Update label
+            self.capital_req_label.config(text=message, foreground='#000000')
+
+        except Exception as e:
+            self.capital_req_label.config(
+                text=f"Error calculating requirements: {str(e)}",
+                foreground='#FF0000'
+            )
+
     def update_stop_loss_label(self, value=None):
         """Update stop-loss label."""
         self.stop_loss_label.config(text=f"{self.stop_loss_trigger_var.get():.1f}%")
@@ -1583,7 +1931,10 @@ class BotLauncherGUI:
             'LOG_LEVEL', 'LOG_FILE',
             'MARKET_SCAN_INTERVAL_SECONDS', 'FILL_CHECK_INTERVAL_SECONDS',
             'TELEGRAM_HEARTBEAT_INTERVAL_HOURS',
-            'API_HOST'
+            'API_HOST',
+            'ENABLE_POSITION_LADDERING', 'LADDER_BUY_OFFSET_PCT', 'LADDER_MAX_ROUNDS',
+            'LADDER_PROFIT_TARGET_PCT', 'LADDER_HARD_STOP_LOSS_PCT', 'LADDER_SPREAD_FILTER_PCT',
+            'LADDER_CAPITAL_MULTIPLIER', 'LADDERING_MODE'
         ]
         
         for key in keys:
@@ -1667,6 +2018,17 @@ class BotLauncherGUI:
         
         # Credentials tab
         self.api_host_var.set(self.config_data.get('api_host', 'https://proxy.opinion.trade:8443'))
+
+        # Laddering tab
+        self.enable_laddering_var.set(self.config_data.get('enable_position_laddering', False))
+        self.ladder_buy_offset_var.set(self.config_data.get('ladder_buy_offset_pct', -15.0))
+        self.ladder_max_rounds_var.set(self.config_data.get('ladder_max_rounds', 1))
+        self.ladder_profit_target_var.set(self.config_data.get('ladder_profit_target_pct', 4.0))
+        self.ladder_hard_stop_loss_var.set(self.config_data.get('ladder_hard_stop_loss_pct', -50.0))
+        self.ladder_spread_filter_var.set(self.config_data.get('ladder_spread_filter_pct', 20.0))
+        self.ladder_capital_multiplier_var.set(self.config_data.get('ladder_capital_multiplier', 2.0))
+        self.laddering_mode_var.set(self.config_data.get('laddering_mode', 'single'))
+        self.on_laddering_toggle()
 
     def check_first_run_and_setup(self):
         """
@@ -1954,7 +2316,17 @@ Click Yes to open the download page."""
         
         # Credentials tab
         data['api_host'] = self.api_host_var.get()
-        
+
+        # Laddering tab
+        data['enable_position_laddering'] = self.enable_laddering_var.get()
+        data['ladder_buy_offset_pct'] = self.ladder_buy_offset_var.get()
+        data['ladder_max_rounds'] = self.ladder_max_rounds_var.get()
+        data['ladder_profit_target_pct'] = self.ladder_profit_target_var.get()
+        data['ladder_hard_stop_loss_pct'] = self.ladder_hard_stop_loss_var.get()
+        data['ladder_spread_filter_pct'] = self.ladder_spread_filter_var.get()
+        data['ladder_capital_multiplier'] = self.ladder_capital_multiplier_var.get()
+        data['laddering_mode'] = self.laddering_mode_var.get()
+
         return data
         
     def save_configuration(self):

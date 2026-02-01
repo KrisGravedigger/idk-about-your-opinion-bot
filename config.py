@@ -295,6 +295,64 @@ STOP_LOSS_SPREAD_FILTER_PCT = 10.0
 STOP_LOSS_CONFIRMATION_CHECKS = 3
 
 # =============================================================================
+# POSITION LADDERING STRATEGY
+# =============================================================================
+
+# Enable position laddering strategy (buy the dip instead of panic selling)
+# This replaces traditional stop-loss with counter-BUY orders at lower prices
+# to average down your cost basis and profit from mean reversion.
+#
+# IMPORTANT: Requires 2x capital reserves (1x position + 1x counter-buy)
+# When enabled, CAPITAL_PERCENTAGE is automatically divided by LADDER_CAPITAL_MULTIPLIER
+#
+# Use case: Turn flash crashes into profit opportunities
+# Example: Entry $0.78 → Crash to $0.50 → Counter-buy $0.66 → Avg $0.72 → Sell $0.75 = +4% profit
+ENABLE_POSITION_LADDERING = False  # Default: disabled (opt-in for advanced users)
+
+# Laddering mode
+# 'single' = One counter-BUY level (Phase 1: conservative, recommended)
+# 'multi' = Multiple counter-BUY levels (Phase 2: future enhancement, requires 4x capital)
+LADDERING_MODE = 'single'
+
+# Counter-BUY offset (percentage below entry price)
+# Determines where to place the counter-BUY order
+# Example: -15.0 = place counter-BUY at 15% below entry
+#   If entry = $0.7820, counter-BUY = $0.6647 (0.7820 × 0.85)
+LADDER_BUY_OFFSET_PCT = -15.0
+
+# Maximum number of times to average down per position
+# 1 = conservative (recommended for Phase 1)
+# 2-3 = more aggressive (requires more capital, future enhancement)
+LADDER_MAX_ROUNDS = 1
+
+# Profit target after averaging down (percentage above break-even)
+# After averaging, bot will sell at: averaged_cost_basis × (1 + LADDER_PROFIT_TARGET_PCT/100)
+# Example: 4.0 = sell at 4% profit above averaged price
+#   If averaged price = $0.7234, sell target = $0.7520 (+4%)
+LADDER_PROFIT_TARGET_PCT = 4.0
+
+# Hard stop-loss from AVERAGED price (last resort protection)
+# If market doesn't recover after averaging, exit at this loss
+# Example: -50.0 = exit if loss exceeds 50% from averaged price
+# NOTE: This is calculated from AVERAGED price, not original entry
+LADDER_HARD_STOP_LOSS_PCT = -50.0
+
+# Spread filter for counter-BUY execution (flash crash protection)
+# Don't counter-buy if spread exceeds this percentage
+# Wide spreads indicate temporary illiquidity, not true price moves
+# Example: 20.0 = block counter-buy if spread > 20%
+LADDER_SPREAD_FILTER_PCT = 20.0
+
+# Capital multiplier (reserve ratio for ladder strategy)
+# Determines how much capital to reserve for counter-buy orders
+# Example: 2.0 = reserve 50% for position + 50% for counter-buy
+# Effective position size = CAPITAL_PERCENTAGE / LADDER_CAPITAL_MULTIPLIER
+# If CAPITAL_PERCENTAGE = 90% and multiplier = 2.0:
+#   - Position size = 45% (for initial BUY)
+#   - Counter-buy reserve = 45% (for ladder BUY if needed)
+LADDER_CAPITAL_MULTIPLIER = 2.0
+
+# =============================================================================
 # SELL ORDER REPRICING CONTROL
 # =============================================================================
 
@@ -518,6 +576,83 @@ def validate_config():
     if LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS <= 0:
         warnings.append(f"Invalid LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS ({LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS}), using default 1.0")
         LIQUIDITY_AUTO_CANCEL_TIMEOUT_HOURS = 1.0  # ACTUALLY FIX IT
+
+    # Validate position laddering parameters
+    if ENABLE_POSITION_LADDERING:
+        # Validate laddering mode
+        valid_ladder_modes = ['single', 'multi']
+        if LADDERING_MODE not in valid_ladder_modes:
+            errors.append(
+                f"LADDERING_MODE must be one of {valid_ladder_modes}, got '{LADDERING_MODE}'"
+            )
+
+        # Validate ladder buy offset (must be negative percentage)
+        if LADDER_BUY_OFFSET_PCT >= 0 or LADDER_BUY_OFFSET_PCT < -99:
+            errors.append(
+                f"LADDER_BUY_OFFSET_PCT must be negative and between -1 and -99, got {LADDER_BUY_OFFSET_PCT}"
+            )
+
+        # Validate max rounds (must be positive integer)
+        if LADDER_MAX_ROUNDS < 1 or LADDER_MAX_ROUNDS > 3:
+            errors.append(
+                f"LADDER_MAX_ROUNDS must be 1-3, got {LADDER_MAX_ROUNDS}"
+            )
+
+        # Validate profit target (must be positive)
+        if LADDER_PROFIT_TARGET_PCT <= 0 or LADDER_PROFIT_TARGET_PCT > 100:
+            errors.append(
+                f"LADDER_PROFIT_TARGET_PCT must be positive and <= 100, got {LADDER_PROFIT_TARGET_PCT}"
+            )
+
+        # Validate hard stop-loss (must be negative and more aggressive than profit target)
+        if LADDER_HARD_STOP_LOSS_PCT >= 0 or LADDER_HARD_STOP_LOSS_PCT < -100:
+            errors.append(
+                f"LADDER_HARD_STOP_LOSS_PCT must be negative and between -1 and -100, got {LADDER_HARD_STOP_LOSS_PCT}"
+            )
+
+        # Validate that hard stop-loss is more aggressive than standard stop-loss
+        if abs(LADDER_HARD_STOP_LOSS_PCT) < abs(STOP_LOSS_TRIGGER_PERCENT):
+            errors.append(
+                f"LADDER_HARD_STOP_LOSS_PCT ({LADDER_HARD_STOP_LOSS_PCT}%) must be more aggressive (larger) than "
+                f"STOP_LOSS_TRIGGER_PERCENT ({STOP_LOSS_TRIGGER_PERCENT}%)"
+            )
+
+        # Validate spread filter (must be positive percentage)
+        if LADDER_SPREAD_FILTER_PCT <= 0 or LADDER_SPREAD_FILTER_PCT > 100:
+            errors.append(
+                f"LADDER_SPREAD_FILTER_PCT must be positive and <= 100, got {LADDER_SPREAD_FILTER_PCT}"
+            )
+
+        # Validate capital multiplier (must be >= 1.0)
+        if LADDER_CAPITAL_MULTIPLIER < 1.0:
+            errors.append(
+                f"LADDER_CAPITAL_MULTIPLIER must be >= 1.0, got {LADDER_CAPITAL_MULTIPLIER}"
+            )
+
+        # Warning: Capital requirements
+        effective_percentage = CAPITAL_PERCENTAGE / LADDER_CAPITAL_MULTIPLIER
+        warnings.append(
+            f"Position laddering enabled: Effective position size = {effective_percentage:.1f}% "
+            f"(CAPITAL_PERCENTAGE / LADDER_CAPITAL_MULTIPLIER)"
+        )
+        warnings.append(
+            f"Reserved for counter-buy: {effective_percentage:.1f}% "
+            f"({LADDER_CAPITAL_MULTIPLIER}x capital required)"
+        )
+
+        # Warning: Traditional stop-loss interaction
+        if ENABLE_STOP_LOSS:
+            warnings.append(
+                "Both position laddering and traditional stop-loss are enabled. "
+                "Stop-loss will be calculated from AVERAGED price after counter-buy fills."
+            )
+
+        # Warning: Multi-ladder mode not implemented
+        if LADDERING_MODE == 'multi':
+            warnings.append(
+                "LADDERING_MODE='multi' is not yet implemented (Phase 2 feature). "
+                "Only 'single' mode is currently supported."
+            )
 
     return (len(errors) == 0, errors, warnings)
 
