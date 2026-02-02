@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 # Add parent dir to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Mock API client for testing
 class MockClient:
@@ -209,18 +209,18 @@ def test_5_position_too_small():
 def test_6_warning_threshold():
     """
     Test 6: Position below airdrop points threshold (should log warning).
-    
+
     Scenario:
         - Balance: 7 USDT
         - Mode: percentage 100% = 7 USDT
         - Min for points: 10 USDT
-        
-    Expected: 
+
+    Expected:
         - Should succeed (7 > 5 platform min)
         - Should log warning (7 < 10 points threshold)
     """
     print("Test 6: Position below airdrop points threshold (warning)")
-    
+
     config = {
         'CAPITAL_MODE': 'percentage',
         'CAPITAL_AMOUNT_USDT': 10.0,
@@ -230,15 +230,120 @@ def test_6_warning_threshold():
         'MIN_POSITION_FOR_POINTS_USDT': 10.0,
         'WARN_IF_BELOW_POINTS_THRESHOLD': True
     }
-    
+
     client = MockClient(balance=7.0)
     manager = CapitalManager(config, client)
-    
+
     position_size = manager.get_position_size()
-    
+
     assert position_size == 7.0, f"Expected 7.0, got {position_size}"
     print(f"   ✓ Position size: ${position_size:.2f} (warning logged above)")
     print()
+
+
+def test_7_laddering_percentage_mode():
+    """
+    Test 7: Laddering enabled with percentage mode.
+
+    Scenario:
+        - Balance: 174.83 USDT
+        - Mode: percentage 90%
+        - Laddering: enabled (2x multiplier)
+
+    Expected:
+        - Base calculation: 174.83 × 0.90 = 157.35
+        - Adjusted for laddering: 157.35 / 2.0 = 78.67 (rounded to 78.68)
+        - This reserves 45% for position + 45% for counter-buy
+    """
+    print("Test 7: Laddering enabled with percentage mode")
+
+    # Import config to check and modify laddering flag
+    import config
+    original_laddering = config.ENABLE_POSITION_LADDERING
+
+    try:
+        # Enable laddering for this test
+        config.ENABLE_POSITION_LADDERING = True
+
+        test_config = {
+            'CAPITAL_MODE': 'percentage',
+            'CAPITAL_AMOUNT_USDT': 20.0,
+            'CAPITAL_PERCENTAGE': 90.0,
+            'MIN_BALANCE_TO_CONTINUE_USDT': 50.0,
+            'MIN_POSITION_SIZE_USDT': 50.0,
+            'MIN_POSITION_FOR_POINTS_USDT': 10.0,
+            'WARN_IF_BELOW_POINTS_THRESHOLD': False
+        }
+
+        client = MockClient(balance=174.83)
+        manager = CapitalManager(test_config, client)
+
+        position_size = manager.get_position_size()
+
+        # Expected: 174.83 × 0.90 / 2.0 = 78.6735 ≈ 78.67
+        expected = 174.83 * 0.90 / 2.0
+
+        # Allow small floating point difference
+        assert abs(position_size - expected) < 0.01, f"Expected {expected:.2f}, got {position_size:.2f}"
+        print(f"   ✓ Position size: ${position_size:.2f} (45% of balance)")
+        print(f"   ✓ Counter-buy reserve: ${position_size:.2f} (45% of balance)")
+        print()
+
+    finally:
+        # Restore original config
+        config.ENABLE_POSITION_LADDERING = original_laddering
+
+
+def test_8_laddering_fixed_mode():
+    """
+    Test 8: Laddering enabled with fixed mode.
+
+    Scenario:
+        - Balance: 200 USDT
+        - Mode: fixed 100 USDT
+        - Laddering: enabled (2x multiplier)
+
+    Expected:
+        - Base: 100 USDT (fixed)
+        - Adjusted for laddering: 100 / 2.0 = 50 USDT
+        - This reserves 50 USDT for position + 50 USDT for counter-buy
+    """
+    print("Test 8: Laddering enabled with fixed mode")
+
+    # Import config to check and modify laddering flag
+    import config
+    original_laddering = config.ENABLE_POSITION_LADDERING
+
+    try:
+        # Enable laddering for this test
+        config.ENABLE_POSITION_LADDERING = True
+
+        test_config = {
+            'CAPITAL_MODE': 'fixed',
+            'CAPITAL_AMOUNT_USDT': 100.0,
+            'CAPITAL_PERCENTAGE': 90.0,
+            'MIN_BALANCE_TO_CONTINUE_USDT': 50.0,
+            'MIN_POSITION_SIZE_USDT': 40.0,
+            'MIN_POSITION_FOR_POINTS_USDT': 10.0,
+            'WARN_IF_BELOW_POINTS_THRESHOLD': False
+        }
+
+        client = MockClient(balance=200.0)
+        manager = CapitalManager(test_config, client)
+
+        position_size = manager.get_position_size()
+
+        # Expected: 100 / 2.0 = 50.0
+        expected = 50.0
+
+        assert position_size == expected, f"Expected {expected:.2f}, got {position_size:.2f}"
+        print(f"   ✓ Position size: ${position_size:.2f}")
+        print(f"   ✓ Counter-buy reserve: ${position_size:.2f}")
+        print()
+
+    finally:
+        # Restore original config
+        config.ENABLE_POSITION_LADDERING = original_laddering
 
 
 # =============================================================================
@@ -257,7 +362,9 @@ if __name__ == "__main__":
         test_4_insufficient_balance()
         test_5_position_too_small()
         test_6_warning_threshold()
-        
+        test_7_laddering_percentage_mode()
+        test_8_laddering_fixed_mode()
+
         print("=" * 60)
         print("✅ ALL TESTS PASSED!")
         print("=" * 60)

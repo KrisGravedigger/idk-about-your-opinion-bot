@@ -20,6 +20,7 @@ Usage:
 from typing import Dict, Any
 from logger_config import setup_logger
 from utils import format_usdt
+from config_loader import config
 
 logger = setup_logger(__name__)
 
@@ -124,6 +125,18 @@ class CapitalManager:
             raise ValueError(
                 f"Invalid CAPITAL_MODE: '{self.capital_mode}' "
                 f"(must be 'fixed' or 'percentage')"
+            )
+
+        # Apply laddering capital adjustment if enabled
+        if config.ENABLE_POSITION_LADDERING:
+            original_size = position_size
+            position_size = position_size / config.LADDER_CAPITAL_MULTIPLIER
+            logger.debug(
+                f"Position laddering enabled: dividing by {config.LADDER_CAPITAL_MULTIPLIER}x "
+                f"({format_usdt(original_size)} → {format_usdt(position_size)})"
+            )
+            logger.debug(
+                f"Capital reserved for counter-buy: {format_usdt(original_size - position_size)}"
             )
         
         # Validate position meets platform minimum
