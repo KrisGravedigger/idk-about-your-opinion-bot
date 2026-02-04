@@ -109,7 +109,10 @@ class BuyMonitor:
         logger.info(f"   Check interval: {self.check_interval}s")
         logger.info(f"   Timeout: {timeout_at.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("")
-        
+
+        # Extract outcome side for log messages (YES or NO)
+        outcome_side = self.state.get('current_position', {}).get('outcome_side', 'YES')
+
         # Extract market info from state
         # State can have data in root OR in current_position depending on stage
         market_id = self.state.get('market_id') or self.state.get('current_position', {}).get('market_id')
@@ -360,11 +363,11 @@ class BuyMonitor:
                     # Extract fill data
                     filled_amount, avg_fill_price, filled_usdt = self._extract_fill_data(order)
                     
-                    logger.info(f"   Filled: {filled_amount:.4f} YES tokens")
+                    logger.info(f"   Filled: {filled_amount:.4f} {outcome_side} tokens")
                     logger.info(f"   Avg price: {format_price(avg_fill_price)}")
                     logger.info(f"   Total cost: ${filled_usdt:.2f}")
                     logger.info("")
-                    
+
                     return {
                         'status': 'filled',
                         'filled_amount': filled_amount,
@@ -413,7 +416,7 @@ class BuyMonitor:
 
                         logger.info("")
                         logger.info(f"   📊 Proceeding with filled portion:")
-                        logger.info(f"   Filled: {filled_amount:.4f} YES tokens")
+                        logger.info(f"   Filled: {filled_amount:.4f} {outcome_side} tokens")
                         logger.info(f"   Avg price: {format_price(avg_fill_price)}")
                         logger.info(f"   Total cost: ${filled_usdt:.2f}")
                         logger.info("")
