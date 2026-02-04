@@ -433,6 +433,7 @@ class PositionLaddering:
         position['avg_fill_price'] = avg_price
         position['filled_amount'] = total_shares
         position['total_cost_usd'] = float(total_cost)
+        position['filled_usdt'] = float(total_cost)
         position['averaged_down'] = True
         position['averaging_rounds'] = position.get('averaging_rounds', 0) + 1
 
