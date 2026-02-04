@@ -1403,7 +1403,9 @@ class SellMonitor:
         try:
             market_data = self.client.get_market(market_id)
             if market_data:
-                market_status = market_data.get('status', 'unknown').lower()
+                # SDK returns ModelsTopicStatus enum -- extract .value (string) before .lower()
+                market_status_raw = market_data.get('status', 'unknown')
+                market_status = getattr(market_status_raw, 'value', market_status_raw).lower()
 
                 if market_status in ['resolved', 'closed', 'resolving']:
                     logger.warning("")
