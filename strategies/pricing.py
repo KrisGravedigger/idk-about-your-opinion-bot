@@ -256,7 +256,7 @@ class PricingStrategy:
         # Safety check 2: Don't cross the bid
         min_safe_price = best_bid + self.safety_margin
         
-        if price <= min_safe_price:
+        if price < min_safe_price:
             logger.warning(
                 f"⚠️  Calculated SELL price {format_price(price)} "
                 f"would cross bid {format_price(best_bid)}"

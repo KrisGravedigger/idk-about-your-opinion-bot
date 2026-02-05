@@ -908,14 +908,8 @@ class SellMonitor:
                 total_proceeds = 0.0
 
                 for trade in trades:
-                    # Extract shares and amount
-                    # IMPORTANT: trades[] returns values in WEI (18 decimals)
-                    # Must divide by 1e18 to get human-readable values
-                    shares_wei = safe_float(trade.get('shares', 0))
-                    proceeds_wei = safe_float(trade.get('amount', 0))
-
-                    shares = shares_wei / 1e18
-                    proceeds = proceeds_wei / 1e18
+                    shares = safe_float(trade.get('shares', 0))
+                    proceeds = safe_float(trade.get('amount', 0))
 
                     total_shares += shares
                     total_proceeds += proceeds
@@ -1120,9 +1114,12 @@ class SellMonitor:
         filled_amount = safe_float(position.get('filled_amount', 0))
         original_buy_price = safe_float(position.get('original_cost_basis', position.get('avg_fill_price', 0)))
 
-        # Extract BUY fill data
-        buy_filled_shares = safe_float(buy_order.get('filled_shares', filled_amount))
-        buy_filled_price = safe_float(buy_order.get('price', position.get('ladder_buy_price', 0)))
+        # Extract BUY fill data using standard extraction (with fallback chain)
+        buy_filled_shares, buy_filled_price, _ = self._extract_fill_data(buy_order)
+        if buy_filled_shares == 0:
+            buy_filled_shares = filled_amount
+        if buy_filled_price == 0:
+            buy_filled_price = position.get('ladder_buy_price', 0)
 
         # Execute averaging down
         from monitoring.position_laddering import PositionLaddering
@@ -1319,9 +1316,12 @@ class SellMonitor:
         logger.warning("=" * 70)
         logger.warning("")
 
-        # Extract BUY fill data
-        buy_filled_shares = safe_float(buy_order.get('filled_shares', filled_amount))
-        buy_filled_price = safe_float(buy_order.get('price', position.get('ladder_buy_price', 0)))
+        # Extract BUY fill data using standard extraction (with fallback chain)
+        buy_filled_shares, buy_filled_price, _ = self._extract_fill_data(buy_order)
+        if buy_filled_shares == 0:
+            buy_filled_shares = filled_amount
+        if buy_filled_price == 0:
+            buy_filled_price = position.get('ladder_buy_price', 0)
 
         logger.info(f"   Original: {filled_amount:.2f} @ {format_price(original_buy_price)}")
         logger.info(f"   Counter-buy: {buy_filled_shares:.2f} @ {format_price(buy_filled_price)}")
@@ -1403,7 +1403,9 @@ class SellMonitor:
         try:
             market_data = self.client.get_market(market_id)
             if market_data:
-                market_status = market_data.get('status', 'unknown').lower()
+                # SDK returns ModelsTopicStatus enum -- extract .value (string) before .lower()
+                market_status_raw = market_data.get('status', 'unknown')
+                market_status = getattr(market_status_raw, 'value', market_status_raw).lower()
 
                 if market_status in ['resolved', 'closed', 'resolving']:
                     logger.warning("")

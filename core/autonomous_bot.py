@@ -566,6 +566,7 @@ class AutonomousBot:
         position = self.state.get('current_position', {})
         market_info = None
         order_info = None
+        ladder_info = None
         position_value = 0.0
         outcome_side = None
 
@@ -747,6 +748,23 @@ class AutonomousBot:
                                 except Exception as e:
                                     logger.debug(f"Could not fetch order details for heartbeat: {e}")
 
+                        # Fetch ladder BUY order info if laddering is active
+                        if position.get('laddering_active') and stage in ['SELL_PLACED', 'SELL_MONITORING']:
+                            ladder_buy_id = position.get('ladder_buy_order_id')
+                            if ladder_buy_id and ladder_buy_id != 'unknown':
+                                try:
+                                    ladder_order = self.client.get_order(ladder_buy_id)
+                                    if ladder_order:
+                                        ladder_info = {
+                                            'ladder_buy_order_id': ladder_buy_id,
+                                            'ladder_buy_price': float(ladder_order.get('price', 0)),
+                                            'ladder_buy_status': ladder_order.get('status_enum', 'unknown'),
+                                            'ladder_buy_filled': float(ladder_order.get('filled_amount', 0)),
+                                            'ladder_buy_amount': float(ladder_order.get('order_amount', 0)),
+                                        }
+                                except Exception as e:
+                                    logger.debug(f"Could not fetch ladder order for heartbeat: {e}")
+
             except Exception as e:
                 logger.debug(f"Could not fetch market info for heartbeat: {e}")
 
@@ -794,7 +812,8 @@ class AutonomousBot:
             position_value=position_value,
             outcome_side=outcome_side,
             stop_loss_info=stop_loss_info,
-            sell_placed_timestamp=sell_placed_timestamp
+            sell_placed_timestamp=sell_placed_timestamp,
+            ladder_info=ladder_info
         )
 
         self.last_heartbeat = now

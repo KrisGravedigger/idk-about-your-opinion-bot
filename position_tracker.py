@@ -126,7 +126,21 @@ class PositionTracker:
         d_buy_price = safe_decimal(buy_price)
         d_sell_tokens = safe_decimal(sell_tokens)
         d_sell_price = safe_decimal(sell_price)
-        
+
+        # Validate buy-side consistency
+        # buy_cost_usdt should approximately equal buy_tokens × buy_price.
+        # Mismatches indicate stale filled_usdt (e.g. after laddering or self-healing recovery).
+        expected_buy_cost = d_buy_tokens * d_buy_price
+        if d_buy_cost > 0 and expected_buy_cost > 0:
+            cost_diff_pct = abs((d_buy_cost - expected_buy_cost) / expected_buy_cost) * Decimal('100')
+            if cost_diff_pct > Decimal('1'):
+                logger.warning(
+                    f"⚠️  P&L buy-side mismatch: buy_cost=${float(d_buy_cost):.2f} "
+                    f"but tokens({float(d_buy_tokens):.2f}) × price(${float(d_buy_price):.4f}) "
+                    f"= ${float(expected_buy_cost):.2f} (diff {float(cost_diff_pct):.1f}%). "
+                    f"Using buy_cost_usdt for P&L. Verify filled_usdt in state."
+                )
+
         # Calculate sell proceeds
         d_sell_proceeds = d_sell_tokens * d_sell_price
         

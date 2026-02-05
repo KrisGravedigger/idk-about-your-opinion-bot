@@ -353,6 +353,9 @@ class BuyHandler:
 
         result = monitor.monitor_until_filled(order_id, timeout_at)
 
+        # Re-fetch position reference - heartbeat callback may have reloaded self.bot.state from disk
+        position = self.bot.state['current_position']
+
         status = result['status']
 
         # Handle different outcomes

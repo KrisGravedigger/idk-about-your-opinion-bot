@@ -285,7 +285,8 @@ class TelegramNotifier:
         position_value: float = 0,
         outcome_side: Optional[str] = None,
         stop_loss_info: Optional[Dict[str, Any]] = None,
-        sell_placed_timestamp: Optional[str] = None
+        sell_placed_timestamp: Optional[str] = None,
+        ladder_info: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Send periodic heartbeat update.
@@ -474,6 +475,17 @@ class TelegramNotifier:
             else:
                 # Our order is at the best price!
                 message += f"\n✨ <b>At best {order_side.lower()} price!</b>\n"
+
+        # Add ladder BUY order info if laddering is active
+        if ladder_info:
+            ladder_status = ladder_info.get('ladder_buy_status', 'unknown')
+            status_emoji = '⏳' if ladder_status == 'Pending' else '✅' if ladder_status == 'Finished' else '❌'
+            message += f"""
+🛡️ <b>Ladder BUY (Safety Net):</b>
+   • Status: {status_emoji} {ladder_status}
+   • Price: ${ladder_info.get('ladder_buy_price', 0):.4f}
+   • Amount: ${ladder_info.get('ladder_buy_amount', 0):.2f}
+"""
 
         message += f"\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 

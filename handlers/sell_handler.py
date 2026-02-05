@@ -152,7 +152,35 @@ class SellHandler:
                     logger.warning(f"⚠️ No significant tokens found (only {tokens:.4f})")
 
                     if order_details and is_fully_filled:
-                        logger.info(f"   SELL order completed successfully")
+                        logger.info(f"   SELL order completed successfully (detected during self-healing)")
+
+                        # Extract fill data from order for P&L calculation
+                        sell_filled_shares = float(order_details.get('filled_shares', 0) or 0)
+                        sell_price = float(order_details.get('price', 0) or 0)
+                        sell_usdt = float(order_details.get('filled_amount', 0) or 0)
+
+                        if sell_filled_shares > 0 and sell_price > 0:
+                            # Update position with sell data
+                            position['sell_filled_amount'] = sell_filled_shares
+                            position['avg_sell_price'] = sell_price
+                            position['sell_proceeds'] = sell_usdt
+                            position['sell_fill_timestamp'] = get_timestamp()
+
+                            # Calculate and record P&L
+                            pnl = self.tracker.calculate_pnl(
+                                buy_cost_usdt=position.get('filled_usdt', 0),
+                                buy_tokens=position.get('filled_amount', 0),
+                                buy_price=position.get('avg_fill_price', 0),
+                                sell_tokens=sell_filled_shares,
+                                sell_price=sell_price
+                            )
+                            self.tracker.display_pnl(pnl)
+                            self.tracker.add_to_history(pnl, position['market_id'])
+                            self.bot._update_statistics(pnl)
+                        else:
+                            logger.warning(f"   ⚠️ Could not extract SELL fill data for P&L (shares={sell_filled_shares}, price={sell_price})")
+                            logger.warning(f"   P&L not recorded for this trade")
+
                         logger.info("   Marking as COMPLETED")
                         self.bot.state['stage'] = 'COMPLETED'
                         self.state_manager.save_state(self.bot.state)
