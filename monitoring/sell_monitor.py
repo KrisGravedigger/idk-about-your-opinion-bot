@@ -147,8 +147,9 @@ class SellMonitor:
         logger.info("")
         
         # Validate state has required fields in current_position
+        # NOTE: token_id is optional (derived from market_id + outcome_side if needed)
         position = self.state.get('current_position', {})
-        required_fields = ['token_id', 'market_id', 'avg_fill_price', 'filled_amount']
+        required_fields = ['market_id', 'avg_fill_price', 'filled_amount']
         missing = [f for f in required_fields if not position.get(f)]
         if missing:
             error_msg = f"State missing required fields in current_position: {missing}"
