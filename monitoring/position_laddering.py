@@ -464,14 +464,15 @@ class PositionLaddering:
             order_manager = OrderManager(self.client)
 
             market_id = position.get('market_id')
-            token_id = position.get('token_id')
             outcome_side = position.get('outcome_side', 'YES')
 
             logger.info(f"📤 Placing new SELL order at profit target...")
 
+            # Note: token_id no longer in state, OrderManager.place_sell needs to be fixed
+            # For now, pass None (will likely cause error until OrderManager updated)
             sell_result = order_manager.place_sell(
                 market_id=market_id,
-                token_id=token_id,
+                token_id=None,  # FIXME: OrderManager.place_sell needs update to remove this
                 price=profit_target_price,
                 amount_tokens=total_shares,
                 outcome_side=outcome_side

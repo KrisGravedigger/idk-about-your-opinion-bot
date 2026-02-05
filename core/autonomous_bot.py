@@ -163,7 +163,7 @@ class AutonomousBot:
         # Send Telegram notification: Bot started
         try:
             logger.info("📝 Fetching balance for Telegram...")
-            balance = self.client.get_usdt_balance()
+            balance = float(self.client.get_balance())
             logger.info(f"📝 Balance: ${balance:.2f}")
         except Exception as e:
             logger.warning(f"Could not fetch balance for Telegram notification: {e}")
@@ -770,7 +770,7 @@ class AutonomousBot:
 
         # Get current balance
         try:
-            balance = self.client.get_usdt_balance()
+            balance = float(self.client.get_balance())
         except Exception as e:
             logger.debug(f"Could not fetch balance for heartbeat: {e}")
             balance = 0.0

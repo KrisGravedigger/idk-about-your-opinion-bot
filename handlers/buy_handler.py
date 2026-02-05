@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from logger_config import setup_logger
-from utils import format_price, format_usdt, get_timestamp, round_price
+from utils import format_price, format_usdt, get_timestamp, round_price, safe_float
 from monitoring.buy_monitor import BuyMonitor
 
 logger = setup_logger(__name__)
@@ -78,14 +78,15 @@ class BuyHandler:
             return order_price
 
         # Try #3: Get current market price
-        token_id = position.get('token_id')
-        if token_id:
+        market_id = position.get('market_id')
+        outcome_side = position.get('outcome_side', 'YES')
+        if market_id:
             try:
-                orderbook = self.client.get_market_orderbook(token_id)
+                orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
                 if orderbook and 'bids' in orderbook:
                     bids = orderbook.get('bids', [])
                     if bids:
-                        best_bid = max(float(bid.get('price', 0)) for bid in bids)
+                        best_bid = safe_float(bids[0].get('price', 0))  # Already sorted descending
                         if best_bid > 0:
                             logger.warning(f"   ⚠️  Using current market bid as avg_fill_price: ${best_bid:.4f}")
                             logger.warning(f"   P&L calculations may be slightly inaccurate")
@@ -134,14 +135,6 @@ class BuyHandler:
                 # Update state with recovered order_id
                 position['order_id'] = result.order_id
                 order_id = result.order_id
-
-                # Also recover token_id to prevent liquidity check crashes
-                outcome_side = position.get('outcome_side', 'YES')
-                token_result = self.recovery.recover_token_id_from_market(market_id, outcome_side)
-
-                if token_result.success:
-                    position['token_id'] = token_result.token_id
-                    logger.info(f"   ✅ Also recovered token_id")
 
                 self.state_manager.save_state(self.bot.state)
                 logger.info("✅ order_id recovered and saved to state")
@@ -366,8 +359,9 @@ class BuyHandler:
             order_id = position.get('order_id', 'unknown')
             market_id = position.get('market_id', 0)
             market_title = position.get('market_title', 'Unknown market')
-            token_id = position.get('token_id', '')
             outcome = position.get('outcome_side', 'YES')
+            # token_id no longer stored in state (adapter handles token_id lookup internally)
+            token_id = ''  # Not needed for transaction history
 
             # Update state with fill data
             filled_from_monitor = result.get('filled_amount', 0)
@@ -487,7 +481,6 @@ class BuyHandler:
 
         position = self.bot.state['current_position']
         market_id = position['market_id']
-        token_id = position.get('token_id')
 
         # CRITICAL: Use .get() to handle case where filled_amount is missing
         # This can happen if state is reconstructed by reconciliation or reset between stages
@@ -571,8 +564,9 @@ class BuyHandler:
                 self.state_manager.save_state(self.bot.state)
                 return False
 
-        # Validate token_id
+        # Validate/recover token_id (not stored in state anymore, adapter handles it)
         outcome_side = position.get('outcome_side', 'YES')
+        token_id = None  # token_id no longer in state, will be recovered by validator
         is_valid, recovered_token_id = self.validator.validate_token_id(token_id, market_id, outcome_side)
 
         if not is_valid:
@@ -585,12 +579,10 @@ class BuyHandler:
             self.state_manager.save_state(self.bot.state)
             return False
 
-        # Update token_id if it was recovered
+        # Update token_id if it was recovered (use local var, don't store in state)
         if recovered_token_id and recovered_token_id != token_id:
             token_id = recovered_token_id
-            position['token_id'] = token_id
-            self.state_manager.save_state(self.bot.state)
-            logger.info(f"   💾 State updated with valid token_id")
+            logger.info(f"   ✅ token_id recovered: {token_id[:20]}...")
 
         logger.info(f"✅ token_id validated: {token_id[:20]}...")
 
@@ -627,7 +619,7 @@ class BuyHandler:
 
         # Get fresh orderbook for SELL pricing
         try:
-            fresh_orderbook = self.scanner.get_fresh_orderbook(market_id, token_id)
+            fresh_orderbook = self.scanner.get_fresh_orderbook(market_id, token_id, outcome_side)
 
             if not fresh_orderbook:
                 logger.error("Failed to get orderbook for SELL")

@@ -412,12 +412,12 @@ class MarketScanner:
         OUTCOME_MAX_PROBABILITY = config.OUTCOME_MAX_PROBABILITY
         OUTCOME_PROBABILITY_METHOD = config.OUTCOME_PROBABILITY_METHOD
 
-        # Fetch BOTH orderbooks
-        logger.debug(f"📡 Fetching YES orderbook: {yes_token_id[:20]}...")
-        yes_orderbook = self.client.get_market_orderbook(yes_token_id)
+        # Fetch BOTH orderbooks using abstract interface
+        logger.debug(f"📡 Fetching YES orderbook for market {market_id}...")
+        yes_orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side='YES')
 
-        logger.debug(f"📡 Fetching NO orderbook: {no_token_id[:20]}...")
-        no_orderbook = self.client.get_market_orderbook(no_token_id)
+        logger.debug(f"📡 Fetching NO orderbook for market {market_id}...")
+        no_orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side='NO')
 
         if not yes_orderbook or not no_orderbook:
             logger.debug(f"❌ REJECTED: Missing orderbook data")
@@ -763,36 +763,35 @@ class MarketScanner:
         top = self.scan_and_rank(limit=1)
         return top[0] if top else None
     
-    def get_fresh_orderbook(self, market_id: int, token_id: str) -> Optional[dict]:
+    def get_fresh_orderbook(self, market_id: int, token_id: str = None, outcome_side: str = 'YES') -> Optional[dict]:
         """
         Get fresh orderbook data for a specific market.
         Use this when you need current prices before placing orders.
-        
+
         Args:
-            market_id: Market ID (for logging)
-            token_id: Token ID to fetch orderbook for
-            
+            market_id: Market ID
+            token_id: Token ID (DEPRECATED - use market_id + outcome_side instead)
+            outcome_side: "YES" or "NO" (default "YES")
+
         Returns:
             Dict with 'best_bid', 'best_ask', 'spread_abs', 'spread_pct' or None
         """
-        orderbook = self.client.get_market_orderbook(token_id)
-        
+        # Use abstract interface
+        orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
+
         if not orderbook:
             return None
-        
+
         bids = orderbook.get('bids', [])
         asks = orderbook.get('asks', [])
-        
+
         if not bids or not asks:
             return None
-        
-        # Extract all prices and find actual best prices
-        # API does NOT return sorted data, so we must find min/max ourselves
-        bid_prices = [safe_float(bid.get('price', 0)) for bid in bids]
-        ask_prices = [safe_float(ask.get('price', 0)) for ask in asks]
-        
-        best_bid = max(bid_prices) if bid_prices else 0  # Highest bid
-        best_ask = min(ask_prices) if ask_prices else 0  # Lowest ask
+
+        # Extract best prices from sorted orderbook
+        # Adapter returns bids sorted descending, asks sorted ascending
+        best_bid = safe_float(bids[0].get('price', 0)) if bids else 0
+        best_ask = safe_float(asks[0].get('price', 0)) if asks else 0
         
         if best_bid <= 0 or best_ask <= 0 or best_bid >= best_ask:
             return None
