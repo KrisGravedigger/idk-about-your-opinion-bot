@@ -529,15 +529,22 @@ class AutonomousBot:
         # Send heartbeat if:
         # 1. Never sent before, OR
         # 2. Enough time has passed since last heartbeat
-        should_send = (
-            self.last_heartbeat is None or
-            (now - self.last_heartbeat).total_seconds() >= self.heartbeat_interval_hours * 3600
-        )
-
-        if not should_send:
+        if self.last_heartbeat is None:
+            logger.debug(f"💓 Heartbeat: First heartbeat (last_heartbeat is None)")
+            self._send_heartbeat_now()
             return
 
-        self._send_heartbeat_now()
+        elapsed_seconds = (now - self.last_heartbeat).total_seconds()
+        required_seconds = self.heartbeat_interval_hours * 3600
+
+        logger.debug(f"💓 Heartbeat check: elapsed={elapsed_seconds:.0f}s, required={required_seconds:.0f}s, interval={self.heartbeat_interval_hours}h")
+
+        if elapsed_seconds >= required_seconds:
+            logger.debug(f"💓 Heartbeat: Sending (enough time has passed)")
+            self._send_heartbeat_now()
+        else:
+            remaining = required_seconds - elapsed_seconds
+            logger.debug(f"💓 Heartbeat: Skipping (need {remaining:.0f}s more)")
 
     def _send_heartbeat_now(self):
         """Send heartbeat immediately (called by _check_and_send_heartbeat or on startup)."""
@@ -582,7 +589,7 @@ class AutonomousBot:
                 needs_market_data = (not market_title or market_title == f'Market #{market_id}' or
                                     outcome_side == 'UNKNOWN')
 
-                if needs_market_data and token_id:
+                if needs_market_data:
                     try:
                         market_data = self.client.get_market(market_id)
                         if market_data:
@@ -601,22 +608,15 @@ class AutonomousBot:
                                     market_title = f'Market #{market_id}'
 
                             # Update outcome_side if UNKNOWN
+                            # NOTE: After adapter refactor, token_id is no longer in state.
+                            # outcome_side should always be set when position is created.
+                            # If it's UNKNOWN here, that's a bug in position creation.
                             if outcome_side == 'UNKNOWN':
-                                yes_token_id = market_data.get('yes_token_id')
-                                no_token_id = market_data.get('no_token_id')
-
-                                if token_id == yes_token_id:
-                                    outcome_side = 'YES'
-                                    position['outcome_side'] = outcome_side
-                                    state_updated = True
-                                    logger.debug(f"   ✅ Determined outcome_side: YES")
-                                elif token_id == no_token_id:
-                                    outcome_side = 'NO'
-                                    position['outcome_side'] = outcome_side
-                                    state_updated = True
-                                    logger.debug(f"   ✅ Determined outcome_side: NO")
-                                else:
-                                    logger.debug(f"   ⚠️ Token ID doesn't match YES or NO token")
+                                logger.warning(f"   ⚠️ outcome_side is UNKNOWN - this shouldn't happen!")
+                                logger.warning(f"   Position state may be corrupted or incomplete")
+                                logger.warning(f"   Heartbeat will show minimal info until position is recreated")
+                                # Don't try to determine from token_id (it's not in state anymore)
+                                # Just log the issue and continue with UNKNOWN
 
                             # Save state if updated
                             if state_updated:
