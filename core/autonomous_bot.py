@@ -626,19 +626,18 @@ class AutonomousBot:
                         if not market_title or market_title == f'Market #{market_id}':
                             market_title = f'Market #{market_id}'
 
-                # DEBUG: Log which token we're fetching orderbook for
+                # DEBUG: Log which market we're fetching orderbook for
                 logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
-                logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
                 logger.debug(f"   outcome_side: {outcome_side}")
 
-                # Get orderbook using token_id (FIXED: was using market_id which doesn't work)
+                # Get orderbook using abstract adapter interface (market_id + outcome_side)
                 orderbook = None
-                if token_id:
-                    orderbook = self.client.get_market_orderbook(token_id)
+                if market_id and outcome_side and outcome_side != 'UNKNOWN':
+                    orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
                     if orderbook:
                         logger.debug(f"   ✅ Orderbook fetched successfully")
                     else:
-                        logger.warning(f"   ⚠️ Orderbook fetch returned None for token {token_id[:20]}...")
+                        logger.warning(f"   ⚠️ Orderbook fetch returned None for market {market_id}, side {outcome_side}")
 
                 if orderbook and 'bids' in orderbook and 'asks' in orderbook:
                     bids = orderbook['bids']
