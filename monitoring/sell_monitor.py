@@ -632,6 +632,10 @@ class SellMonitor:
 
             # FLASH CRASH PROTECTION: Check spread before triggering stop-loss
             # If spread is abnormally wide, this is likely a temporary liquidity drain, not a real market crash
+
+            # Get current time FIRST (before any conditionals)
+            current_time = time.time()
+
             if asks:
                 current_best_ask = safe_float(asks[0].get('price', 999)) if asks else 999  # Already sorted ascending
 
@@ -640,8 +644,6 @@ class SellMonitor:
 
                     if spread_pct > self.stop_loss_spread_filter:
                         # Track how long spread has been wide
-                        import time
-                        current_time = time.time()
 
                         if self.wide_spread_start_time is None:
                             self.wide_spread_start_time = current_time
