@@ -231,7 +231,8 @@ class MarketSelector:
             market_id=selected_market.market_id,
             token_id=selected_market.yes_token_id,
             price=buy_price,
-            amount_usdt=position_size
+            amount_usdt=position_size,
+            outcome_side=selected_market.outcome_side
         )
 
         if not result:

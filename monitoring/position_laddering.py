@@ -240,11 +240,16 @@ class PositionLaddering:
             amount_usdt = float(required_capital)
 
             logger.info(f"   Placing BUY limit order...")
+
+            # Get outcome_side from state (ladder buy uses same outcome as original position)
+            outcome_side = self.state.get('current_position', {}).get('outcome_side', 'YES')
+
             result = order_manager.place_buy(
                 market_id=market_id,
                 token_id=token_id,
                 price=price,
-                amount_usdt=amount_usdt
+                amount_usdt=amount_usdt,
+                outcome_side=outcome_side
             )
 
             if not result:
