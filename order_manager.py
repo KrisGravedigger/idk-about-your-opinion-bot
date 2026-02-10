@@ -193,10 +193,9 @@ class OrderManager:
 
         result = self.client.place_buy_order(
             market_id=market_id,
-            token_id=token_id,
-            price=price,
-            amount_usdt=amount_usdt,
-            check_approval=False
+            outcome_side=outcome_side,
+            price=Decimal(str(price)),
+            amount=Decimal(str(amount_usdt))
         )
 
         if result:
@@ -312,13 +311,12 @@ class OrderManager:
             logger.warning(f"   Using requested amount - may fail if insufficient")
         
         logger.info(f"   Amount: {amount_tokens:.4f} tokens (final)")
-        
+
         result = self.client.place_sell_order(
             market_id=market_id,
-            token_id=token_id,
-            price=price,
-            amount_tokens=amount_tokens,
-            check_approval=True
+            outcome_side=outcome_side,
+            price=Decimal(str(price)),
+            amount=Decimal(str(amount_tokens))
         )
         
         if result:

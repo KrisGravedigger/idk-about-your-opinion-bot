@@ -376,16 +376,13 @@ class AutonomousBot:
         Transitions to: SCANNING
         """
         logger.info("💤 IDLE - Ready to start new cycle")
-        
-        # CLEANUP: Redeem any resolved positions before starting new cycle
-        logger.info("🧹 Checking for resolved positions to cleanup...")
-        try:
-            redeemed = self.client.cleanup_resolved_positions()
-            if redeemed > 0:
-                logger.info(f"✅ Cleaned up {redeemed} resolved market(s)")
-        except Exception as e:
-            logger.warning(f"⚠️ Cleanup failed (non-critical): {e}")
-        
+
+        # NOTE: Automatic cleanup of resolved positions disabled
+        # Reason: Adapter pattern requires market_id, but we don't have one at IDLE stage
+        # Old API had cleanup_resolved_positions() scan all positions automatically
+        # New adapter pattern cleanup_resolved_positions(market_id) requires specific market
+        # TODO: Implement position scanning + cleanup loop or handle resolved markets during trading
+
         # Transition to scanning
         self.state['stage'] = 'SCANNING'
         self.state['cycle_number'] = self.state.get('cycle_number', 0) + 1
