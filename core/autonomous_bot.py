@@ -588,7 +588,7 @@ class AutonomousBot:
 
                 if needs_market_data:
                     try:
-                        market_data = self.client.get_market(market_id)
+                        market_data = self.client.get_market(str(market_id))
                         if market_data:
                             state_updated = False
 

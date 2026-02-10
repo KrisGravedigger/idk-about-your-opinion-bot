@@ -206,7 +206,7 @@ class ReconciliationEngine:
             api_shares = None
             if market_id is not None and market_id > 0:
                 api_shares_raw = self.client.get_position_shares(
-                    market_id=market_id,
+                    market_id=str(market_id),
                     outcome_side=outcome_side
                 )
                 api_shares = safe_float(api_shares_raw) if api_shares_raw else 0.0
@@ -255,7 +255,7 @@ class ReconciliationEngine:
                             for try_side in ['YES', 'NO']:
                                 try:
                                     shares = self.client.get_position_shares(
-                                        market_id=market_id,
+                                        market_id=str(market_id),
                                         outcome_side=try_side
                                     )
                                     if shares and float(shares) > self.dust_threshold:
@@ -562,7 +562,7 @@ class ReconciliationEngine:
 
             try:
                 # Get market details
-                market = self.client.get_market(market_id)
+                market = self.client.get_market(str(market_id))
                 if not market:
                     return RecoveryResult(
                         success=False,
@@ -681,7 +681,7 @@ class ReconciliationEngine:
         try:
             # 1. Get market details
             actions.append(f"Fetching market #{market_id} details")
-            market = self.client.get_market(market_id)
+            market = self.client.get_market(str(market_id))
 
             if not market:
                 return RecoveryResult(

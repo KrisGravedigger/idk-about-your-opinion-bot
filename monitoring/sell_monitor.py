@@ -1407,7 +1407,7 @@ class SellMonitor:
     ):
         """Check if market resolved during monitoring."""
         try:
-            market_data = self.client.get_market(market_id)
+            market_data = self.client.get_market(str(market_id))
             if market_data:
                 # SDK returns ModelsTopicStatus enum -- extract .value (string) before .lower()
                 market_status_raw = market_data.get('status', 'unknown')

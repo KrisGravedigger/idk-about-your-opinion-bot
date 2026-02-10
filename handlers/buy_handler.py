@@ -207,7 +207,7 @@ class BuyHandler:
 
                 for attempt in range(1, max_retries + 1):
                     verified_shares = self.client.get_position_shares(
-                        market_id=market_id,
+                        market_id=str(market_id),
                         outcome_side="YES"
                     )
                     tokens = float(verified_shares)
@@ -371,7 +371,7 @@ class BuyHandler:
                 market_id = position['market_id']
                 outcome_side = position.get('outcome_side', 'YES')
                 verified_shares = self.client.get_position_shares(
-                    market_id=market_id,
+                    market_id=str(market_id),
                     outcome_side=outcome_side
                 )
                 verified_amount = float(verified_shares)
@@ -502,7 +502,7 @@ class BuyHandler:
                     return False
 
                 # Try to get position from API
-                shares = self.client.get_position_shares(market_id, outcome_side)
+                shares = self.client.get_position_shares(str(market_id), outcome_side)
                 filled_amount = float(shares) if shares else 0
 
                 if filled_amount > 0:
@@ -721,7 +721,7 @@ class BuyHandler:
 
             try:
                 existing_shares = self.client.get_position_shares(
-                    market_id=market_id,
+                    market_id=str(market_id),
                     outcome_side=outcome_side
                 )
                 existing_amount = float(existing_shares)

@@ -81,7 +81,7 @@ class OrderManager:
         Raises:
             ValueError: If market not found or token_id missing
         """
-        market = self.client.get_market(market_id)
+        market = self.client.get_market(str(market_id))
         if not market:
             raise ValueError(f"Market {market_id} not found")
 
@@ -192,7 +192,7 @@ class OrderManager:
         logger.info("")
 
         result = self.client.place_buy_order(
-            market_id=market_id,
+            market_id=str(market_id),
             outcome_side=outcome_side,
             price=Decimal(str(price)),
             amount=Decimal(str(amount_usdt))
@@ -254,7 +254,7 @@ class OrderManager:
             for attempt in range(1, max_retries + 1):
                 # Check the specific outcome_side we're selling
                 balance_decimal = self.client.get_position_shares(
-                    market_id=market_id,
+                    market_id=str(market_id),
                     outcome_side=outcome_side_upper
                 )
                 actual_balance = float(balance_decimal) if balance_decimal else 0.0
@@ -313,7 +313,7 @@ class OrderManager:
         logger.info(f"   Amount: {amount_tokens:.4f} tokens (final)")
 
         result = self.client.place_sell_order(
-            market_id=market_id,
+            market_id=str(market_id),
             outcome_side=outcome_side,
             price=Decimal(str(price)),
             amount=Decimal(str(amount_tokens))

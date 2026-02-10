@@ -81,7 +81,7 @@ class MarketSelector:
             # Fetch market details to get token_id
             logger.info(f"   Fetching market details to recover token_id...")
             try:
-                market_details = self.client.get_market(market_id)
+                market_details = self.client.get_market(str(market_id))
 
                 if market_details:
                     # Extract correct token_id based on outcome_side
