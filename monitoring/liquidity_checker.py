@@ -75,18 +75,20 @@ class LiquidityChecker:
         initial_best_bid: float,
         buy_price: Optional[float] = None,
         initial_spread_pct: Optional[float] = None,
-        stop_loss_spread_filter: Optional[float] = None
+        stop_loss_spread_filter: Optional[float] = None,
+        outcome_side: str = 'YES'
     ) -> Dict[str, Any]:
         """
         Check if liquidity has deteriorated significantly.
 
         Args:
             market_id: Market ID (for logging)
-            token_id: Token ID to fetch orderbook
+            token_id: Token ID to fetch orderbook (DEPRECATED - use market_id + outcome_side)
             initial_best_bid: Initial best bid price when order was placed (for compatibility)
             buy_price: Actual price paid for position (used for stop-loss calculation)
             initial_spread_pct: Initial spread percentage when order was placed
             stop_loss_spread_filter: Spread filter threshold to prevent stop-loss during flash crashes
+            outcome_side: "YES" or "NO" (default "YES")
 
         Returns:
             Dictionary with structure:
@@ -101,27 +103,27 @@ class LiquidityChecker:
 
         Example:
             >>> # Good liquidity
-            >>> result = checker.check_liquidity(813, 1626, 0.066, buy_price=0.072, initial_spread_pct=12.0)
+            >>> result = checker.check_liquidity(813, 1626, 0.066, buy_price=0.072, initial_spread_pct=12.0, outcome_side='YES')
             >>> result['ok']
             True
 
             >>> # Bad liquidity (price dropped 30% from buy price)
-            >>> result = checker.check_liquidity(813, 1626, 0.100, buy_price=0.150, initial_spread_pct=10.0)
+            >>> result = checker.check_liquidity(813, 1626, 0.100, buy_price=0.150, initial_spread_pct=10.0, outcome_side='YES')
             >>> result['ok']
             False
             >>> result['deterioration_reason']
             'Bid dropped 33.3% from buy price (threshold: -25.0%)'
         """
         logger.debug(
-            f"Checking liquidity for market {market_id}, "
+            f"Checking liquidity for market {market_id} ({outcome_side}), "
             f"initial bid: {format_price(initial_best_bid)}"
         )
-        
-        # Get fresh orderbook
-        orderbook = self.client.get_market_orderbook(token_id)
+
+        # Get fresh orderbook using abstract interface
+        orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
         
         if not orderbook or 'bids' not in orderbook or 'asks' not in orderbook:
-            logger.warning(f"⚠️  Could not fetch orderbook for token {token_id}")
+            logger.warning(f"⚠️  Could not fetch orderbook for market {market_id} ({outcome_side})")
             # Return neutral result (don't cancel on fetch failure)
             return {
                 'ok': True,
@@ -131,12 +133,12 @@ class LiquidityChecker:
                 'bid_drop_pct': 0.0,
                 'deterioration_reason': None
             }
-        
+
         bids = orderbook.get('bids', [])
         asks = orderbook.get('asks', [])
-        
+
         if not bids or not asks:
-            logger.warning(f"⚠️  Empty orderbook for token {token_id}")
+            logger.warning(f"⚠️  Empty orderbook for market {market_id} ({outcome_side})")
             return {
                 'ok': True,
                 'current_best_bid': initial_best_bid,
@@ -145,11 +147,11 @@ class LiquidityChecker:
                 'bid_drop_pct': 0.0,
                 'deterioration_reason': None
             }
-        
-        # Extract current best bid and ask
-        # Note: Opinion.trade orderbook may not be sorted, so use max/min
-        current_best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
-        current_best_ask = min(safe_float(ask.get('price', 0)) for ask in asks)
+
+        # Extract current best bid and ask from normalized orderbook
+        # Adapter returns bids sorted descending, asks sorted ascending
+        current_best_bid = safe_float(bids[0].get('price', 0)) if bids else 0
+        current_best_ask = safe_float(asks[0].get('price', 0)) if asks else 0
 
         # Calculate current spread percentage
         if current_best_bid > 0:

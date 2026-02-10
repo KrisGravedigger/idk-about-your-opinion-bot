@@ -103,7 +103,7 @@ class PositionValidator:
         logger.info(f"🔄 Attempting recovery from market #{market_id} details...")
 
         try:
-            market_details = self.client.get_market(market_id)
+            market_details = self.client.get_market(str(market_id))
 
             if not market_details:
                 logger.error(f"   ❌ Could not fetch market #{market_id}")
@@ -313,7 +313,7 @@ class PositionValidator:
 
         try:
             verified_shares = self.client.get_position_shares(
-                market_id=market_id,
+                market_id=str(market_id),
                 outcome_side=outcome_side
             )
             actual_tokens = float(verified_shares)

@@ -147,8 +147,9 @@ class SellMonitor:
         logger.info("")
         
         # Validate state has required fields in current_position
+        # NOTE: token_id is optional (derived from market_id + outcome_side if needed)
         position = self.state.get('current_position', {})
-        required_fields = ['token_id', 'market_id', 'avg_fill_price', 'filled_amount']
+        required_fields = ['market_id', 'avg_fill_price', 'filled_amount']
         missing = [f for f in required_fields if not position.get(f)]
         if missing:
             error_msg = f"State missing required fields in current_position: {missing}"
@@ -179,11 +180,12 @@ class SellMonitor:
             # Try to get price from orderbook
             recalculated = False
             try:
-                orderbook = self.client.get_market_orderbook(token_id)
+                outcome_side = position.get('outcome_side', 'YES')
+                orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
                 if orderbook and 'bids' in orderbook:
                     bids = orderbook.get('bids', [])
                     if bids:
-                        best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+                        best_bid = safe_float(bids[0].get('price', 0))  # Already sorted descending
                         if best_bid > 0:
                             logger.info(f"   Using current market bid as avg_fill_price: ${best_bid:.4f}")
                             buy_price = best_bid
@@ -370,6 +372,7 @@ class SellMonitor:
                     # Get initial spread from state (stored when SELL order was placed)
                     initial_spread_pct = position.get('initial_spread_pct')
                     initial_best_bid = position.get('initial_best_bid', buy_price)
+                    outcome_side = position.get('outcome_side', 'YES')
 
                     liquidity = self.liquidity_checker.check_liquidity(
                         market_id=market_id,
@@ -377,7 +380,8 @@ class SellMonitor:
                         initial_best_bid=initial_best_bid,
                         buy_price=buy_price,  # Use ACTUAL buy price for stop-loss calculation
                         initial_spread_pct=initial_spread_pct,  # Check if spread WIDENED
-                        stop_loss_spread_filter=self.stop_loss_spread_filter  # Respect spread filter
+                        stop_loss_spread_filter=self.stop_loss_spread_filter,  # Respect spread filter
+                        outcome_side=outcome_side  # Pass outcome_side for abstract interface
                     )
 
                     if not liquidity['ok']:
@@ -596,16 +600,16 @@ class SellMonitor:
             logger.warning(f"   Continuing with check but results may be inaccurate")
         
         # Get fresh orderbook to check current market price
-        # Note: token_id is stored in current_position, not directly in state
         position = self.state.get('current_position', {})
-        token_id = position.get('token_id')
-        
-        if not token_id:
-            logger.warning("Token ID missing from current_position - cannot check stop-loss")
+        market_id = position.get('market_id')
+        outcome_side = position.get('outcome_side', 'YES')
+
+        if not market_id:
+            logger.warning("Market ID missing from current_position - cannot check stop-loss")
             return (False, 0.0)
-        
+
         try:
-            orderbook = self.client.get_market_orderbook(token_id)
+            orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
 
             if not orderbook or 'bids' not in orderbook:
                 logger.warning("Failed to fetch orderbook for stop-loss check")
@@ -618,8 +622,8 @@ class SellMonitor:
                 logger.warning("Empty orderbook - cannot check stop-loss")
                 return (False, 0.0)
 
-            # Extract best bid (orderbook is NOT sorted)
-            current_best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+            # Extract best bid from sorted orderbook (adapter returns bids sorted descending)
+            current_best_bid = safe_float(bids[0].get('price', 0)) if bids else 0
 
             # Assertion: Verify we got a valid price
             if current_best_bid <= 0:
@@ -628,16 +632,18 @@ class SellMonitor:
 
             # FLASH CRASH PROTECTION: Check spread before triggering stop-loss
             # If spread is abnormally wide, this is likely a temporary liquidity drain, not a real market crash
+
+            # Get current time FIRST (before any conditionals)
+            current_time = time.time()
+
             if asks:
-                current_best_ask = min(safe_float(ask.get('price', 999)) for ask in asks)
+                current_best_ask = safe_float(asks[0].get('price', 999)) if asks else 999  # Already sorted ascending
 
                 if current_best_ask > current_best_bid:
                     spread_pct = ((current_best_ask - current_best_bid) / current_best_bid) * 100
 
                     if spread_pct > self.stop_loss_spread_filter:
                         # Track how long spread has been wide
-                        import time
-                        current_time = time.time()
 
                         if self.wide_spread_start_time is None:
                             self.wide_spread_start_time = current_time
@@ -792,10 +798,10 @@ class SellMonitor:
 
             # Step 2: Get fresh orderbook
             position = self.state.get('current_position', {})
-            token_id = position.get('token_id')
             market_id = position.get('market_id')
+            outcome_side = position.get('outcome_side', 'YES')
 
-            orderbook = self.client.get_market_orderbook(token_id)
+            orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
 
             if not orderbook or 'bids' not in orderbook:
                 logger.error("   Failed to fetch orderbook")
@@ -806,8 +812,8 @@ class SellMonitor:
                 logger.error("   Empty orderbook")
                 return {'success': False, 'reason': 'Empty orderbook - no bids'}
 
-            # Get best bid (unsorted)
-            best_bid = max(safe_float(bid.get('price', 0)) for bid in bids)
+            # Get best bid from sorted orderbook
+            best_bid = safe_float(bids[0].get('price', 0)) if bids else 0
 
             # Step 3: Calculate aggressive limit price
             aggressive_price = best_bid + self.stop_loss_offset
@@ -1401,7 +1407,7 @@ class SellMonitor:
     ):
         """Check if market resolved during monitoring."""
         try:
-            market_data = self.client.get_market(market_id)
+            market_data = self.client.get_market(str(market_id))
             if market_data:
                 # SDK returns ModelsTopicStatus enum -- extract .value (string) before .lower()
                 market_status_raw = market_data.get('status', 'unknown')
@@ -1495,18 +1501,19 @@ class SellMonitor:
             return None
 
         position = self.state.get('current_position', {})
-        token_id = position.get('token_id')
+        market_id = position.get('market_id')
+        outcome_side = position.get('outcome_side', 'YES')
         buy_price = safe_float(position.get('avg_fill_price', 0))
         original_price = safe_float(position.get('original_sell_price', current_price))
         filled_amount = safe_float(position.get('filled_amount', 0))
 
-        if not token_id or buy_price <= 0 or filled_amount <= 0:
+        if not market_id or buy_price <= 0 or filled_amount <= 0:
             logger.warning("Cannot check repricing: missing required position data")
             return None
 
         try:
-            # Get fresh orderbook
-            orderbook = self.client.get_market_orderbook(token_id)
+            # Get fresh orderbook using abstract interface
+            orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
             if not orderbook or 'asks' not in orderbook:
                 return None
 

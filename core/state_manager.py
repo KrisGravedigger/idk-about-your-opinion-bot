@@ -74,13 +74,19 @@ class StateManager:
             logger.info(f"✅ State loaded from {self.state_file}")
             logger.debug(f"   Stage: {state.get('stage', 'UNKNOWN')}")
             logger.debug(f"   Cycle: {state.get('cycle_number', 0)}")
-            
+
             # Check if migration needed
             if state.get('version') != '1.0':
                 logger.info("Migrating state from old format...")
                 state = self._migrate_from_v0(state)
                 self.save_state(state)
-            
+
+            # Remove legacy token_id field if present
+            if 'current_position' in state and 'token_id' in state['current_position']:
+                logger.info("Migrated position state: removed legacy token_id field")
+                del state['current_position']['token_id']
+                self.save_state(state)
+
             return state
             
         except (json.JSONDecodeError, IOError) as e:
@@ -152,7 +158,6 @@ class StateManager:
             
             "current_position": {
                 "market_id": None,
-                "token_id": None,
                 "market_title": None,
                 "buy_order_id": None,
                 "buy_amount_usdt": None,
@@ -210,7 +215,7 @@ class StateManager:
         # Check current_position structure
         if 'current_position' in state:
             required_position = [
-                'market_id', 'token_id', 'market_title',
+                'market_id', 'market_title',
                 'buy_order_id', 'buy_amount_usdt', 'buy_tokens', 'buy_price',
                 'sell_order_id', 'sell_amount_usdt', 'sell_tokens', 'sell_price'
             ]
@@ -248,7 +253,6 @@ class StateManager:
         # Reset all position fields to None
         state['current_position'] = {
             "market_id": None,
-            "token_id": None,
             "market_title": None,
             "buy_order_id": None,
             "buy_amount_usdt": None,

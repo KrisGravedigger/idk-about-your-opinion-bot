@@ -199,7 +199,7 @@ class PositionRecovery:
 
         try:
             # Fetch market using get_market() method
-            market_details = self.client.get_market(market_id)
+            market_details = self.client.get_market(str(market_id))
 
             if not market_details:
                 logger.warning(f"   ⚠️ Could not fetch market #{market_id} details")
@@ -263,7 +263,7 @@ class PositionRecovery:
 
         try:
             verified_shares = self.client.get_position_shares(
-                market_id=market_id,
+                market_id=str(market_id),
                 outcome_side=outcome_side
             )
             tokens = float(verified_shares)
@@ -347,7 +347,7 @@ class PositionRecovery:
 
         try:
             verified_shares = self.client.get_position_shares(
-                market_id=market_id,
+                market_id=str(market_id),
                 outcome_side=outcome_side
             )
             filled_amount = float(verified_shares)

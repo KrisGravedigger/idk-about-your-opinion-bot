@@ -5,7 +5,8 @@ Tests validation logic for dust positions, token IDs, and manual sales.
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock
+from decimal import Decimal
+from tests.mock_client import MockPredictionMarketClient
 from core.position_validator import PositionValidator, ValidationResult
 
 
@@ -14,7 +15,7 @@ class TestPositionValidator(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.mock_client = Mock()
+        self.mock_client = MockPredictionMarketClient()
         self.config = {
             'MIN_ORDER_VALUE_USDT': 1.30,
             'MIN_SELLABLE_SHARES': 5.0,
@@ -66,27 +67,28 @@ class TestPositionValidator(unittest.TestCase):
 
     def test_validate_token_id_invalid_int(self):
         """Test token ID validation with invalid int type."""
-        self.mock_client.get_market.return_value = Mock(
-            yes_token_id="0xrecovered123"
-        )
+        # Set up market with token IDs
+        self.mock_client.set_markets([{
+            'market_id': '123',
+            'yes_id': '0xrecovered123',
+            'no_id': '0xrecovered456'
+        }])
 
         is_valid, recovered = self.validator.validate_token_id(
             12345,  # Invalid: int instead of string
-            123,
+            '123',
             "YES"
         )
 
-        # Should attempt recovery
-        self.mock_client.get_market.assert_called_once_with(123)
+        # Should attempt recovery from market data
         self.assertEqual(recovered, "0xrecovered123")
 
     def test_validate_token_id_recovery_failure(self):
         """Test token ID validation when recovery fails."""
-        self.mock_client.get_market.return_value = None
-
+        # Don't set any markets - get_market returns {}
         is_valid, recovered = self.validator.validate_token_id(
             None,  # Invalid
-            123,
+            '123',
             "YES"
         )
 
@@ -95,8 +97,7 @@ class TestPositionValidator(unittest.TestCase):
 
     def test_detect_manual_sale_no_sale(self):
         """Test manual sale detection when position is intact."""
-        self.mock_client.get_position_shares.return_value = "100.0"
-
+        # Position matches expected - no manual sale
         result = self.validator.detect_manual_sale(
             expected_tokens=100.0,
             actual_tokens=100.0
@@ -117,10 +118,11 @@ class TestPositionValidator(unittest.TestCase):
 
     def test_verify_actual_position_success(self):
         """Test position verification with matching position."""
-        self.mock_client.get_position_shares.return_value = "50.0"
+        # Set position in mock client
+        self.mock_client.set_position('123', 'YES', Decimal('50.0'))
 
         has_position, actual_tokens, error_msg = self.validator.verify_actual_position(
-            market_id=123,
+            market_id='123',
             outcome_side="YES",
             expected_tokens=50.0
         )
@@ -131,10 +133,11 @@ class TestPositionValidator(unittest.TestCase):
 
     def test_verify_actual_position_manual_sale(self):
         """Test position verification detecting manual sale."""
-        self.mock_client.get_position_shares.return_value = "1.0"  # 98% missing
+        # Set much smaller position (98% missing - manual sale detected)
+        self.mock_client.set_position('123', 'YES', Decimal('1.0'))
 
         has_position, actual_tokens, error_msg = self.validator.verify_actual_position(
-            market_id=123,
+            market_id='123',
             outcome_side="YES",
             expected_tokens=100.0
         )

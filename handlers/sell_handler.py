@@ -239,10 +239,11 @@ class SellHandler:
             self.bot._update_statistics(pnl)
 
             # Record SELL transaction in history
+            # Note: token_id no longer stored in state (adapter handles token_id lookup)
             self.bot.transaction_history.record_sell(
                 market_id=position.get('market_id', 0),
                 market_title=position.get('market_title', 'Unknown market'),
-                token_id=position.get('token_id', ''),
+                token_id='',  # Not stored in state anymore
                 shares=result['filled_amount'],
                 price=result['avg_fill_price'],
                 amount_usdt=result['filled_usdt'],

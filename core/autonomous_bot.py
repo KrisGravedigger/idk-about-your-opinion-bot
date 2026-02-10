@@ -163,7 +163,7 @@ class AutonomousBot:
         # Send Telegram notification: Bot started
         try:
             logger.info("📝 Fetching balance for Telegram...")
-            balance = self.client.get_usdt_balance()
+            balance = float(self.client.get_balance())
             logger.info(f"📝 Balance: ${balance:.2f}")
         except Exception as e:
             logger.warning(f"Could not fetch balance for Telegram notification: {e}")
@@ -376,16 +376,13 @@ class AutonomousBot:
         Transitions to: SCANNING
         """
         logger.info("💤 IDLE - Ready to start new cycle")
-        
-        # CLEANUP: Redeem any resolved positions before starting new cycle
-        logger.info("🧹 Checking for resolved positions to cleanup...")
-        try:
-            redeemed = self.client.cleanup_resolved_positions()
-            if redeemed > 0:
-                logger.info(f"✅ Cleaned up {redeemed} resolved market(s)")
-        except Exception as e:
-            logger.warning(f"⚠️ Cleanup failed (non-critical): {e}")
-        
+
+        # NOTE: Automatic cleanup of resolved positions disabled
+        # Reason: Adapter pattern requires market_id, but we don't have one at IDLE stage
+        # Old API had cleanup_resolved_positions() scan all positions automatically
+        # New adapter pattern cleanup_resolved_positions(market_id) requires specific market
+        # TODO: Implement position scanning + cleanup loop or handle resolved markets during trading
+
         # Transition to scanning
         self.state['stage'] = 'SCANNING'
         self.state['cycle_number'] = self.state.get('cycle_number', 0) + 1
@@ -529,15 +526,22 @@ class AutonomousBot:
         # Send heartbeat if:
         # 1. Never sent before, OR
         # 2. Enough time has passed since last heartbeat
-        should_send = (
-            self.last_heartbeat is None or
-            (now - self.last_heartbeat).total_seconds() >= self.heartbeat_interval_hours * 3600
-        )
-
-        if not should_send:
+        if self.last_heartbeat is None:
+            logger.debug(f"💓 Heartbeat: First heartbeat (last_heartbeat is None)")
+            self._send_heartbeat_now()
             return
 
-        self._send_heartbeat_now()
+        elapsed_seconds = (now - self.last_heartbeat).total_seconds()
+        required_seconds = self.heartbeat_interval_hours * 3600
+
+        logger.debug(f"💓 Heartbeat check: elapsed={elapsed_seconds:.0f}s, required={required_seconds:.0f}s, interval={self.heartbeat_interval_hours}h")
+
+        if elapsed_seconds >= required_seconds:
+            logger.debug(f"💓 Heartbeat: Sending (enough time has passed)")
+            self._send_heartbeat_now()
+        else:
+            remaining = required_seconds - elapsed_seconds
+            logger.debug(f"💓 Heartbeat: Skipping (need {remaining:.0f}s more)")
 
     def _send_heartbeat_now(self):
         """Send heartbeat immediately (called by _check_and_send_heartbeat or on startup)."""
@@ -582,9 +586,9 @@ class AutonomousBot:
                 needs_market_data = (not market_title or market_title == f'Market #{market_id}' or
                                     outcome_side == 'UNKNOWN')
 
-                if needs_market_data and token_id:
+                if needs_market_data:
                     try:
-                        market_data = self.client.get_market(market_id)
+                        market_data = self.client.get_market(str(market_id))
                         if market_data:
                             state_updated = False
 
@@ -601,22 +605,15 @@ class AutonomousBot:
                                     market_title = f'Market #{market_id}'
 
                             # Update outcome_side if UNKNOWN
+                            # NOTE: After adapter refactor, token_id is no longer in state.
+                            # outcome_side should always be set when position is created.
+                            # If it's UNKNOWN here, that's a bug in position creation.
                             if outcome_side == 'UNKNOWN':
-                                yes_token_id = market_data.get('yes_token_id')
-                                no_token_id = market_data.get('no_token_id')
-
-                                if token_id == yes_token_id:
-                                    outcome_side = 'YES'
-                                    position['outcome_side'] = outcome_side
-                                    state_updated = True
-                                    logger.debug(f"   ✅ Determined outcome_side: YES")
-                                elif token_id == no_token_id:
-                                    outcome_side = 'NO'
-                                    position['outcome_side'] = outcome_side
-                                    state_updated = True
-                                    logger.debug(f"   ✅ Determined outcome_side: NO")
-                                else:
-                                    logger.debug(f"   ⚠️ Token ID doesn't match YES or NO token")
+                                logger.warning(f"   ⚠️ outcome_side is UNKNOWN - this shouldn't happen!")
+                                logger.warning(f"   Position state may be corrupted or incomplete")
+                                logger.warning(f"   Heartbeat will show minimal info until position is recreated")
+                                # Don't try to determine from token_id (it's not in state anymore)
+                                # Just log the issue and continue with UNKNOWN
 
                             # Save state if updated
                             if state_updated:
@@ -626,19 +623,18 @@ class AutonomousBot:
                         if not market_title or market_title == f'Market #{market_id}':
                             market_title = f'Market #{market_id}'
 
-                # DEBUG: Log which token we're fetching orderbook for
+                # DEBUG: Log which market we're fetching orderbook for
                 logger.debug(f"💓 Heartbeat: Fetching orderbook for market #{market_id}")
-                logger.debug(f"   token_id: {token_id[:20] if token_id else 'None'}...")
                 logger.debug(f"   outcome_side: {outcome_side}")
 
-                # Get orderbook using token_id (FIXED: was using market_id which doesn't work)
+                # Get orderbook using abstract adapter interface (market_id + outcome_side)
                 orderbook = None
-                if token_id:
-                    orderbook = self.client.get_market_orderbook(token_id)
+                if market_id and outcome_side and outcome_side != 'UNKNOWN':
+                    orderbook = self.client.get_orderbook(market_id=str(market_id), outcome_side=outcome_side)
                     if orderbook:
                         logger.debug(f"   ✅ Orderbook fetched successfully")
                     else:
-                        logger.warning(f"   ⚠️ Orderbook fetch returned None for token {token_id[:20]}...")
+                        logger.warning(f"   ⚠️ Orderbook fetch returned None for market {market_id}, side {outcome_side}")
 
                 if orderbook and 'bids' in orderbook and 'asks' in orderbook:
                     bids = orderbook['bids']
@@ -770,7 +766,7 @@ class AutonomousBot:
 
         # Get current balance
         try:
-            balance = self.client.get_usdt_balance()
+            balance = float(self.client.get_balance())
         except Exception as e:
             logger.debug(f"Could not fetch balance for heartbeat: {e}")
             balance = 0.0
