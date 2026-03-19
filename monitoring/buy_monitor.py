@@ -116,31 +116,19 @@ class BuyMonitor:
         # Extract market info from state
         # State can have data in root OR in current_position depending on stage
         market_id = self.state.get('market_id') or self.state.get('current_position', {}).get('market_id')
-        token_id = self.state.get('token_id') or self.state.get('current_position', {}).get('token_id')
-        
+
         # current_price in state is OUR order price, not best bid from orderbook
         # For liquidity check we need the INITIAL best bid that was in orderbook
         # This should be stored separately, but for now use our order price as approximation
         initial_best_bid = safe_float(
-            self.state.get('initial_best_bid') or 
-            self.state.get('current_price') or 
+            self.state.get('initial_best_bid') or
+            self.state.get('current_price') or
             self.state.get('current_position', {}).get('price') or
             0
         )
-        
+
         # Log what we got to debug
         logger.debug(f"Liquidity check params: market_id={market_id}, initial_bid=${initial_best_bid:.4f}")
-
-        # Validate token_id exists
-        if not token_id:
-            # Try alternate location in state
-            token_id = self.state.get('current_position', {}).get('token_id')
-            
-            if not token_id:
-                logger.error("❌ CRITICAL: token_id missing from state!")
-                logger.error(f"   State keys: {list(self.state.keys())}")
-                logger.error(f"   Current position keys: {list(self.state.get('current_position', {}).keys())}")
-                raise ValueError("token_id is required for monitoring but missing from state")
         
         check_count = 0
         last_liquidity_check = 0
@@ -280,21 +268,13 @@ class BuyMonitor:
                 if check_count - last_liquidity_check >= LIQUIDITY_CHECK_INTERVAL:
                     logger.debug(f"[{check_time}] 🔍 Checking liquidity...")
                     
-                    # DEFENSIVE: Check if token_id is valid before liquidity check
-                    # Recovery may not have token_id immediately available
-                    if not token_id or token_id == 'unknown' or isinstance(token_id, int):
-                        logger.warning(f"⚠️ Invalid token_id for liquidity check")
-                        logger.warning(f"   token_id: {token_id} (type: {type(token_id).__name__})")
-                        logger.info(f"   Skipping liquidity deterioration detection for this cycle")
-                        logger.info(f"   Bot will still monitor order fill status")
-                        liquidity = {'is_acceptable': True}  # Skip check, assume OK
-                    else:
-                        # Normal liquidity check with valid token_id
-                        liquidity = self.liquidity_checker.check_liquidity(
-                            market_id=market_id,
-                            token_id=token_id,
-                            initial_best_bid=initial_best_bid
-                        )
+                    # Liquidity check using abstract interface (token_id no longer needed)
+                    liquidity = self.liquidity_checker.check_liquidity(
+                        market_id=market_id,
+                        token_id=None,  # DEPRECATED parameter, not used internally
+                        initial_best_bid=initial_best_bid,
+                        outcome_side=outcome_side
+                    )
                     
                     if not liquidity['ok']:
                         logger.warning("")

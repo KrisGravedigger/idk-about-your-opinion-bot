@@ -81,7 +81,7 @@ class MarketSelector:
             # Fetch market details to get token_id
             logger.info(f"   Fetching market details to recover token_id...")
             try:
-                market_details = self.client.get_market(market_id)
+                market_details = self.client.get_market(str(market_id))
 
                 if market_details:
                     # Extract correct token_id based on outcome_side
@@ -165,7 +165,6 @@ class MarketSelector:
             self.bot.state['stage'] = 'BUY_FILLED'
             self.bot.state['current_position'] = {
                 'market_id': market_id,
-                'token_id': token_id,
                 'outcome_side': outcome_side_enum,
                 'market_title': f"Recovered market #{market_id}",
                 'filled_amount': shares,
@@ -232,7 +231,8 @@ class MarketSelector:
             market_id=selected_market.market_id,
             token_id=selected_market.yes_token_id,
             price=buy_price,
-            amount_usdt=position_size
+            amount_usdt=position_size,
+            outcome_side=selected_market.outcome_side
         )
 
         if not result:
@@ -256,7 +256,6 @@ class MarketSelector:
                     self.bot.state['stage'] = 'BUY_FILLED'
                     self.bot.state['current_position'] = {
                         'market_id': selected_market.market_id,
-                        'token_id': selected_market.yes_token_id,
                         'outcome_side': selected_market.outcome_side,
                         'market_title': selected_market.title,
                         'filled_amount': shares,
@@ -288,7 +287,6 @@ class MarketSelector:
         self.bot.state['stage'] = 'BUY_PLACED'
         self.bot.state['current_position'] = {
             'market_id': selected_market.market_id,
-            'token_id': selected_market.yes_token_id,
             'outcome_side': selected_market.outcome_side,
             'market_title': selected_market.title,
             'is_bonus': selected_market.is_bonus,
@@ -419,7 +417,8 @@ class MarketSelector:
             # Get fresh orderbook
             fresh_orderbook = self.scanner.get_fresh_orderbook(
                 selected.market_id,
-                selected.yes_token_id
+                selected.yes_token_id,  # DEPRECATED: kept for backward compat
+                selected.outcome_side
             )
 
             if not fresh_orderbook:

@@ -481,7 +481,7 @@ def main():
                 # Get market details to find token_id AND check order value
                 logger.info("   Fetching market details for token_id...")
                 try:
-                    market_data = client.get_market(market_id)
+                    market_data = client.get_market(str(market_id))
                     if not market_data:
                         logger.warning(f"   ⚠️ Could not fetch market data")
                         logger.warning(f"   Cannot verify order value - skipping recovery")

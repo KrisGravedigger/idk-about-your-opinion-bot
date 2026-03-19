@@ -3,14 +3,14 @@ Unit tests for market_scanner.py
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock
+from tests.mock_client import MockPredictionMarketClient
 from market_scanner import MarketScanner
 
 
 def test_scan_and_rank_with_default_profile():
     """Test that scan_and_rank works with default profile (None)."""
-    mock_client = Mock()
-    mock_client.get_all_active_markets.return_value = []
+    mock_client = MockPredictionMarketClient()
+    mock_client.set_markets([])
     
     scanner = MarketScanner(mock_client)
     markets = scanner.scan_and_rank(limit=5)
@@ -21,8 +21,8 @@ def test_scan_and_rank_with_default_profile():
 
 def test_scan_and_rank_with_named_profile():
     """Test that scan_and_rank works with named profile string."""
-    mock_client = Mock()
-    mock_client.get_all_active_markets.return_value = []
+    mock_client = MockPredictionMarketClient()
+    mock_client.set_markets([])
     
     scanner = MarketScanner(mock_client)
     markets = scanner.scan_and_rank(limit=5, scoring_profile='balanced')
@@ -33,8 +33,8 @@ def test_scan_and_rank_with_named_profile():
 
 def test_scan_and_rank_with_custom_profile():
     """Test that scan_and_rank works with custom profile dict."""
-    mock_client = Mock()
-    mock_client.get_all_active_markets.return_value = []
+    mock_client = MockPredictionMarketClient()
+    mock_client.set_markets([])
     
     custom_profile = {
         'weights': {'spread': 1.0},
@@ -51,8 +51,8 @@ def test_scan_and_rank_with_custom_profile():
 
 def test_scan_and_rank_with_invalid_profile_type():
     """Test that scan_and_rank raises ValueError for invalid profile type."""
-    mock_client = Mock()
-    mock_client.get_all_active_markets.return_value = []
+    mock_client = MockPredictionMarketClient()
+    mock_client.set_markets([])
     
     scanner = MarketScanner(mock_client)
     
@@ -62,7 +62,7 @@ def test_scan_and_rank_with_invalid_profile_type():
 
 def test_scan_and_rank_profile_validation():
     """Test that profile validation assertions work."""
-    mock_client = Mock()
+    mock_client = MockPredictionMarketClient()
     
     # Mock get_scoring_profile to return invalid profile
     import config
@@ -80,14 +80,14 @@ def test_scan_and_rank_profile_validation():
 
 def test_analyze_market_requires_scoring_profile():
     """Test that analyze_market requires scoring_profile parameter."""
-    mock_client = Mock()
+    mock_client = MockPredictionMarketClient()
     scanner = MarketScanner(mock_client)
-    
-    market = {'market_id': 1, 'yes_token_id': 'test'}
+
+    market = {'market_id': '1', 'yes_id': 'test', 'no_id': 'test2'}
     profile = {'weights': {'spread': 1.0}, 'bonus_multiplier': 1.0}
-    
-    # This should work
-    mock_client.get_market_orderbook.return_value = None  # Will return None early
+
+    # This should work - empty orderbook will cause early return
+    mock_client.set_orderbook('1', 'YES', bids=[], asks=[])
     result = scanner.analyze_market(market, profile)
     
     # Should call with proper signature (no error about missing parameter)

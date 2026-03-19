@@ -57,12 +57,48 @@ class OrderManager:
     def __init__(self, client: OpinionClient):
         """
         Initialize order manager with Opinion client.
-        
+
         Args:
             client: Configured OpinionClient instance
         """
         self.client = client
-    
+
+    # =========================================================================
+    # HELPER METHODS
+    # =========================================================================
+
+    def _get_token_id(self, market_id: int, outcome_side: str) -> str:
+        """
+        Get token_id for a market outcome (backward compatibility helper).
+
+        Args:
+            market_id: Market ID
+            outcome_side: "YES" or "NO"
+
+        Returns:
+            Token ID string
+
+        Raises:
+            ValueError: If market not found or token_id missing
+        """
+        market = self.client.get_market(str(market_id))
+        if not market:
+            raise ValueError(f"Market {market_id} not found")
+
+        outcome_upper = outcome_side.upper()
+        if outcome_upper == "YES":
+            token_id = market.get('yes_token_id')
+            if not token_id:
+                raise ValueError(f"Market {market_id} missing yes_token_id")
+            return token_id
+        elif outcome_upper == "NO":
+            token_id = market.get('no_token_id')
+            if not token_id:
+                raise ValueError(f"Market {market_id} missing no_token_id")
+            return token_id
+        else:
+            raise ValueError(f"Invalid outcome_side: {outcome_side} (must be YES or NO)")
+
     # =========================================================================
     # PRICE CALCULATION
     # =========================================================================
@@ -111,30 +147,38 @@ class OrderManager:
     def place_buy(
         self,
         market_id: int,
-        token_id: str,
-        price: float,
-        amount_usdt: float
+        token_id: Optional[str] = None,
+        price: float = 0.0,
+        amount_usdt: float = 0.0,
+        outcome_side: str = "YES"
     ) -> Optional[dict]:
         """
         Place a BUY limit order.
-        
+
         Args:
             market_id: Market ID
-            token_id: YES token ID
+            token_id: YES token ID (optional - will be derived if None)
             price: Limit price
             amount_usdt: Amount in USDT
-            
+            outcome_side: Which side to buy ("YES" or "NO") - used if token_id is None
+
         Returns:
             Order result dict with order_id, or None on failure
         """
+        # Derive token_id if not provided (backward compatibility)
+        if token_id is None:
+            logger.debug(f"Token ID not provided, deriving from market {market_id} ({outcome_side})")
+            token_id = self._get_token_id(market_id, outcome_side)
+            logger.debug(f"Derived token_id: {token_id}")
+
         logger.info(f"📤 Placing BUY order on market #{market_id}")
         logger.info(f"   Price: {format_price(price)}")
         logger.info(f"   Amount: {amount_usdt:.2f} USDT")
-                      
+
         # VALIDATION: Check USDT balance before attempting order
         logger.info(f"🔰 Checking USDT balance...")
         current_balance = self.client.get_usdt_balance()
-        
+
         if current_balance < amount_usdt:
             logger.error(f"❌ Insufficient USDT balance!")
             logger.error(f"   Available: {current_balance:.2f} USDT")
@@ -143,30 +187,29 @@ class OrderManager:
             logger.error(f"")
             logger.error(f"Please deposit at least {amount_usdt - current_balance:.2f} USDT to your wallet")
             return None
-        
+
         logger.info(f"   ✓ Balance OK: {current_balance:.2f} USDT available")
         logger.info("")
-        
+
         result = self.client.place_buy_order(
-            market_id=market_id,
-            token_id=token_id,
-            price=price,
-            amount_usdt=amount_usdt,
-            check_approval=False
+            market_id=str(market_id),
+            outcome_side=outcome_side,
+            price=Decimal(str(price)),
+            amount=Decimal(str(amount_usdt))
         )
-        
+
         if result:
             order_id = result.get('order_id', 'unknown')
             logger.info(f"✅ BUY order placed: {order_id}")
-        
+
         return result
     
     def place_sell(
         self,
         market_id: int,
-        token_id: str,
-        price: float,
-        amount_tokens: float,
+        token_id: Optional[str] = None,
+        price: float = 0.0,
+        amount_tokens: float = 0.0,
         outcome_side: str = "YES"
     ) -> Optional[dict]:
         """
@@ -174,7 +217,7 @@ class OrderManager:
 
         Args:
             market_id: Market ID
-            token_id: Token ID (YES or NO)
+            token_id: Token ID (YES or NO) - optional, will be derived if None
             price: Limit price
             amount_tokens: Amount of tokens to sell
             outcome_side: Which side we're selling ("YES" or "NO")
@@ -182,6 +225,12 @@ class OrderManager:
         Returns:
             Order result dict with order_id, or None on failure
         """
+        # Derive token_id if not provided (backward compatibility)
+        if token_id is None:
+            logger.debug(f"Token ID not provided, deriving from market {market_id} ({outcome_side})")
+            token_id = self._get_token_id(market_id, outcome_side)
+            logger.debug(f"Derived token_id: {token_id}")
+
         logger.info(f"📤 Placing SELL order on market #{market_id}")
         logger.info(f"   Price: {format_price(price)}")
         logger.info(f"   Amount: {amount_tokens:.4f} tokens (requested)")
@@ -205,7 +254,7 @@ class OrderManager:
             for attempt in range(1, max_retries + 1):
                 # Check the specific outcome_side we're selling
                 balance_decimal = self.client.get_position_shares(
-                    market_id=market_id,
+                    market_id=str(market_id),
                     outcome_side=outcome_side_upper
                 )
                 actual_balance = float(balance_decimal) if balance_decimal else 0.0
@@ -262,13 +311,12 @@ class OrderManager:
             logger.warning(f"   Using requested amount - may fail if insufficient")
         
         logger.info(f"   Amount: {amount_tokens:.4f} tokens (final)")
-        
+
         result = self.client.place_sell_order(
-            market_id=market_id,
-            token_id=token_id,
-            price=price,
-            amount_tokens=amount_tokens,
-            check_approval=True
+            market_id=str(market_id),
+            outcome_side=outcome_side,
+            price=Decimal(str(price)),
+            amount=Decimal(str(amount_tokens))
         )
         
         if result:
