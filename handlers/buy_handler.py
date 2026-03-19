@@ -691,7 +691,7 @@ class BuyHandler:
                 max_reduction_pct = self.config.get('MAX_SELL_PRICE_REDUCTION_PCT', 5.0)
 
                 if not allow_below_buy:
-                    min_allowed_price = buy_price
+                    min_allowed_price = round_price(buy_price)
                 else:
                     # Allow reduction up to max_reduction_pct below buy price
                     min_allowed_price = buy_price * (1 - max_reduction_pct / 100.0)

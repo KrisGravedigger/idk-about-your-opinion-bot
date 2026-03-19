@@ -597,6 +597,8 @@ class OpinionAdapter(PredictionMarketClient):
             return {}
 
         try:
+            # Round price to 6 decimal places (API limit)
+            price = round(float(price), 6)
             logger.info(f"Placing BUY order: {amount} USDT @ ${price:.4f}")
 
             order_input = PlaceOrderDataInput(
@@ -689,6 +691,8 @@ class OpinionAdapter(PredictionMarketClient):
                 logger.error(f"❌ Cannot place SELL order with amount={amount}")
                 return {}
 
+            # Round price to 6 decimal places (API limit)
+            price = round(float(price), 6)
             logger.info(f"Placing SELL order: {amount:.4f} tokens @ ${price:.4f}")
 
             # Floor to 1 decimal place to avoid API rounding errors
